@@ -399,8 +399,13 @@ class PuffcoBLE:
             except Exception:
                 pass
             try:
-                if self.client.is_connected:
-                    await self.client.disconnect()
+                # Even for a link that already dropped. Bleak skips the Bluetooth
+                # disconnect then, but still closes its own D-Bus connection —
+                # and that connection owns the StartNotify session. Left open,
+                # BlueZ kept notifying it, and on the next link every reply
+                # arrived once per lost link before it: a leak that grew with
+                # each unexpected drop for the life of the daemon.
+                await self.client.disconnect()
             finally:
                 self.client = None
                 self._notify_started = False
