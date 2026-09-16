@@ -15,7 +15,7 @@ LEVELS: tuple[tuple[str, float], ...] = (
     ("extreme", 1.5),
 )
 
-_BY_NAME = {name: value for name, value in LEVELS}
+_BY_NAME = dict(LEVELS)
 _NAMES = [name for name, _value in LEVELS]
 
 
