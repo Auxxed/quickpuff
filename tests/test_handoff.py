@@ -511,3 +511,29 @@ def test_the_bar_reads_handed_off_after_a_link_dies_mid_snapshot(tmp_path, capsy
     out = json.loads(capsys.readouterr().out)
     assert out["tooltip"].startswith("Another computer has the Peak")
     assert "77" not in out["text"]
+
+
+def test_uncontended_backoff_climbs_and_stops_hammering():
+    """A Peak that is off or out of range must not be retried forever at a
+    near-flat interval: each try holds its radio at ~9.6 mA against ~0.5 mA
+    for one left alone."""
+    from quickpuff.daemon import (
+        RECONNECT_BACKOFF_CEILING_S,
+        RECONNECT_BACKOFF_GROWTH,
+        next_backoff,
+    )
+
+    base = 2.0
+    waits = []
+    for _ in range(12):
+        waits.append(base)
+        base = next_backoff(base)
+
+    assert waits[0] == 2.0
+    assert waits == sorted(waits), "each wait is at least as long as the last"
+    assert base == RECONNECT_BACKOFF_CEILING_S, "it settles on the ceiling"
+    assert next_backoff(RECONNECT_BACKOFF_CEILING_S) == RECONNECT_BACKOFF_CEILING_S
+    # An hour of a Peak that never answers costs far fewer reaches than the
+    # flat-20s behaviour that ran 120 attempts in 68 minutes.
+    assert sum(waits) > 200.0
+    assert RECONNECT_BACKOFF_GROWTH > 1.0
