@@ -104,7 +104,9 @@ def print_status(data: dict, as_json: bool, units: str | None = None) -> None:
         return
     units = units or load_config().get("units") or "F"
     if not data.get("connected"):
-        if data.get("resting"):
+        if data.get("resting") and data.get("powered_off"):
+            print(f"Switched off ({data.get('battery')}% at the last check); switch it on to reconnect")
+        elif data.get("resting"):
             print(f"Resting to save battery ({data.get('battery')}% at the last check); reconnecting now")
         else:
             print("Disconnected")
@@ -277,6 +279,8 @@ def print_waybar(data: dict) -> None:
     tooltip = state if not connected else f"{state} · {battery_text} · {temp}".strip(" ·")
     if resting:
         tooltip = f"Resting to save battery · {battery_text} at the last check"
+        if data.get("powered_off"):
+            tooltip = f"Switched off · {battery_text} at the last check"
     if handed_off:
         # A daemon started while the other computer holds the Peak has never
         # read a battery, so don't report 0% as though it had.
