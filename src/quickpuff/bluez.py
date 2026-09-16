@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from dbus_fast import BusType, Variant
+from collections.abc import Callable
+
+from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
 
 from .paths import load_config
@@ -222,3 +224,63 @@ async def pair_device(address: str) -> None:
         log.info("Paired %s", address)
     finally:
         bus.disconnect()
+
+
+# Why BlueZ says a link ended (Device1.Disconnected, BlueZ 5.73+). A timeout
+# means packets stopped getting through; "remote" means the Peak hung up.
+DISCONNECT_REASONS = {
+    "org.bluez.Reason.Timeout": "timeout",
+    "org.bluez.Reason.Remote": "closed by the Peak",
+    "org.bluez.Reason.Local": "closed by this computer",
+    "org.bluez.Reason.Authentication": "authentication failed",
+    "org.bluez.Reason.Suspend": "adapter suspended",
+    "org.bluez.Reason.Unknown": "unknown",
+}
+
+
+def address_from_path(path: str) -> str | None:
+    tail = path.rsplit("/", 1)[-1]
+    if not tail.startswith("dev_"):
+        return None
+    return tail[4:].replace("_", ":")
+
+
+async def watch_disconnects(on_disconnect: Callable[[str, str, str], None]) -> MessageBus:
+    """Call on_disconnect(address, reason, message) whenever BlueZ reports why a
+    link ended. Returns the bus, which the caller closes. On a BlueZ too old to
+    send the signal this simply never fires."""
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    rule = (
+        f"type='signal',interface='{DEVICE_IFACE}',member='Disconnected',"
+        "path_namespace='/org/bluez'"
+    )
+    reply = await bus.call(
+        Message(
+            destination="org.freedesktop.DBus",
+            path="/org/freedesktop/DBus",
+            interface="org.freedesktop.DBus",
+            member="AddMatch",
+            signature="s",
+            body=[rule],
+        )
+    )
+    if reply and reply.message_type == MessageType.ERROR:
+        bus.disconnect()
+        raise RuntimeError(f"AddMatch refused: {reply.body}")
+
+    def handler(msg: Message) -> None:
+        if msg.message_type != MessageType.SIGNAL or msg.member != "Disconnected":
+            return
+        if msg.interface != DEVICE_IFACE:
+            return
+        address = address_from_path(msg.path or "")
+        if not address:
+            return
+        body = list(msg.body or []) + ["", ""]
+        try:
+            on_disconnect(address, str(body[0]), str(body[1]))
+        except Exception:
+            log.debug("disconnect reason callback failed", exc_info=True)
+
+    bus.add_message_handler(handler)
+    return bus

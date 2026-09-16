@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import __version__, audit, faults, history
+from . import __version__, audit, bluez, faults, history
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
 from .paths import load_config, save_config, socket_path
@@ -358,6 +358,10 @@ class QuickPuffDaemon:
         self._resting = False
         self._handoff = _as_bool(load_config().get("handoff", True))
         self._presence: SeatPresence | None = None
+        # BlueZ's account of why each link ended, and what the Peak was doing
+        # just before: the evidence for whether heating disturbs the link.
+        self._disconnect_watch = None
+        self._state_before_drop: tuple[Any, Any] = (None, None)
         # Consecutive short-lived links: the other computer taking the Peak.
         self._strikes = 0
         # When a link is live, the moment it became usable. None once its drop
@@ -542,6 +546,8 @@ class QuickPuffDaemon:
                 log.warning("BLE link dropped after %.0fs — held it (strike %d)", held, self._strikes)
             else:
                 log.warning("BLE link dropped after %.0fs", held)
+        if self.status.get("operating_state") != "Disconnected":
+            self._state_before_drop = (self.status.get("operating_state"), self.status.get("heater_temp_f"))
         self.status["connected"] = False
         self.status["operating_state"] = "Disconnected"
         self.status["operating_state_id"] = -1
@@ -1953,8 +1959,28 @@ class QuickPuffDaemon:
         if self._handoff:
             self._presence = SeatPresence(on_change=self._on_seat_change)
             await self._presence.start()
+        try:
+            self._disconnect_watch = await bluez.watch_disconnects(self._on_link_ended)
+        except Exception as exc:
+            log.debug("BlueZ disconnect reasons unavailable: %s", exc)
         self._resume_last_device()
         self._recap_task = asyncio.create_task(self._recap_loop())
+
+    def _on_link_ended(self, address: str, reason: str, message: str) -> None:
+        """Log why BlueZ says the Peak's link ended, beside what it was doing."""
+        mine = {(m or "").lower() for m in (self._connect_mac, self.status.get("device_mac")) if m}
+        if address.lower() not in mine:
+            return
+        state, temp = self._state_before_drop
+        if self.status.get("operating_state") not in (None, "Disconnected"):
+            state, temp = self.status.get("operating_state"), self.status.get("heater_temp_f")
+        doing = f"{state or 'unknown'}" + (f", {int(temp)}°F" if temp else "")
+        log.info(
+            "Bluetooth link ended: %s (%s) while %s",
+            bluez.DISCONNECT_REASONS.get(reason, reason or "unknown"),
+            message or "no detail",
+            doing,
+        )
 
     def _resume_last_device(self) -> bool:
         """Reconnect to the last Peak after a restart or reboot, unless the
@@ -1982,6 +2008,9 @@ class QuickPuffDaemon:
         if self._presence:
             await self._presence.stop()
             self._presence = None
+        if self._disconnect_watch:
+            self._disconnect_watch.disconnect()
+            self._disconnect_watch = None
         self._stop_poll()
         if self.device:
             try:
