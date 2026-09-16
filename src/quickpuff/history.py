@@ -195,6 +195,24 @@ def record_cycle(
     return event
 
 
+def record_battery(cycle_ts: float, battery: Any) -> bool:
+    """Note the charge left once the cycle logged at `cycle_ts` is over."""
+    try:
+        pct = int(battery)
+    except (TypeError, ValueError):
+        return False
+    # A Peak won't heat near 5%, so 0 is a reading that was never taken.
+    if not 1 <= pct <= 100:
+        return False
+    data = _load()
+    for event in reversed(data.get("events", [])):
+        if event.get("ts") == cycle_ts:
+            event["battery"] = pct
+            _save(data)
+            return True
+    return False
+
+
 def device_log_state() -> dict[str, Any]:
     data = _load()
     return {"index": data.get("device_log_index"), "serial": data.get("device_log_serial")}
@@ -505,8 +523,10 @@ def _session_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "temp_f": None if temp_f is None else round(float(temp_f)),
                 "temp_c": None if temp_f is None else round((float(temp_f) - 32) * 5 / 9),
                 "preheat_s": None,
+                "battery": e.get("battery"),
             }
         )
+    readings = sorted((float(e["ts"]), e["battery"]) for e in data.get("events", []) if e.get("battery"))
     for s in device:
         temp_c = s.get("temp_c")
         rows.append(
@@ -517,9 +537,20 @@ def _session_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "temp_c": temp_c,
                 "temp_f": None if temp_c is None else round(float(temp_c) * 9 / 5 + 32),
                 "preheat_s": s.get("preheat_s"),
+                "battery": _battery_near(readings, float(s["ts"])),
             }
         )
     return rows
+
+
+# The Peak logs reaching temperature within a poll of QuickPuff seeing it.
+BATTERY_MATCH_S = 120
+
+
+def _battery_near(readings: list[tuple[float, int]], ts: float) -> int | None:
+    """Battery QuickPuff read after the cycle it watched at the same moment."""
+    near = [(abs(at - ts), pct) for at, pct in readings if abs(at - ts) <= BATTERY_MATCH_S]
+    return min(near)[1] if near else None
 
 
 def list_sessions(limit: int = 50, offset: int = 0) -> dict[str, Any]:

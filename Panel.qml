@@ -460,6 +460,13 @@ Panel {
     return bits.length ? bits.join(" \u00b7 ") : "Dab"
   }
 
+  function sessionDetail(session) {
+    var bits = []
+    if (Number(session.preheat_s) > 0) bits.push("Heated up in " + Math.round(Number(session.preheat_s)) + " s")
+    if (Number(session.battery) > 0) bits.push("Battery " + Math.round(Number(session.battery)) + "% after")
+    return bits.join(" · ")
+  }
+
   function formatSessionTime(ts) {
     return Qt.formatDateTime(new Date(Number(ts) * 1000), "ddd MMM d, h:mm AP")
   }
@@ -3059,9 +3066,9 @@ Panel {
 
       Text {
         width: parent.width
-        visible: Number(sessionCard.session.preheat_s) > 0
+        visible: text !== ""
         textFormat: Text.PlainText
-        text: "Heated up in " + Math.round(Number(sessionCard.session.preheat_s)) + " s"
+        text: root.sessionDetail(sessionCard.session)
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption

@@ -52,6 +52,8 @@ def print_sessions(result: dict, units: str = "F") -> None:
             bits.append(f"{temp}°{units}")
         if row.get("preheat_s"):
             bits.append(f"heated in {round(row['preheat_s'])}s")
+        if row.get("battery") is not None:
+            bits.append(f"{row['battery']}% after")
         line = "  ".join(bits)
         if row.get("note"):
             line += f"  — {row['note']}"

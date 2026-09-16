@@ -95,6 +95,45 @@ def test_cli_lists_sessions_with_notes(capsys):
     assert "d7" in out and "P2" in out and "535°F" in out and "heated in 41s" in out and out.strip().endswith("— smooth")
 
 
+
+def test_battery_after_a_watched_dab_shows_on_its_logged_session():
+    cycle = history.record_cycle(temp_f=535)
+    assert history.record_battery(cycle["ts"], 72)
+    seed_sessions([0, 3600])  # d100 is the dab just watched; d101 an hour off
+    rows = {r["key"]: r["battery"] for r in history.list_sessions()["sessions"]}
+    assert rows == {"d100": 72, "d101": None}
+
+
+def test_battery_before_the_log_stays_on_the_local_dab():
+    cycle = history.record_cycle(temp_f=510)
+    history.record_battery(cycle["ts"], 64)
+    assert history.list_sessions()["sessions"][0]["battery"] == 64
+
+
+def test_a_battery_never_read_is_not_logged():
+    cycle = history.record_cycle()
+    assert not history.record_battery(cycle["ts"], 0)
+    assert not history.record_battery(cycle["ts"], None)
+    assert not history.record_battery(cycle["ts"] - 1, 50)
+    assert history.list_sessions()["sessions"][0]["battery"] is None
+
+
+def test_daemon_logs_the_battery_when_a_dab_ends(tmp_path):
+    from quickpuff.constants import OperatingState
+
+    d = daemon(tmp_path)
+    d._cycle_ts = history.record_cycle()["ts"]
+    asyncio.run(d._track_session_end(None, int(OperatingState.HEAT_CYCLE_ACTIVE)))
+    d.status["battery"] = 81
+    asyncio.run(d._track_session_end(int(OperatingState.HEAT_CYCLE_FADE), int(OperatingState.IDLE)))
+    assert history.list_sessions()["sessions"][0]["battery"] == 81
+    assert d._cycle_ts is None
+
+
+def test_cli_shows_the_battery_after_a_dab(capsys):
+    print_sessions({"sessions": [{"key": "d7", "ts": time.time(), "battery": 72}]}, "F")
+    assert "72% after" in capsys.readouterr().out
+
 # ---- daily limit
 
 

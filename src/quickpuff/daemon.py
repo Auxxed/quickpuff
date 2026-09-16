@@ -335,6 +335,7 @@ class QuickPuffDaemon:
         self._low_battery_warned = False
         self.qtip_reminder = _as_bool(load_config().get("qtip_reminder", True))
         self._session_reached_temp = False
+        self._cycle_ts: float | None = None
         self.daily_limit = clamp_daily_limit(load_config().get("daily_limit"))
         self.weekly_recap = _as_bool(load_config().get("weekly_recap", True))
         self._recap_task: Optional[asyncio.Task] = None
@@ -869,7 +870,7 @@ class QuickPuffDaemon:
                         elif cycle_just_ended(prev_state, new_state):
                             self._schedule_saver_sleep()
                     if prev_state != new_state and new_state == int(OperatingState.HEAT_CYCLE_ACTIVE):
-                        history.record_cycle(**self._cycle_meta())
+                        self._cycle_ts = history.record_cycle(**self._cycle_meta())["ts"]
                         self.status["telemetry"] = history.get_stats()
                         await self._count_session()
                         self._spawn(self._sync_usage_safe(delay=5.0))
@@ -1349,7 +1350,8 @@ class QuickPuffDaemon:
             self._desktop_notify(title, body)
 
     async def _track_session_end(self, prev_state: Any, new_state: Any) -> None:
-        """Q-tip reminder once a session that reached temperature is over.
+        """Q-tip reminder and the battery left once a session that reached
+        temperature is over.
 
         An aborted preheat never got the chamber dirty, so it doesn't count.
         """
@@ -1358,7 +1360,11 @@ class QuickPuffDaemon:
             return
         if prev_state in CYCLE_STATES and new_state not in CYCLE_STATES:
             reached, self._session_reached_temp = self._session_reached_temp, False
+            cycle_ts, self._cycle_ts = self._cycle_ts, None
             if reached:
+                if cycle_ts is not None:
+                    # This poll just read the battery, after the heater let go.
+                    history.record_battery(cycle_ts, self.status.get("battery"))
                 self._spawn(self._notify_qtip())
 
     async def _notify_qtip(self) -> None:
