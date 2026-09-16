@@ -1890,7 +1890,12 @@ class QuickPuffDaemon:
                         async with self._cmd_lock:
                             result = await self.handle(str(cmd), args)
                 except Exception as exc:
-                    log.exception("command %s failed", cmd)
+                    if isinstance(exc, ConnectionError):
+                        # The Peak is asleep, off or out of range: expected,
+                        # and the message already says what to do about it.
+                        log.warning("command %s failed: %s", cmd, exc)
+                    else:
+                        log.exception("command %s failed", cmd)
                     err = str(exc) or exc.__class__.__name__
                     await self._send(
                         writer,
