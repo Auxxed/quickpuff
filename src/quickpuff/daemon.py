@@ -637,6 +637,8 @@ class QuickPuffDaemon:
 
         self._stop_poll()
         if self.device:
+            # Replacing the link on purpose; its drop is not one to score.
+            self._link_started = None
             try:
                 await self.device.disconnect()
             except Exception:
@@ -670,6 +672,7 @@ class QuickPuffDaemon:
             raise
         self.device = ble
         self._want_connected = True
+        self.status["powered_off"] = False
         snap = await ble.snapshot(include_profiles=profiles)
         if not profiles:
             # Keep the profiles already shown; this read skipped them.
@@ -809,6 +812,8 @@ class QuickPuffDaemon:
         self._cancel_saver_sleep()
         self._stop_poll()
         if self.device:
+            # Disconnect was asked for; the drop it causes is not a lost link.
+            self._link_started = None
             try:
                 await self.device.disconnect()
             except Exception:
@@ -1038,6 +1043,7 @@ class QuickPuffDaemon:
     def _end_rest(self) -> None:
         self._resting = False
         self.status["resting"] = False
+        self.status["powered_off"] = False
         task = self._rest_task
         # A check-in in progress finishes on its own and sees the rest is over.
         if task and not task.done() and not self._checking_in and task is not asyncio.current_task():
@@ -1821,7 +1827,22 @@ class QuickPuffDaemon:
             return {"ok": True}
         if cmd == "power_off":
             self._cancel_saver_sleep()
-            await dev.power_off()
+            # Switching the Peak off takes the link down before its reply can
+            # arrive, so the command's own success looked like a failure: the
+            # CLI reported an error, the drop was scored as a lost link, and
+            # the daemon began reconnecting to a Peak that was now off.
+            # Letting go first, the way battery saver does, means the drop is
+            # expected; the rest's check-ins notice it being switched back on.
+            self._resting = True
+            try:
+                await dev.power_off()
+            except (LoraxError, asyncio.TimeoutError):
+                if dev.is_connected:
+                    self._resting = False
+                    raise
+            await self._rest()
+            self.status["powered_off"] = True
+            await self._broadcast_event("status", self.status)
             return {"ok": True}
         if cmd == "factory_reset":
             await dev.factory_reset()

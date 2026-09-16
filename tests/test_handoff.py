@@ -622,3 +622,95 @@ def test_the_poll_still_reports_its_own_link_dying(tmp_path):
 
     asyncio.run(scenario())
 
+
+# --- letting go on purpose ---------------------------------------------------
+
+from quickpuff.ble import LoraxError  # noqa: E402
+
+
+class SwitchingOffPeak(FakePeak):
+    """MASTER_OFF takes the link down before the reply: bleak calls back as the
+    link dies, and the pending command fails with "Device disconnected"."""
+
+    def __init__(self, stays_up=False):
+        super().__init__()
+        self.stays_up = stays_up
+        self.daemon = None
+
+    async def power_off(self):
+        if self.stays_up:
+            raise LoraxError("Lorax status 0x02")
+        self.is_connected = False
+        self.daemon._on_ble_drop()
+        raise LoraxError("Device disconnected")
+
+    async def disconnect(self):
+        was = self.is_connected
+        self.is_connected = False
+        if was and self.daemon:
+            self.daemon._on_ble_drop()
+
+
+def test_switching_the_peak_off_is_a_success_not_a_lost_link(tmp_path):
+    async def scenario():
+        peak = SwitchingOffPeak()
+        d = make_daemon(tmp_path, peak)
+        peak.daemon = d
+        d._loop = asyncio.get_running_loop()
+        d._link_started = time.monotonic()      # a young link: would strike
+
+        assert await d.handle("power_off", {}) == {"ok": True}
+        await asyncio.sleep(0)                  # let the drop's follow-up run
+
+        assert d._strikes == 0
+        assert d._reconnect_task is None, "chasing a Peak that was switched off"
+        assert d.status["resting"] is True
+        assert d.status["powered_off"] is True
+        d._rest_task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_a_power_off_the_peak_refused_still_fails(tmp_path):
+    async def scenario():
+        peak = SwitchingOffPeak(stays_up=True)
+        d = make_daemon(tmp_path, peak)
+        peak.daemon = d
+        try:
+            await d.handle("power_off", {})
+        except LoraxError:
+            pass
+        else:
+            raise AssertionError("a refused power-off reported success")
+        assert d._resting is False
+
+    asyncio.run(scenario())
+
+
+def test_pressing_disconnect_is_not_a_strike(tmp_path):
+    async def scenario():
+        peak = SwitchingOffPeak()
+        d = make_daemon(tmp_path, peak)
+        peak.daemon = d
+        d._link_started = time.monotonic()      # young enough to strike
+        await d._disconnect(forget=True)
+        assert d._strikes == 0
+
+    asyncio.run(scenario())
+
+
+def test_bar_says_switched_off_rather_than_resting(capsys):
+    print_waybar(
+        {
+            "connected": False,
+            "resting": True,
+            "powered_off": True,
+            "battery": 39,
+            "operating_state": "Resting",
+            "operating_state_id": -1,
+        }
+    )
+    out = json.loads(capsys.readouterr().out)
+    assert out["class"] == "resting"
+    assert out["tooltip"].startswith("Switched off")
+    assert "39%" in out["tooltip"]
