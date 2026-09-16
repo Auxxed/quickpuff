@@ -95,15 +95,16 @@ def ensure_daemon(timeout: float = 8.0) -> None:
     src = str(project_root() / "src")
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = src if not existing else f"{src}:{existing}"
-    handle = open(log, "ab", buffering=0)
-    subprocess.Popen(
-        [python_executable(), "-m", "quickpuff.daemon"],
-        cwd=str(project_root()),
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        env=env,
-    )
+    # The child dups these on spawn, so the parent must not hold them open.
+    with open(log, "ab", buffering=0) as handle:
+        subprocess.Popen(
+            [python_executable(), "-m", "quickpuff.daemon"],
+            cwd=str(project_root()),
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            env=env,
+        )
     deadline = time.time() + timeout
     while time.time() < deadline:
         if daemon_running():

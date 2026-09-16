@@ -541,7 +541,9 @@ class QuickPuffDaemon:
             return
 
         def _after_drop():
-            asyncio.create_task(self._broadcast_event("status", self.status))
+            # _spawn, not create_task: the loop keeps only weak references, so
+            # a bare task here can be collected before the status goes out.
+            self._spawn(self._broadcast_event("status", self.status))
             if self._want_connected and self._auto_reconnect:
                 self._schedule_reconnect()
 
