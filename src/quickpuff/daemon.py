@@ -109,6 +109,15 @@ CONTENTION_BACKOFF_S = (5.0, 15.0, 40.0)
 # Once this machine has given best, it only looks in this often — enough to
 # notice the other computer going away, rare enough to stop interrupting it.
 CONCEDED_BACKOFF_S = 300.0
+
+# How far the uncontended reconnect wait climbs after repeated failures.
+# A Peak that is powered off or out of range is not coming back by itself, and
+# each try holds its radio awake: measured at ~9.6 mA against ~0.5 mA for one
+# left alone. The old 20s ceiling meant a try roughly every 70s forever — one
+# spell in the wild ran 120 attempts over 68 minutes — which also kept
+# knocking battery saver out of rest.
+RECONNECT_BACKOFF_GROWTH = 1.6
+RECONNECT_BACKOFF_CEILING_S = 60.0
 # Running a QuickPuff command claims the Peak for this machine: strikes clear,
 # and a seat logind calls away still counts as in use for this long.
 CLAIM_WINDOW_S = 120.0
@@ -207,6 +216,11 @@ def reconnect_delay(strikes: int, base: float) -> float:
     if strikes >= CONCEDE_AFTER_STRIKES:
         return max(base, CONCEDED_BACKOFF_S)
     return max(base, CONTENTION_BACKOFF_S[min(strikes, len(CONTENTION_BACKOFF_S)) - 1])
+
+
+def next_backoff(base: float) -> float:
+    """Grow the uncontended reconnect wait after a try that failed."""
+    return min(base * RECONNECT_BACKOFF_GROWTH, RECONNECT_BACKOFF_CEILING_S)
 
 
 def conceded(handoff: bool, strikes: int) -> bool:
@@ -563,7 +577,7 @@ class QuickPuffDaemon:
                     return
                 except Exception as exc:
                     log.warning("Reconnect failed: %s", exc)
-                    base = min(base * 1.6, 20.0)
+                    base = next_backoff(base)
 
         self._reconnect_task = asyncio.create_task(_retry())
 
