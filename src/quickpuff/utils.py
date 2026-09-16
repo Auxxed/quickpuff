@@ -1,6 +1,11 @@
 from datetime import datetime
 
 
+def clamp_byte(value) -> int:
+    """An LED byte, from whatever a profile or the panel hands over."""
+    return max(0, min(255, int(value)))
+
+
 class PuffcoUtils:
     @staticmethod
     def revision_number_to_string(value) -> str:

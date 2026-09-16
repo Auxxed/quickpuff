@@ -191,7 +191,7 @@ def print_status(data: dict, as_json: bool, units: str | None = None) -> None:
             except (TypeError, ValueError):
                 boost = ""
         print(
-            f" {mark} P{p.get('index')}: {str(p.get('name') or ''):<16} "
+            f" {mark} P{p.get('index')}: {p.get('name') or ''!s:<16} "
             f"{temp}  {p.get('time')}s  {vapor:<8}  {boost:<10}  {p.get('color') or ''}"
         )
 

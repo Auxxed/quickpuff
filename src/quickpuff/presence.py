@@ -22,7 +22,7 @@ import asyncio
 import logging
 import os
 import shutil
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from dbus_fast import BusType
 from dbus_fast.aio import MessageBus
@@ -52,11 +52,11 @@ class SeatPresence:
     never set, and resting an idle Peak is already battery saver's job.
     """
 
-    def __init__(self, on_change: Optional[Callable[[bool], None]] = None):
+    def __init__(self, on_change: Callable[[bool], None] | None = None):
         self._on_change = on_change
         self._bus = None
         self._props = None
-        self._lock_task: Optional[asyncio.Task] = None
+        self._lock_task: asyncio.Task | None = None
         self._helper = shutil.which(LOCK_HELPER)
         self.available = False
         # Until something says otherwise, assume the user is right here.

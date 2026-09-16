@@ -3,4 +3,4 @@
 from .ble import LoraxError, PuffcoBLE
 
 __version__ = "0.5.1"
-__all__ = ["PuffcoBLE", "LoraxError", "__version__"]
+__all__ = ["LoraxError", "PuffcoBLE", "__version__"]

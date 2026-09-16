@@ -12,14 +12,13 @@ import os
 import struct
 from base64 import b64decode
 from hashlib import sha256
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 import cbor2
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
 from .codec import decode_puffco_json, first_color, hexify
-from .lights import rgbt_color, rgbt_to_hex, solid_color_payload
 from .constants import (
     CHAMBER_LABELS,
     CHARGE_SOURCE_LABELS,
@@ -35,8 +34,9 @@ from .constants import (
     OperatingState,
     UnlockKeys,
 )
+from .lights import rgbt_color, rgbt_to_hex, solid_color_payload
 from .product_info import get_product_info, is_proxy
-from .utils import PuffcoUtils
+from .utils import PuffcoUtils, clamp_byte
 from .vapor import name_for as vapor_name_for
 
 log = logging.getLogger("quickpuff.ble")
@@ -98,8 +98,8 @@ class LoraxError(RuntimeError):
 class PuffcoBLE:
     def __init__(
         self,
-        device_name: Optional[str] = None,
-        device_mac: Optional[str] = None,
+        device_name: str | None = None,
+        device_mac: str | None = None,
         debug: bool = False,
         disconnected_callback=None,
         on_attempt=None,
@@ -112,21 +112,21 @@ class PuffcoBLE:
         # caller timing how long a link lasted measures the right try.
         self._on_attempt = on_attempt
         self.lorax_sequence = 1
-        self.client: Optional[BleakClient] = None
+        self.client: BleakClient | None = None
         self._pending: dict[int, asyncio.Future] = {}
         self._notify_started = False
         self._lock = asyncio.Lock()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self.address: Optional[str] = None
-        self.advertised_name: Optional[str] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self.address: str | None = None
+        self.advertised_name: str | None = None
         self._pairing_agent = None
-        self._write_fd: Optional[int] = None
+        self._write_fd: int | None = None
         self._write_bus = None
         # Largest single Lorax message; lowered to the link's ATT MTU and the
         # Peak's reported limit once connected.
         self._max_message = 125
         # 2 or 3, read once per connection (see get_led_api).
-        self._led_api: Optional[int] = None
+        self._led_api: int | None = None
         if debug:
             logging.getLogger("puffcoble").setLevel(logging.DEBUG)
 
@@ -217,7 +217,7 @@ class PuffcoBLE:
             return True
         return False
 
-    async def search_for_device(self, timeout: float = 10.0) -> Optional[BLEDevice]:
+    async def search_for_device(self, timeout: float = 10.0) -> BLEDevice | None:
         from . import bluez
 
         if not self.device_mac and not self.device_name:
@@ -316,8 +316,8 @@ class PuffcoBLE:
         await self.auth_device()
 
     async def connect(self) -> BleakClient:
-        from .agent import PairingAgent
         from . import bluez
+        from .agent import PairingAgent
 
         self._loop = asyncio.get_running_loop()
         last_error: Exception | None = None
@@ -540,10 +540,10 @@ class PuffcoBLE:
         self,
         path: str,
         offset: int = 0,
-        size: Optional[int] = None,
+        size: int | None = None,
         data_type: DataType = "bytes",
         count: int = 1,
-    ) -> Union[float, int, bool, bytes, list]:
+    ) -> float | int | bool | bytes | list:
         if data_type == "bytes":
             if size is None:
                 raise ValueError("size is required when data_type='bytes'")
@@ -596,7 +596,7 @@ class PuffcoBLE:
     async def write(
         self,
         path: str,
-        value: Union[int, float, bool, bytes],
+        value: int | float | bool | bytes,
         offset: int = 0,
         flags: int = 0,
         data_type: DataType = "bytes",
@@ -649,7 +649,7 @@ class PuffcoBLE:
         path: str,
         *,
         chunk_size: int = 125,
-        max_len: Optional[int] = None,
+        max_len: int | None = None,
     ) -> bytes:
         out = bytearray()
         idx = 0
@@ -878,12 +878,11 @@ class PuffcoBLE:
         await self.write_short("/p/app/ltrn/cmd", 0, 0, bytes([0]))
 
     async def set_led_brightness(self, base: int, mid: int, glass: int, logo: int) -> None:
-        clamp = lambda n: max(0, min(255, int(n)))
         await self.write_short(
             "/u/app/ui/lbrt",
             0,
             0,
-            bytes([clamp(base), clamp(mid), clamp(glass), clamp(logo)]),
+            bytes([clamp_byte(base), clamp_byte(mid), clamp_byte(glass), clamp_byte(logo)]),
         )
 
     async def get_led_brightness(self) -> dict[str, int]:
@@ -921,7 +920,7 @@ class PuffcoBLE:
         decoded = cbor2.loads(raw)
         return decode_puffco_json(decoded)
 
-    async def get_profile_colours(self, index: Optional[int] = None) -> Any:
+    async def get_profile_colours(self, index: int | None = None) -> Any:
         path = "/p/app/thc/colr" if index is None else f"/u/app/hc/{index}/colr"
         raw = await self.read_bytes_all(path)
         return decode_puffco_json(cbor2.loads(raw))
@@ -960,7 +959,7 @@ class PuffcoBLE:
                     self._led_api = 3
         return self._led_api
 
-    async def _set_profile_color_rgbt(self, index: Optional[int], hex_color: str) -> None:
+    async def _set_profile_color_rgbt(self, index: int | None, hex_color: str) -> None:
         if index is None:
             index = await self.get_current_profile()
         color = rgbt_color(hex_color)
@@ -992,7 +991,7 @@ class PuffcoBLE:
 
     async def set_profile_colour(
         self,
-        index: Optional[int] = None,
+        index: int | None = None,
         *,
         colour: dict,
         preview: bool = True,
@@ -1020,7 +1019,7 @@ class PuffcoBLE:
             except Exception:
                 log.debug("live heat-cycle colour mirror failed", exc_info=True)
 
-    async def set_profile_solid_color(self, index: Optional[int], hex_color: str) -> None:
+    async def set_profile_solid_color(self, index: int | None, hex_color: str) -> None:
         if not hex_color.startswith("#"):
             hex_color = f"#{hex_color}"
         if await self.get_led_api() == 2:
@@ -1028,7 +1027,7 @@ class PuffcoBLE:
             return
         await self.set_profile_colour(index, colour=solid_color_payload(hex_color))
 
-    async def get_profile_name(self, index: Optional[int] = None) -> str:
+    async def get_profile_name(self, index: int | None = None) -> str:
         if index is None:
             return await self._read_and_decode("/p/app/thc/name")
         return await self._read_and_decode(f"/u/app/hc/{index}/name")
@@ -1037,12 +1036,12 @@ class PuffcoBLE:
         encoded = name.encode("utf-8")[:20] + b"\x00"
         await self.write_short(f"/u/app/hc/{index}/name", 0, 0, encoded)
 
-    async def get_profile_temp_c(self, index: Optional[int] = None) -> float:
+    async def get_profile_temp_c(self, index: int | None = None) -> float:
         if index is None:
             return float(await self.read("/p/app/thc/temp", 0, data_type="float32"))
         return float(await self.read(f"/u/app/hc/{index}/temp", 0, data_type="float32"))
 
-    async def get_profile_temp(self, index: Optional[int] = None) -> int:
+    async def get_profile_temp(self, index: int | None = None) -> int:
         return PuffcoUtils.c_to_f(await self.get_profile_temp_c(index))
 
     async def set_profile_temp_c(self, index: int, celsius: float) -> None:
@@ -1051,7 +1050,7 @@ class PuffcoBLE:
     async def set_profile_temp_f(self, index: int, fahrenheit: float) -> None:
         await self.set_profile_temp_c(index, PuffcoUtils.f_to_c(fahrenheit))
 
-    async def get_profile_time(self, index: Optional[int] = None) -> int:
+    async def get_profile_time(self, index: int | None = None) -> int:
         if index is None:
             return int(round(float(await self.read("/p/app/thc/time", 0, data_type="float32"))))
         return int(round(float(await self.read(f"/u/app/hc/{index}/time", 0, data_type="float32"))))
@@ -1059,7 +1058,7 @@ class PuffcoBLE:
     async def set_profile_time(self, index: int, seconds: float) -> None:
         await self.write(f"/u/app/hc/{index}/time", float(seconds), data_type="float32")
 
-    async def get_profile_vapor(self, index: Optional[int] = None) -> float:
+    async def get_profile_vapor(self, index: int | None = None) -> float:
         path = "/p/app/thc/intn" if index is None else f"/u/app/hc/{index}/intn"
         return float(await self.read(path, 0, 4, "float32"))
 
@@ -1067,7 +1066,7 @@ class PuffcoBLE:
         await self.write(f"/u/app/hc/{index}/intn", float(level), data_type="float32")
         await self._reload_if_current(index)
 
-    async def get_profile_boost_temp_f(self, index: Optional[int] = None) -> float:
+    async def get_profile_boost_temp_f(self, index: int | None = None) -> float:
         path = "/p/app/thc/btmp" if index is None else f"/u/app/hc/{index}/btmp"
         return float(await self.read(path, 0, 4, "float32"))
 
@@ -1075,7 +1074,7 @@ class PuffcoBLE:
         await self.write(f"/u/app/hc/{index}/btmp", float(fahrenheit), data_type="float32")
         await self._reload_if_current(index)
 
-    async def get_profile_boost_time(self, index: Optional[int] = None) -> float:
+    async def get_profile_boost_time(self, index: int | None = None) -> float:
         path = "/p/app/thc/btim" if index is None else f"/u/app/hc/{index}/btim"
         return float(await self.read(path, 0, 4, "float32"))
 

@@ -13,7 +13,7 @@ import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from . import __version__, audit, faults, history
 from .ble import LoraxError, PuffcoBLE
@@ -21,8 +21,9 @@ from .constants import PROFILE_COUNT, OperatingState
 from .paths import load_config, save_config, socket_path
 from .presence import SeatPresence
 from .product_info import is_proxy
-from .utils import PuffcoUtils
-from .vapor import snap as snap_vapor, value_for as vapor_value
+from .utils import PuffcoUtils, clamp_byte
+from .vapor import snap as snap_vapor
+from .vapor import value_for as vapor_value
 
 log = logging.getLogger("quickpuff.daemon")
 
@@ -179,7 +180,7 @@ def snapshot_kind(
     return None
 
 
-def idle_sleep_due(idle_since: Optional[float], now: float, last_user_cmd: float, watching: bool) -> bool:
+def idle_sleep_due(idle_since: float | None, now: float, last_user_cmd: float, watching: bool) -> bool:
     if idle_since is None or watching:
         return False
     return now - idle_since >= IDLE_SLEEP_S and now - last_user_cmd >= IDLE_SLEEP_S
@@ -317,7 +318,7 @@ class QuickPuffDaemon:
         # Usage belongs to a Peak, not this computer: show the last Peak's
         # stats until another one connects.
         history.use_device(load_config().get("last_serial"))
-        self.device: Optional[PuffcoBLE] = None
+        self.device: PuffcoBLE | None = None
         self.status: dict[str, Any] = self._empty_status()
         self.clients: set[asyncio.StreamWriter] = set()
         self._cmd_lock = asyncio.Lock()
@@ -328,15 +329,15 @@ class QuickPuffDaemon:
         self.preheat_scale = history.preheat_scale()
         self._preheat_backfilled = False
         self._fault_cache: dict[str, Any] = {}
-        self._poll_task: Optional[asyncio.Task] = None
-        self._reconnect_task: Optional[asyncio.Task] = None
+        self._poll_task: asyncio.Task | None = None
+        self._reconnect_task: asyncio.Task | None = None
         self._auto_reconnect = True
         self._want_connected = False
-        self._connect_name: Optional[str] = None
-        self._connect_mac: Optional[str] = None
+        self._connect_name: str | None = None
+        self._connect_mac: str | None = None
         self.lantern = False
         # The Peak can't report the lantern, so it's followed on the Peak's own timer.
-        self._lantern_started: Optional[float] = None
+        self._lantern_started: float | None = None
         self.brightness = {"base": 80, "mid": 80, "glass": 80, "logo": 80}
         # How often the Peak is polled while the panel is open.
         self.poll_interval = WATCHED_POLL_S
@@ -344,7 +345,7 @@ class QuickPuffDaemon:
         self._last_user_cmd = float("-inf")
         self._last_watch = float("-inf")
         self._poll_wake = asyncio.Event()
-        self._idle_since: Optional[float] = None
+        self._idle_since: float | None = None
         self._battery_raw: Any = None
         self._low_battery_warned = False
         self.qtip_reminder = _as_bool(load_config().get("qtip_reminder", True))
@@ -352,25 +353,25 @@ class QuickPuffDaemon:
         self._cycle_ts: float | None = None
         self.daily_limit = clamp_daily_limit(load_config().get("daily_limit"))
         self.weekly_recap = _as_bool(load_config().get("weekly_recap", True))
-        self._recap_task: Optional[asyncio.Task] = None
-        self._saver_sleep_task: Optional[asyncio.Task] = None
+        self._recap_task: asyncio.Task | None = None
+        self._saver_sleep_task: asyncio.Task | None = None
         self._resting = False
         self._handoff = _as_bool(load_config().get("handoff", True))
-        self._presence: Optional[SeatPresence] = None
+        self._presence: SeatPresence | None = None
         # Consecutive short-lived links: the other computer taking the Peak.
         self._strikes = 0
         self._link_started = float("-inf")
         # Let go for another computer, as opposed to resting or disconnected.
         self._yielded = False
         self._checking_in = False
-        self._rest_task: Optional[asyncio.Task] = None
-        self._wake_task: Optional[asyncio.Task] = None
+        self._rest_task: asyncio.Task | None = None
+        self._wake_task: asyncio.Task | None = None
         self._profiles_dirty_at = 0.0
-        self._profile_refresh_task: Optional[asyncio.Task] = None
-        self._clean_serial: Optional[str] = None
+        self._profile_refresh_task: asyncio.Task | None = None
+        self._clean_serial: str | None = None
         self._load_clean(load_config().get("last_serial"))
-        self._server: Optional[asyncio.AbstractServer] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._server: asyncio.AbstractServer | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.status["battery_saver"] = self.battery_saver
         self.status["handoff"] = self._handoff
         self.status["qtip_reminder"] = self.qtip_reminder
@@ -477,7 +478,7 @@ class QuickPuffDaemon:
         """Keep the brightness the Peak reported, so the slider starts where the Peak is."""
         reported = snap.get("brightness")
         if isinstance(reported, dict) and all(isinstance(reported.get(k), int) for k in self.brightness):
-            self.brightness = {k: max(0, min(255, int(reported[k]))) for k in self.brightness}
+            self.brightness = {k: clamp_byte(reported[k]) for k in self.brightness}
 
     def _stamp_local(self, snap: dict[str, Any]) -> dict[str, Any]:
         self._expire_lantern()
@@ -602,7 +603,7 @@ class QuickPuffDaemon:
     async def _broadcast_event(self, event: str, data: Any) -> None:
         await self._broadcast({"event": event, "data": data})
 
-    async def _connect(self, device_name: Optional[str], device_mac: Optional[str], **options: bool) -> dict:
+    async def _connect(self, device_name: str | None, device_mac: str | None, **options: bool) -> dict:
         # One connect at a time: the reconnect after a restart and a Connect
         # click racing each other both reached for the same Peak.
         async with self._connect_lock:
@@ -610,8 +611,8 @@ class QuickPuffDaemon:
 
     async def _connect_unlocked(
         self,
-        device_name: Optional[str],
-        device_mac: Optional[str],
+        device_name: str | None,
+        device_mac: str | None,
         *,
         profiles: bool = True,
         sync: bool = True,
@@ -1273,7 +1274,7 @@ class QuickPuffDaemon:
             "clean_due": remaining <= 0,
         }
 
-    def _load_clean(self, serial: Optional[str]) -> None:
+    def _load_clean(self, serial: str | None) -> None:
         """This Peak's cleaning baseline; the interval is one preference for all."""
         cfg = load_config()
         self.clean_every = snap_clean_every(cfg.get("clean_every"))
@@ -1455,7 +1456,7 @@ class QuickPuffDaemon:
                 continue
         return f"Profile {index + 1}"
 
-    async def _maybe_send_recap(self, now: Optional[datetime] = None) -> bool:
+    async def _maybe_send_recap(self, now: datetime | None = None) -> bool:
         if not self.weekly_recap:
             return False
         now = now or datetime.now()
@@ -1949,7 +1950,7 @@ class QuickPuffDaemon:
                 pass
 
 
-async def amain(argv: Optional[list[str]] = None) -> int:
+async def amain(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="QuickPuff Peak Pro BLE daemon")
     parser.add_argument("--socket", type=Path, default=socket_path())
     parser.add_argument("--debug", action="store_true")

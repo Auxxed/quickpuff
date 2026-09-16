@@ -17,8 +17,9 @@ import re
 import statistics
 import time
 from datetime import datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .paths import data_dir, write_json_atomic
 
@@ -33,10 +34,6 @@ def use_device(serial: str | None) -> None:
     _device_serial = (serial or "").strip() or None
     if _device_serial:
         _adopt_legacy(_device_serial)
-
-
-def current_device() -> str | None:
-    return _device_serial
 
 
 def _legacy_path() -> Path:
@@ -93,7 +90,7 @@ def _save(data: dict[str, Any]) -> None:
     write_json_atomic(history_path(), data)
 
 
-def record_total(total_dabs: Optional[int]) -> Optional[dict[str, Any]]:
+def record_total(total_dabs: int | None) -> dict[str, Any] | None:
     """Log an increase in the device's lifetime dab counter, if any.
 
     Call this every time a fresh `total_dabs` reading comes back from the
@@ -378,7 +375,7 @@ def _best_streak(daily: dict[str, int]) -> int:
     if not dates:
         return 0
     best = run = 1
-    for prev, nxt in zip(dates, dates[1:]):
+    for prev, nxt in pairwise(dates):
         if (nxt - prev).days == 1:
             run += 1
             if run > best:
