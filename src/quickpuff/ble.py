@@ -514,6 +514,15 @@ class PuffcoBLE:
         await self._ensure_notify()
         await self._acquire_command_write()
         async with self._lock:
+            # The link can drop while this waits its turn: the usage sync walks
+            # the log one read at a time, so it is nearly always queued behind
+            # the poll. The drop closes the command fd, and writing to None
+            # surfaced as "'NoneType' object cannot be interpreted as an
+            # integer". Check here, with no await before the write, so the
+            # caller sees the disconnect for what it is.
+            fd = self._write_fd
+            if fd is None or not self.client or not self.client.is_connected:
+                raise RuntimeError("Client not connected")
             seq = self.lorax_sequence & 0xFFFF
             if seq == 0:
                 seq = 1
@@ -528,7 +537,7 @@ class PuffcoBLE:
             fut: asyncio.Future = loop.create_future()
             self._pending[seq] = fut
             try:
-                os.write(self._write_fd, msg)
+                os.write(fd, msg)
                 reply = await asyncio.wait_for(fut, timeout=timeout)
                 self._dbg(f"← seq {seq:04X} reply ({len(reply)} bytes)")
                 return reply
