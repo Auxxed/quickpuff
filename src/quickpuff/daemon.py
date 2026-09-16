@@ -635,6 +635,7 @@ class QuickPuffDaemon:
             # A different Peak was picked from Find nearby Peaks.
             await self._disconnect(forget=False)
 
+        self._stop_poll()
         if self.device:
             try:
                 await self.device.disconnect()
@@ -855,14 +856,23 @@ class QuickPuffDaemon:
     def _start_poll(self) -> None:
         self._stop_poll()
 
+        # The loop polls the link it was started for, and stops once that link
+        # is replaced or let go. It sleeps between polls, and a reconnect clears
+        # self.device meanwhile; reaching for it blind crashed on None, and the
+        # crash was then scored as a lost link — a strike for a link that was
+        # still being set up.
+        dev = self.device
+
         async def _loop():
             last_full = last_counters = time.monotonic()
             was_watching = False
-            while self.device and self.device.is_connected:
+            while dev is not None and self.device is dev and dev.is_connected:
                 try:
                     await self._poll_wait(
                         poll_delay(self.status.get("operating_state_id"), self._watching(), self.poll_interval)
                     )
+                    if self.device is not dev:
+                        return
                     prev_state = self.status.get("operating_state_id")
                     watching = self._watching()
                     now = time.monotonic()
@@ -873,7 +883,7 @@ class QuickPuffDaemon:
                         last_counters = now
                         if kind == "full":
                             last_full = now
-                        snap = await self.device.snapshot(include_profiles=kind == "full")
+                        snap = await dev.snapshot(include_profiles=kind == "full")
                         if kind != "full":
                             # Keep the profiles already shown; this read skipped them.
                             snap.pop("profiles", None)
@@ -881,7 +891,7 @@ class QuickPuffDaemon:
                         # Catches an odometer bump that lands only when a cycle ends.
                         await self._refresh_clean(self.status.get("total_dabs"), notify=True)
                     else:
-                        snap = await self.device.poll_fast()
+                        snap = await dev.poll_fast()
                         self._stamp_local(snap)
                         self.status.update(snap)
                     await self._broadcast_event("status", self.status)
@@ -907,8 +917,12 @@ class QuickPuffDaemon:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    if self.device is not dev:
+                        # Not this loop's link any more; whoever swapped it
+                        # owns what happens next.
+                        return
                     log.warning("poll failed: %s", exc)
-                    if not (self.device and self.device.is_connected):
+                    if not dev.is_connected:
                         self._on_ble_drop()
                         return
 
