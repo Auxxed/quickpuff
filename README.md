@@ -155,13 +155,43 @@ are re-read once a minute while the panel is open and after each session; the
 heat profiles when the panel opens.
 
 With battery saver on, QuickPuff also lets go of the Peak when it's done.
-The Peak Pro ignores a sleep command over Bluetooth, and an open
+The Peak Pro ignores a sleep command over Bluetooth — it acknowledges
+`ModeCommands.SLEEP` and stays in `Idle` at an unchanged 35 mA — and an open
 Bluetooth link keeps its radio busy, so 30 seconds after a session (or after
 10 idle minutes) the daemon disconnects and the bar shows the last battery
 reading as resting. Opening the panel or running a command reconnects in a few
 seconds, and every 15 minutes it checks in to refresh the battery and count new
 dabs. While it rests, a dab started with the Peak's own button gets no "ready"
 notification; it's counted at the next check-in.
+
+#### What the link actually costs
+
+Measured on a Peak Pro (firmware AW, a 1397 mAh pack as its gauge has learned
+it) by reading `/p/bat/curr`, `/p/bat/volt` and the fractional `/p/bat/soc`:
+
+| State | Draw | Share of the pack per day |
+| --- | --- | --- |
+| Bluetooth link up, idle | 45 mA | 77% |
+| Link down but something reaching for it (retries, scanning) | ~9.6 mA | 16% |
+| Battery saver resting, with its check-ins | ~1.4 mA | 2.4% |
+| Left alone entirely | 0.5–0.9 mA | ~1.2% |
+
+Holding the link is the whole cost, and it is roughly **50x** what a rested
+Peak draws. How fast QuickPuff polls over that link barely matters: idle
+polling every 20 seconds measured 3.23 %/h against 2.88 %/h at the panel-open
+rate of every 3 seconds, which is the same number inside run-to-run noise.
+Letting go is the only thing that helps, which is what battery saver does.
+
+For scale, one dab costs 4–9% of the pack. A dab is worth several days of a
+rested Peak, so idle drain is not what empties it — an open link is.
+
+Powering the Peak off after a dab saves nothing worth having over letting
+battery saver rest it: the most it can recover is the ~1 mA a rested Peak
+draws. The off state's own draw could not be measured, because the gauge stops
+counting coulombs while the Peak is off and re-derives charge from cell voltage
+when it wakes; a reading taken across a power cycle reflects that correction
+rather than anything consumed. `/p/bat/soc` is only meaningful between two
+readings taken without a power cycle in between.
 
 ### Where the usage numbers come from
 
