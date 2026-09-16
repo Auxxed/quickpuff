@@ -360,7 +360,9 @@ class QuickPuffDaemon:
         self._presence: SeatPresence | None = None
         # Consecutive short-lived links: the other computer taking the Peak.
         self._strikes = 0
-        self._link_started = float("-inf")
+        # When a link is live, the moment it became usable. None once its drop
+        # has been scored, so the same disconnection cannot be scored twice.
+        self._link_started: float | None = None
         # Let go for another computer, as opposed to resting or disconnected.
         self._yielded = False
         self._checking_in = False
@@ -518,22 +520,28 @@ class QuickPuffDaemon:
         if self._resting or self._yielded:
             # Battery saver, or handoff, let go of the Peak on purpose.
             return
-        held = time.monotonic() - self._link_started
-        was, self._strikes = self._strikes, strikes_after_drop(self._strikes, held)
-        if self._strikes > was:
-            log.warning(
-                "BLE link dropped after %.0fs — another computer may want this Peak (strike %d)",
-                held,
-                self._strikes,
-            )
-        elif self._strikes < was:
-            log.warning("BLE link dropped after %.0fs — held it (strike %d)", held, self._strikes)
-        else:
-            log.warning("BLE link dropped after %.0fs", held)
-        # connect() retries internally, so each drop starts the clock for the
-        # next attempt: without this a third try is measured from the first and
-        # a short link reads as a long one.
-        self._link_started = time.monotonic()
+        # One disconnection arrives here twice: BlueZ calls back, and the poll
+        # then fails and finds the link gone. The second arrival is not a
+        # second lost link, and with the clock cleared it cannot be scored as
+        # one. Only a link that came up sets the clock again. The rest of this
+        # runs on every arrival, because the reconnect is scheduled from here.
+        if self._link_started is not None:
+            held = time.monotonic() - self._link_started
+            # connect() retries internally, so a drop ends this link's clock:
+            # the next try sets its own, or a third try would be measured from
+            # the first and a short link would read as a long one.
+            self._link_started = None
+            was, self._strikes = self._strikes, strikes_after_drop(self._strikes, held)
+            if self._strikes > was:
+                log.warning(
+                    "BLE link dropped after %.0fs — something else may want this Peak (strike %d)",
+                    held,
+                    self._strikes,
+                )
+            elif self._strikes < was:
+                log.warning("BLE link dropped after %.0fs — held it (strike %d)", held, self._strikes)
+            else:
+                log.warning("BLE link dropped after %.0fs", held)
         self.status["connected"] = False
         self.status["operating_state"] = "Disconnected"
         self.status["operating_state_id"] = -1

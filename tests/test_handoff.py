@@ -120,8 +120,44 @@ def test_a_link_that_dies_young_counts_as_the_other_computer(tmp_path):
     d._link_started = time.monotonic()
     d._on_ble_drop()
     assert d._strikes == 1
+    # A second link, dying just as young, is a second strike.
+    d._mark_attempt()
     d._on_ble_drop()
     assert d._strikes == 2
+
+
+def test_one_disconnection_is_only_scored_once(tmp_path):
+    """BlueZ calls back, and then the poll fails and finds the link gone. Both
+    reach _on_ble_drop for the same lost link. Scoring the second one measured
+    it against a clock that had just been restarted, so it always looked short
+    and always struck: a single drop took the count up by two, and four of them
+    conceded the Peak to a computer that was never there."""
+    d = make_daemon(tmp_path, FakePeak())
+    d._link_started = time.monotonic()
+
+    d._on_ble_drop()          # BlueZ's disconnected_callback
+    assert d._strikes == 1
+    d._on_ble_drop()          # the poll, noticing the same disconnection
+    assert d._strikes == 1, "the same lost link was scored twice"
+    d._on_ble_drop()
+    assert d._strikes == 1
+
+    # A link that actually comes up can be scored again.
+    d._mark_attempt()
+    d._on_ble_drop()
+    assert d._strikes == 2
+
+
+def test_a_repeat_drop_still_schedules_the_reconnect(tmp_path):
+    """Scoring once must not stop the rest of the handler: the reconnect is
+    scheduled from here, and _wake leans on that to come back in range."""
+    d = make_daemon(tmp_path, FakePeak())
+    d._link_started = time.monotonic()
+    d._on_ble_drop()
+    d.status["connected"] = True
+    d._on_ble_drop()
+    assert d.status["connected"] is False
+    assert d.status["operating_state"] == "Disconnected"
 
 
 def test_holding_the_peak_a_while_takes_one_strike_off(tmp_path):
@@ -242,7 +278,9 @@ def test_each_retry_inside_one_connect_is_timed_on_its_own(tmp_path):
     d._link_started = time.monotonic()
     d._on_ble_drop()
     assert d._strikes == 1
-    # The clock restarts, so the next short link is a strike too.
+    # The next try inside connect() starts its own clock, so its short link
+    # is a strike too.
+    d._mark_attempt()
     d._on_ble_drop()
     assert d._strikes == 2
     # And a long gap after a drop still reads as a link that held.
