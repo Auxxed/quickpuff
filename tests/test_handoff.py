@@ -575,3 +575,50 @@ def test_uncontended_backoff_climbs_and_stops_hammering():
     # flat-20s behaviour that ran 120 attempts in 68 minutes.
     assert sum(waits) > 200.0
     assert RECONNECT_BACKOFF_GROWTH > 1.0
+
+
+# --- the poll must not outlive its link --------------------------------------
+
+class PollingPeak(FakePeak):
+    def __init__(self, fail=False):
+        super().__init__()
+        self.fail = fail
+
+    async def poll_fast(self):
+        if self.fail:
+            self.is_connected = False
+            raise RuntimeError("Client not connected")
+        return {}
+
+
+def test_a_reconnect_clearing_the_device_mid_poll_is_not_a_strike(tmp_path):
+    """Seen live: the poll slept, a reconnect cleared self.device and started
+    its attempt clock, the poll woke and reached for None, and that crash was
+    scored as a lost link — a strike one second before the connect succeeded."""
+
+    async def scenario():
+        d = make_daemon(tmp_path, PollingPeak())
+        d._start_poll()
+        await asyncio.sleep(0)            # the poll is asleep between reads
+        d.device = None                   # a reconnect tears the link down...
+        d._mark_attempt()                 # ...and starts its own attempt clock
+        d._poll_wake.set()
+        await asyncio.wait_for(d._poll_task, timeout=2)
+        assert d._strikes == 0
+
+    asyncio.run(scenario())
+
+
+def test_the_poll_still_reports_its_own_link_dying(tmp_path):
+    async def scenario():
+        d = make_daemon(tmp_path, PollingPeak(fail=True))
+        d._link_started = time.monotonic()
+        d._start_poll()
+        await asyncio.sleep(0)
+        d._poll_wake.set()
+        await asyncio.wait_for(d._poll_task, timeout=2)
+        assert d._strikes == 1
+        assert d.status["connected"] is False
+
+    asyncio.run(scenario())
+
