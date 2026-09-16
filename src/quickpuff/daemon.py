@@ -766,7 +766,7 @@ class QuickPuffDaemon:
         try:
             await self._sync_usage()
         except Exception as exc:
-            log.warning("Usage sync failed: %s", exc)
+            log.warning("Usage sync failed: %s", exc, exc_info=True)
 
     async def _disconnect(self, forget: bool = False) -> dict:
         self._end_rest()
