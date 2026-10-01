@@ -109,6 +109,10 @@ class BatteryChargeState(IntEnum):
     DONE_DISCONNECTED = 4
 
 
+# Ready animations the bar widget knows how to play; "off" plays nothing.
+READY_ANIMATIONS = ("off", "confetti", "rocket")
+
+
 class ChamberType(IntEnum):
     NONE = 0
     CLASSIC = 1

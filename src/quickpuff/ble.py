@@ -18,7 +18,7 @@ import cbor2
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
-from .codec import decode_puffco_json, first_color, hexify
+from .codec import decode_puffco_json, first_cbor_item, first_color, hexify
 from .constants import (
     CHAMBER_LABELS,
     CHARGE_SOURCE_LABELS,
@@ -35,6 +35,9 @@ from .constants import (
     UnlockKeys,
 )
 from .lights import rgbt_color, rgbt_to_hex, solid_color_payload
+from .saved_lights import light_id as saved_light_id
+from .saved_lights import recall_cycle, remember_cycle
+from .moods import ADVANCED_STYLES, cycle_payload, decode_cycle, normalize_style
 from .product_info import get_product_info, is_proxy
 from .utils import PuffcoUtils, clamp_byte
 from .vapor import name_for as vapor_name_for
@@ -686,7 +689,9 @@ class PuffcoBLE:
         return bytes(out)
 
     async def write_cbor_full(self, path: str, obj: dict) -> None:
-        blob = cbor2.dumps(hexify(obj), canonical=True)
+        await self.write_blob_full(path, cbor2.dumps(hexify(obj), canonical=True))
+
+    async def write_blob_full(self, path: str, blob: bytes) -> None:
         # Every Lorax message has to fit one BLE packet (MTU 131 on a Peak Pro
         # link). A larger write is dropped without a reply, which is how colour
         # and mood writes used to time out.
@@ -939,6 +944,14 @@ class PuffcoBLE:
         raw = await self.read_bytes_all(path)
         return decode_puffco_json(cbor2.loads(raw))
 
+    async def get_profile_colour_raw(self, index: int | None = None) -> bytes:
+        """The profile's light exactly as the Peak stores it: one CBOR item,
+        without the zero padding the file keeps after it."""
+        if index is None:
+            index = await self.get_current_profile()
+        raw = await self.read_bytes_all(f"/u/app/hc/{index}/colr")
+        return first_cbor_item(raw)
+
     async def _reload_if_current(self, index: int) -> None:
         try:
             current = await self.get_current_profile()
@@ -1000,16 +1013,20 @@ class PuffcoBLE:
                 except LoraxError:
                     pass
 
-    async def set_lantern_colour(self, colour: dict) -> None:
-        await self.write_cbor_full("/p/app/ltrn/colr", colour)
-
     async def set_profile_colour(
         self,
         index: int | None = None,
         *,
-        colour: dict,
+        colour: dict | None = None,
+        raw: bytes | None = None,
         preview: bool = True,
     ) -> None:
+        """Write a profile's light from a lamp dict, or byte-for-byte from `raw`
+        (a light captured off a Peak, such as an exclusive mood)."""
+        if raw is None:
+            if colour is None:
+                raise ValueError("set_profile_colour needs a colour or raw bytes")
+            raw = cbor2.dumps(hexify(colour), canonical=True)
         if index is None:
             index = await self.get_current_profile()
         # Live lantern first so the Peak shows the new colour immediately
@@ -1018,18 +1035,18 @@ class PuffcoBLE:
         # (medium = green) over the colour we just wrote.
         if preview:
             try:
-                await self.set_lantern_colour(colour)
+                await self.write_blob_full("/p/app/ltrn/colr", raw)
                 await self.start_lantern()
             except Exception:
                 log.debug("live lantern preview failed", exc_info=True)
-        await self.write_cbor_full(f"/u/app/hc/{index}/colr", colour)
+        await self.write_blob_full(f"/u/app/hc/{index}/colr", raw)
         try:
             current = await self.get_current_profile()
         except Exception:
             current = None
         if current == index:
             try:
-                await self.write_cbor_full("/p/app/thc/colr", colour)
+                await self.write_blob_full("/p/app/thc/colr", raw)
             except Exception:
                 log.debug("live heat-cycle colour mirror failed", exc_info=True)
 
@@ -1040,6 +1057,39 @@ class PuffcoBLE:
             await self._set_profile_color_rgbt(index, hex_color)
             return
         await self.set_profile_colour(index, colour=solid_color_payload(hex_color))
+
+    async def set_profile_cycle(
+        self,
+        index: int | None,
+        style: str,
+        colors: list[str],
+        tempo: float,
+        *,
+        inhale: bool = False,
+    ) -> None:
+        """Have the Peak animate `colors` itself for this profile."""
+        if await self.get_led_api() == 2:
+            raise LoraxError("This Peak's firmware only takes a single colour per profile")
+        style = normalize_style(style)
+        api = await self.get_api_version()
+        if style in ADVANCED_STYLES and api < PuffcoUtils.revision_string_to_number("AF"):
+            raise LoraxError(f"{style.title()} needs Peak firmware AF or newer")
+        if inhale and api < PuffcoUtils.revision_string_to_number("AG"):
+            inhale = False
+        raw = cbor2.dumps(hexify(cycle_payload(style, colors, tempo=tempo, inhale=inhale)), canonical=True)
+        await self.set_profile_colour(index, raw=raw)
+        remember_cycle(raw, {
+            "style": style,
+            "colors": [c.lower() for c in colors][:6],
+            "tempo": round(max(0.1, min(1.0, float(tempo))), 2),
+            "inhale": inhale,
+        })
+
+    async def set_profile_light_raw(self, index: int | None, raw: bytes) -> None:
+        """Put a captured light back on a profile, byte for byte."""
+        if await self.get_led_api() == 2:
+            raise LoraxError("This Peak's firmware only takes a single colour per profile")
+        await self.set_profile_colour(index, raw=raw)
 
     async def get_profile_name(self, index: int | None = None) -> str:
         if index is None:
@@ -1105,12 +1155,17 @@ class PuffcoBLE:
         temp_c = await self.get_profile_temp_c(index)
         time_s = await self.get_profile_time(index)
         color = None
+        cycle = None
+        light_id = None
         try:
             if await self.get_led_api() == 2:
                 color = rgbt_to_hex(await self.read_short(f"/u/app/hc/{index}/colr", 0, 8))
             else:
-                decoded = await self.get_profile_colours(index)
+                raw = await self.get_profile_colour_raw(index)
+                decoded = decode_puffco_json(cbor2.loads(raw))
                 color = first_color(decoded)
+                cycle = recall_cycle(raw) or decode_cycle(decoded)
+                light_id = saved_light_id(raw)
         except Exception:
             log.debug("Could not decode colour for profile %s", index, exc_info=True)
         vapor = None
@@ -1132,6 +1187,8 @@ class PuffcoBLE:
             "temp_f": PuffcoUtils.c_to_f(temp_c),
             "time": time_s,
             "color": color,
+            "cycle": cycle,
+            "light_id": light_id,
             "vapor": None if vapor is None else vapor_name_for(vapor),
             "vapor_level": vapor,
             "boost_temp_f": boost_temp_f,

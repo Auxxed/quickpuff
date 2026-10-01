@@ -1,4 +1,6 @@
 import QtQuick
+import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
@@ -11,6 +13,8 @@ BarWidget {
   property string outputTooltip: ""
   property bool outputActive: false
   property bool outputOffline: true
+  property string outputClass: ""
+  readonly property bool heatingNow: outputClass === "preheat" || outputClass === "ready"
   property bool refreshPending: false
   // A stall kill also exits non-zero; that is a slow BLE call, not a missing install.
   property bool stalled: false
@@ -68,6 +72,8 @@ BarWidget {
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.togglePanel() }
+    // Plays the ready animation now, for trying it out.
+    function celebrate(): void { root.playReady("") }
   }
 
   visible: outputText !== ""
@@ -91,6 +97,7 @@ BarWidget {
       root.outputTooltip = "QuickPuff needs setup — click to finish"
       root.outputActive = false
       root.outputOffline = true
+      root.outputClass = ""
     }
     onRunningChanged: {
       if (running) {
@@ -113,8 +120,12 @@ BarWidget {
         // `quickpuff waybar` pads its idle label with a double space, a waybar
         // convention for separating two fields. The Omarchy bar already gaps
         // its widgets, so that reads as two widgets here — collapse it.
+        var cls = String(data.class || "")
+        // Reached temperature: celebrate, on the monitor you're looking at.
+        if (root.outputClass === "preheat" && cls === "ready" && root.onFocusedScreen()) root.playReady("")
         root.outputText = String(data.text || "").replace(/\s+/g, " ").trim()
         root.outputTooltip = String(data.tooltip || "")
+        root.outputClass = String(data.class || "")
         root.outputActive = data.class === "preheat" || data.class === "ready" || data.class === "clean"
         root.outputOffline = data.class === "disconnected"
       }
@@ -134,8 +145,10 @@ BarWidget {
     }
   }
 
+  // Faster while preheating, so the ready animation lands close to the
+  // moment the Peak gets there.
   Timer {
-    interval: 5000
+    interval: root.outputClass === "preheat" ? 1000 : 5000
     running: true
     repeat: true
     onTriggered: root.refresh()
@@ -145,7 +158,9 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.outputText
+    // A flame joins the label while the Peak is heating.
+    text: root.flashText !== "" ? root.flashText
+      : root.heatingNow ? "\uf06d " + root.outputText : root.outputText
     tooltipText: root.outputTooltip
     active: root.outputActive || root.opened
     // Recede while there's no device to report on, the same way the shell's
@@ -156,6 +171,9 @@ BarWidget {
     // read as data, not as a compact tag like the keyboard-layout pill.
     fontSize: Style.font.body
 
+    // Scroll down for the next heat profile, up for the previous one.
+    onWheelMoved: function(delta) { root.wheelStep(delta) }
+
     onPressed: function(b) {
       if (b === Qt.RightButton) {
         if (root.bar) root.bar.run("quickpuff heat start")
@@ -165,5 +183,129 @@ BarWidget {
         root.togglePanel()
       }
     }
+  }
+
+  // ----------------------------------------------- scroll to switch profile
+  // The label briefly shows the profile it landed on. Touchpads send many
+  // small deltas, so they add up to one notch (120) per step, and a step
+  // still in flight swallows the rest of that flick.
+  property string flashText: ""
+  property int wheelAccum: 0
+
+  function flash(text) {
+    flashText = text
+    flashTimer.restart()
+  }
+
+  function wheelStep(delta) {
+    if (root.outputOffline) return
+    if (root.heatingNow) {
+      flash("\uf06d Heating")
+      return
+    }
+    wheelAccum += delta
+    if (Math.abs(wheelAccum) < 120) return
+    var direction = wheelAccum < 0 ? "--next" : "--prev"
+    wheelAccum = 0
+    if (stepProc.running) return
+    stepProc.command = ["bash", "-lc", "quickpuff profile \"$1\"", "quickpuff-step", direction]
+    stepProc.running = true
+  }
+
+  Process {
+    id: stepProc
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.flash("\uf05e Can't switch now")
+      root.refresh()
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var name = String(text || "").trim()
+        if (name !== "") root.flash("\uf1de " + name)
+      }
+    }
+  }
+
+  Timer {
+    id: flashTimer
+    interval: 1800
+    onTriggered: root.flashText = ""
+  }
+
+  // ------------------------------------------------------ ready animation
+  // Played over the desktop by ReadyOverlay.qml when the Peak reaches
+  // temperature; which one comes from `quickpuff ready-anim`.
+  property string readyAnimation: "rocket"
+
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/quickpuff/config.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var cfg = JSON.parse(text() || "{}")
+        root.readyAnimation = String(cfg.ready_animation || "rocket")
+      } catch (e) {}
+    }
+  }
+
+  function onFocusedScreen() {
+    var win = button.QsWindow.window
+    var focused = Hyprland.focusedMonitor
+    if (!win || !win.screen || !focused) return true
+    return focused.name === win.screen.name
+  }
+
+  // `name` "" plays the configured one; the panel's Preview passes its pick.
+  function playReady(name) {
+    var which = name !== "" ? name : root.readyAnimation
+    if (which === "off" || which === "") return
+    readyLoader.active = false
+    readyLoader.active = true
+    var show = readyLoader.item
+    if (!show) return
+    var win = button.QsWindow.window
+    if (win && win.screen) show.screen = win.screen
+    var p = button.mapToItem(null, button.width / 2, 0)
+    var atTop = !root.bar || root.bar.position !== "bottom"
+    var screenH = win && win.screen ? win.screen.height : 0
+    show.barAtTop = atTop
+    show.originX = p.x
+    show.barEdge = atTop ? p.y + button.height : screenH - (win ? win.height : 0) + p.y
+    show.fontFamily = root.bar ? root.bar.fontFamily : Style.font.family
+    show.animation = which
+    show.armed = true
+  }
+
+  LazyLoader {
+    id: readyLoader
+    active: false
+    source: Qt.resolvedUrl("ReadyOverlay.qml")
+  }
+
+  Connections {
+    target: readyLoader.item
+    function onFinished() { readyLoader.active = false }
+  }
+
+  // Breathes while the chamber climbs, so a glance at the bar says "almost".
+  SequentialAnimation on opacity {
+    running: root.outputClass === "preheat"
+    loops: Animation.Infinite
+    alwaysRunToEnd: true
+    onRunningChanged: if (!running) root.opacity = 1
+    NumberAnimation { to: 0.55; duration: 900; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+  }
+
+  // WidgetButton only accepts left/right/middle, so catch mouse 5 (forward
+  // side button) on an overlay. Other buttons and hover fall through to it.
+  MouseArea {
+    anchors.fill: parent
+    acceptedButtons: Qt.ForwardButton
+    hoverEnabled: false
+    onPressed: if (root.bar) root.bar.run("quickpuff heat boost")
   }
 }

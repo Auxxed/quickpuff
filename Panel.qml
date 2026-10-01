@@ -86,6 +86,12 @@ Panel {
       pendingDailyLimit = -1
       pendingRecap = undefined
       pendingPreserve = undefined
+      pickerOpen = false
+      pendingCycleOn = undefined
+      namingLight = false
+      renamingLight = ""
+      confirmDeleteLight = ""
+      pendingLightId = ""
     }
   }
 
@@ -142,6 +148,27 @@ Panel {
     var v = Number(f)
     if (!isFinite(v)) return ""
     return Math.round(v) + "°F"
+  }
+
+  // A dab temperature as a flame colour: pale amber for a low-temp dab, through
+  // orange and ember red, to white-hot at the top of the Peak's range.
+  function heatRamp(f) {
+    var stops = [
+      { "t": 400, "c": "#ffd27a" },
+      { "t": 480, "c": "#ffa03c" },
+      { "t": 540, "c": "#ff6a3a" },
+      { "t": 600, "c": "#ffe9e0" }
+    ]
+    var v = Number(f)
+    if (!isFinite(v)) return root.foreground
+    if (v <= stops[0].t) return stops[0].c
+    for (var i = 1; i < stops.length; i++) {
+      if (v <= stops[i].t) {
+        var k = (v - stops[i - 1].t) / (stops[i].t - stops[i - 1].t)
+        return Qt.tint(stops[i - 1].c, Util.alpha(stops[i].c, k))
+      }
+    }
+    return stops[stops.length - 1].c
   }
 
   readonly property string tempLabel: {
@@ -375,12 +402,12 @@ Panel {
   readonly property bool onDevice: page === "device"
 
   readonly property var pageOptions: [
-    { "value": "control", "label": "Control" },
-    { "value": "lights", "label": "Lights" },
-    { "value": "usage", "label": "Usage" },
+    { "value": "control", "label": "Control", "glyph": "\uf1de" },
+    { "value": "lights", "label": "Lights", "glyph": "\uf0eb" },
+    { "value": "usage", "label": "Usage", "glyph": "\uf201" },
     // A dot on Care while the chamber is due a clean, so it isn't missed from Control.
-    { "value": "care", "label": cleanDue ? "Care \u2022" : "Care" },
-    { "value": "device", "label": "Device" }
+    { "value": "care", "label": "Care", "glyph": "\uf004", "badge": cleanDue },
+    { "value": "device", "label": "Device", "glyph": "\uf2db" }
   ]
 
   property string deviceTab: "info"
@@ -388,8 +415,8 @@ Panel {
   readonly property bool onUsageStats: onUsage && usageTab === "stats"
   readonly property bool onUsageHistory: onUsage && usageTab === "history"
   readonly property var usageTabOptions: [
-    { "value": "stats", "label": "Stats" },
-    { "value": "history", "label": "History" }
+    { "value": "stats", "label": "Stats", "glyph": "\uf080" },
+    { "value": "history", "label": "History", "glyph": "\uf1da" }
   ]
 
   // History: recent dabs with notes, read on demand.
@@ -473,8 +500,8 @@ Panel {
   readonly property bool onDeviceInfo: onDevice && deviceTab === "info"
   readonly property bool onDeviceTips: onDevice && deviceTab === "tips"
   readonly property var deviceTabOptions: [
-    { "value": "info", "label": "Info" },
-    { "value": "tips", "label": "Tips" }
+    { "value": "info", "label": "Info", "glyph": "\uf05a" },
+    { "value": "tips", "label": "Tips", "glyph": "\uf0eb" }
   ]
 
   // Factory Peak Pro presets (Connect: Blue / Green / Red / White).
@@ -503,6 +530,10 @@ Panel {
   function applyLightColor(hex) {
     if (currentProfile < 0) return
     pendingLantern = true
+    // A steady colour replaces any cycle on this profile.
+    cycleApplyTimer.stop()
+    if (activeCycle !== null || pendingCycleOn === true) pendingCycleOn = false
+    pendingLightId = "-"
     var updated = {}
     for (var key in pendingColors) updated[key] = pendingColors[key]
     updated[currentProfile] = hex
@@ -511,6 +542,253 @@ Panel {
     // (which flashes factory green over the new colour).
     runArgv(["quickpuff", "color", hex, "--index", String(currentProfile)])
     clearPendingTimer.restart()
+  }
+
+  // ------------------------------------------------------- colour cycle
+  // The Peak animates these itself (`quickpuff cycle`). The panel keeps an
+  // editable copy seeded from what the active profile is doing; while the
+  // cycle is on, every edit is sent once the taps settle.
+  // The Puffco app's animations for the Peak Pro (Breathe is from an older
+  // app release; Lava Lamp and Confetti run on the Peak's particle engine).
+  readonly property var cycleStyles: [
+    { "value": "fade", "label": "Fade", "glyph": "" },
+    { "value": "spin", "label": "Spin", "glyph": "" },
+    { "value": "breathe", "label": "Breathe", "glyph": "" },
+    { "value": "disco", "label": "Disco", "glyph": "" },
+    { "value": "split", "label": "Split", "glyph": "" },
+    { "value": "fill", "label": "Fill", "glyph": "" },
+    { "value": "lava", "label": "Lava", "glyph": "" },
+    { "value": "confetti", "label": "Confetti", "glyph": "" }
+  ]
+  readonly property var cyclePalettes: [
+    { "name": "Rainbow", "colors": ["#ff0000", "#ffaa00", "#f6f600", "#00e05a", "#0080ff", "#a020ff"] },
+    { "name": "Sunset", "colors": ["#ff2d55", "#ff6a1a", "#ffb000"] },
+    { "name": "Ocean", "colors": ["#0040ff", "#00b4ff", "#00ffd0"] },
+    { "name": "Vapor", "colors": ["#ff4fa3", "#a855f7", "#3b9eff"] },
+    { "name": "Fire", "colors": ["#ff1a00", "#ff5a00", "#ffae00"] },
+    { "name": "Forest", "colors": ["#1f8f3a", "#8fd400", "#00c090"] }
+  ]
+  readonly property int maxCycleColors: 6
+
+  property string cycleStyle: "fade"
+  property var cycleColors: cyclePalettes[0].colors
+  property real cycleTempo: 0.5
+  property bool cycleInhale: false
+  property var pendingCycleOn: undefined
+  readonly property var activeCycle: activeProfile && activeProfile.cycle ? activeProfile.cycle : null
+  readonly property bool cycleOn: pendingCycleOn !== undefined ? pendingCycleOn === true : activeCycle !== null
+
+  function seedCycle() {
+    var c = activeCycle
+    if (!c) return
+    // A captured exclusive mood reads as "custom": keep the editor's own
+    // style rather than showing none picked.
+    for (var i = 0; i < cycleStyles.length; i++)
+      if (cycleStyles[i].value === c.style) cycleStyle = String(c.style)
+    if (c.colors && c.colors.length) cycleColors = c.colors.slice(0, maxCycleColors)
+    var t = Number(c.tempo)
+    if (isFinite(t)) cycleTempo = Math.max(0.1, Math.min(1, t))
+    cycleInhale = c.inhale === true
+  }
+  onCurrentProfileChanged: seedCycle()
+  onActiveCycleChanged: if (!cycleApplyTimer.running && pendingCycleOn === undefined) seedCycle()
+
+  function sendCycle() {
+    if (currentProfile < 0 || cycleColors.length === 0) return
+    var argv = ["quickpuff", "cycle", cycleStyle].concat(cycleColors)
+    argv.push("--speed", String(Math.round(cycleTempo * 100)), "--index", String(currentProfile))
+    if (cycleInhale) argv.push("--inhale")
+    pendingLantern = true
+    pendingLightId = "-"
+    runArgv(argv)
+    clearPendingTimer.restart()
+  }
+
+  function cycleEdited() {
+    if (cycleOn) cycleApplyTimer.restart()
+  }
+
+  function setCycleOn(on) {
+    cycleApplyTimer.stop()
+    pendingCycleOn = on
+    if (on) {
+      sendCycle()
+    } else {
+      // Back to a steady light, in the cycle's first colour.
+      applyLightColor(cycleColors.length ? cycleColors[0] : "#ffffff")
+      pendingCycleOn = false
+    }
+  }
+
+  function pickCycleStyle(style) { cycleStyle = style; cycleEdited() }
+  function pickCyclePalette(colors) { cycleColors = colors.slice(0, maxCycleColors); cycleEdited() }
+  function setCycleTempo(t) { cycleTempo = Math.max(0.1, Math.min(1, t)); cycleEdited() }
+  function toggleCycleInhale() { cycleInhale = !cycleInhale; cycleEdited() }
+
+  // ---------------------------------------------------- saved lights
+  // Lights copied off the Peak (`quickpuff light`), exclusive moods included.
+  readonly property var savedLights: statusData.saved_lights || []
+  readonly property string activeLightId: activeProfile && activeProfile.light_id ? String(activeProfile.light_id) : ""
+  // "-" means an edit just replaced whatever saved light the profile wore.
+  property string pendingLightId: ""
+  readonly property string wornLightId: pendingLightId !== "" ? pendingLightId : activeLightId
+  readonly property bool wearingSaved: {
+    for (var i = 0; i < savedLights.length; i++) if (savedLights[i].id === wornLightId) return true
+    return false
+  }
+  property bool namingLight: false
+  property string renamingLight: ""
+  property string confirmDeleteLight: ""
+
+  function applySavedLight(id) {
+    if (currentProfile < 0) return
+    cycleApplyTimer.stop()
+    pendingLightId = String(id)
+    pendingCycleOn = undefined
+    pendingLantern = true
+    runArgv(["quickpuff", "light", "apply", String(id), "--index", String(currentProfile)])
+    clearPendingTimer.restart()
+  }
+
+  function cleanLightName(raw) {
+    return String(raw || "").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "")
+  }
+
+  function saveCurrentLight(raw) {
+    var name = cleanLightName(raw)
+    namingLight = false
+    refocusPanel()
+    if (name === "" || currentProfile < 0) return
+    runArgv(["quickpuff", "light", "save", name, "--index", String(currentProfile)])
+  }
+
+  function renameSavedLight(id, raw) {
+    var name = cleanLightName(raw)
+    renamingLight = ""
+    refocusPanel()
+    if (name === "") return
+    runArgv(["quickpuff", "light", "rename", String(id), name])
+  }
+
+  function deleteSavedLight(id) {
+    if (confirmDeleteLight !== id) {
+      confirmDeleteLight = id
+      confirmDeleteTimer.restart()
+      return
+    }
+    confirmDeleteLight = ""
+    runArgv(["quickpuff", "light", "delete", String(id)])
+  }
+
+  function refocusPanel() {
+    Qt.callLater(function() { if (root.opened && keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  // A second tap on delete within a few seconds confirms it.
+  Timer {
+    id: confirmDeleteTimer
+    interval: 3000
+    onTriggered: root.confirmDeleteLight = ""
+  }
+
+  function addCycleColor(hex) {
+    var h = profileSwatch(hex)
+    if (h === "" || cycleColors.length >= maxCycleColors) return
+    cycleColors = cycleColors.concat([h.toLowerCase()])
+    cycleEdited()
+  }
+
+  function removeCycleColor(i) {
+    if (cycleColors.length <= 1) return
+    var next = cycleColors.slice()
+    next.splice(i, 1)
+    cycleColors = next
+    cycleEdited()
+  }
+
+  Timer {
+    id: cycleApplyTimer
+    interval: 600
+    onTriggered: root.sendCycle()
+  }
+
+  readonly property bool anyCycle: {
+    for (var i = 0; i < profiles.length; i++) if (profiles[i].cycle) return true
+    return false
+  }
+
+  // Drives the panel's previews of the cycle; roughly the Peak's pace.
+  property int cycleTick: 0
+  readonly property int cycleStepMs: Math.round(1500 - 1250 * cycleTempo)
+  readonly property color cycleNow: cycleColors.length
+    ? cycleColors[cycleTick % cycleColors.length] : Color.accent
+  Timer {
+    interval: root.cycleStepMs
+    repeat: true
+    running: root.opened && (root.cycleOn || root.onLights || root.anyCycle)
+    onTriggered: root.cycleTick = (root.cycleTick + 1) % 720
+  }
+
+  // ------------------------------------------------ custom colour picker
+  // Hue/saturation from the wheel, value from the slider, all 0..1. Seeded
+  // from the profile's current colour whenever the picker opens.
+  property bool pickerOpen: false
+  property real pickH: 0
+  property real pickS: 1
+  property real pickV: 1
+  readonly property color pickColor: Qt.hsva(pickH, pickS, pickV, 1)
+  readonly property string pickHex: hexOf(pickColor)
+  readonly property string activeLightHex: activeProfile ? profileColor(currentProfile, activeProfile.color) : ""
+  readonly property bool customLight: {
+    if (activeLightHex === "") return false
+    for (var i = 0; i < colorPalette.length; i++)
+      if (colorPalette[i].toLowerCase() === activeLightHex.toLowerCase()) return false
+    return true
+  }
+
+  function hexOf(c) {
+    function two(x) {
+      var n = Math.max(0, Math.min(255, Math.round(x * 255)))
+      return (n < 16 ? "0" : "") + n.toString(16)
+    }
+    return "#" + two(c.r) + two(c.g) + two(c.b)
+  }
+
+  function seedPicker(hex) {
+    var s = profileSwatch(hex)
+    if (s === "") return
+    var c = Qt.color(s)
+    pickV = c.hsvValue
+    // Grey has no hue; keep whatever the wheel was on instead of snapping to red.
+    if (c.hsvSaturation > 0) pickH = Math.max(0, c.hsvHue)
+    pickS = c.hsvSaturation
+  }
+
+  function togglePicker() {
+    if (!pickerOpen) seedPicker(activeLightHex !== "" ? activeLightHex : "#ff0000")
+    pickerOpen = !pickerOpen
+  }
+
+  // Typed hex ("#12abef", "12abef", "#1af"): lands on the wheel and the Peak.
+  function applyTypedHex(raw) {
+    var s = String(raw || "").replace(/^\s+|\s+$/g, "").replace(/^#/, "")
+    if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.charAt(0) + s.charAt(0) + s.charAt(1) + s.charAt(1) + s.charAt(2) + s.charAt(2)
+    if (!/^[0-9a-fA-F]{6}$/.test(s)) return false
+    seedPicker("#" + s)
+    pickApplyTimer.stop()
+    if (!cycleOn) applyLightColor("#" + s.toLowerCase())
+    return true
+  }
+
+  // Drags and slides land on the Peak once the pointer lets go, coalesced
+  // so a wheel release plus a nudge of the slider is one BLE write.
+  function schedulePickApply() { pickApplyTimer.restart() }
+
+  Timer {
+    id: pickApplyTimer
+    interval: 300
+    // While a cycle runs the wheel is a chooser for it, not a solid colour.
+    onTriggered: if (!root.cycleOn) root.applyLightColor(root.pickHex)
   }
 
   readonly property var vaporLevels: [
@@ -779,6 +1057,90 @@ Panel {
     commitBrightnessTimer.restart()
   }
 
+  // ---------------------------------------------------- ready animation
+  // Played by the bar widget over the desktop (ReadyOverlay.qml); the choice
+  // lives in quickpuff's config.
+  readonly property var readyAnimations: [
+    { "value": "off", "label": "Off", "glyph": "\uf05e" },
+    { "value": "confetti", "label": "Confetti", "glyph": "\uf0d0" },
+    { "value": "rocket", "label": "Rocket", "glyph": "\uf135" }
+  ]
+  property string configReadyAnimation: "rocket"
+  property string pendingReadyAnimation: ""
+  readonly property string readyAnimation: pendingReadyAnimation !== "" ? pendingReadyAnimation : configReadyAnimation
+
+  function setReadyAnimation(value) {
+    pendingReadyAnimation = value
+    runArgv(["quickpuff", "ready-anim", value])
+  }
+  onConfigReadyAnimationChanged: pendingReadyAnimation = ""
+
+  // The show launches right where this panel sits, so get out of its way.
+  function previewReadyAnimation() {
+    if (readyAnimation === "off" || !hostWidget || typeof hostWidget.playReady !== "function") return
+    close()
+    previewTimer.restart()
+  }
+
+  Timer {
+    id: previewTimer
+    interval: 450
+    onTriggered: if (root.hostWidget) root.hostWidget.playReady(root.readyAnimation)
+  }
+
+  // --------------------------------------------------- lantern auto-off
+  // The daemon clamps to 1 min – 8 h; the stepper walks these stops.
+  readonly property var lanternTimeoutStops: [60, 300, 600, 900, 1800, 3600, 7200, 14400, 28800]
+  property real pendingLanternTimeout: -1
+  readonly property real lanternTimeout: {
+    if (pendingLanternTimeout > 0) return pendingLanternTimeout
+    var n = Number(statusData.lantern_timeout)
+    return isFinite(n) && n > 0 ? n : 1800
+  }
+  readonly property int lanternTimeoutStop: {
+    var best = 0
+    for (var i = 0; i < lanternTimeoutStops.length; i++)
+      if (Math.abs(lanternTimeoutStops[i] - lanternTimeout) < Math.abs(lanternTimeoutStops[best] - lanternTimeout)) best = i
+    return best
+  }
+
+  function formatTimeout(seconds) {
+    var m = Math.round(Number(seconds) / 60)
+    if (m < 60) return m + " min"
+    var h = Math.floor(m / 60), r = m % 60
+    return h + " h" + (r ? " " + r + " min" : "")
+  }
+
+  function stepLanternTimeout(delta) {
+    var i = Math.max(0, Math.min(lanternTimeoutStops.length - 1, lanternTimeoutStop + delta))
+    pendingLanternTimeout = lanternTimeoutStops[i]
+    lanternTimeoutTimer.restart()
+  }
+
+  Timer {
+    id: lanternTimeoutTimer
+    interval: 450
+    onTriggered: {
+      root.runArgv(["quickpuff", "lantern", "--timeout", String(Math.round(root.pendingLanternTimeout))])
+      clearPendingTimer.restart()
+    }
+  }
+
+  // ------------------------------------------------------- heat graph
+  // The chamber's temperature over the current (or last) session, recorded
+  // by the daemon so opening the panel mid-session still shows the climb.
+  readonly property var heatTrace: statusData.heat_trace || null
+  readonly property var heatPoints: heatTrace && heatTrace.points ? heatTrace.points : []
+  readonly property bool heatTraceLive: heatTrace !== null && heatTrace.active === true
+  readonly property real heatPeakF: {
+    var peak = NaN
+    for (var i = 0; i < heatPoints.length; i++) {
+      var f = Number(heatPoints[i][1])
+      if (isFinite(f) && !(f <= peak)) peak = f
+    }
+    return peak
+  }
+
   function commitBrightness() {
     if (pendingBrightness < 0) return
     runArgv(["quickpuff", "brightness", String(pendingBrightness)])
@@ -788,6 +1150,61 @@ Panel {
   // The heat state drives the hero glyph's color, and mirrors the bar widget's
   // own active tint so the two surfaces never disagree at a glance.
   readonly property color heatColor: heating ? urgent : (cooling ? Color.accent : dim)
+
+  // The hero's status dot: warm while heating, the theme accent while idle
+  // and connected, faded while there's nothing to talk to.
+  readonly property color stateColor: needsSetup ? urgent
+    : heating ? urgent
+    : connected ? Color.accent
+    : dim
+
+  // Tint for the active profile: the colour its lantern glows, else accent.
+  readonly property color profileTint: {
+    if (!activeProfile) return Color.accent
+    var hex = profileColor(currentProfile, activeProfile.color)
+    return hex !== "" ? hex : Color.accent
+  }
+
+  // How far the chamber has climbed toward the active profile's target, for
+  // the hero ring. Full while at temp, empty while idle.
+  readonly property real heatProgress: {
+    if (!connected) return 0
+    if (atTemp) return 1
+    if (!preheating && !cooling) return 0
+    var t = Number(statusData.heater_temp_f)
+    var goal = activeProfile ? Number(activeProfile.temp_f) : NaN
+    if (!isFinite(t) || !isFinite(goal) || goal <= 80) return 0
+    return Math.max(0, Math.min(1, (t - 80) / (goal - 80)))
+  }
+
+  // One friendly line under the device name; the state itself stays in the
+  // small-caps meta line above it.
+  readonly property string moodLine: {
+    if (needsSetup) return "Let's get the background service running"
+    if (!connected) {
+      if (resting) return "Catching a few z's to save battery"
+      if (handedOff) return "Hanging out with another computer"
+      if (connecting) return "Reaching out to your Peak…"
+      return "Asleep. Wake it up to say hi"
+    }
+    if (preheating) return "Warming up, hang tight"
+    if (atTemp) return "Ready. Slow pull, big flavor"
+    if (cooling) return "Cooling off"
+    if (lowHeatBattery) return "Running low, plug in soon"
+    if (cleanDue) return "Due for a swab"
+    return "Ready when you are"
+  }
+
+  // Readable glyph colour on top of an arbitrary swatch.
+  function inkOn(hex) {
+    var c = Qt.color(String(hex))
+    return (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) > 0.6 ? "#161616" : "#ffffff"
+  }
+
+  readonly property var stockSwatches: ({ "Blue": "#3b9eff", "Green": "#3dd68c", "Red": "#ff4d4d", "White": "#ffffff" })
+
+  // A celebratory pop the moment the chamber reaches temperature.
+  onAtTempChanged: if (atTemp && opened) heroBurst.fire()
 
   // Profiles carry the LED color the device glows for them; it's how the app's
   // own editor identifies them, so the tiles show the same swatch. Anything
@@ -1166,6 +1583,9 @@ Panel {
       root.pendingCleanEvery = -1
       root.pendingBrightness = -1
       root.pendingDeviceName = ""
+      if (!lanternTimeoutTimer.running) root.pendingLanternTimeout = -1
+      if (!cycleApplyTimer.running) root.pendingCycleOn = undefined
+      root.pendingLightId = ""
     }
   }
 
@@ -1216,6 +1636,7 @@ Panel {
       try {
         var cfg = JSON.parse(text() || "{}")
         root.units = String(cfg.units || "F").toUpperCase() === "C" ? "C" : "F"
+        root.configReadyAnimation = String(cfg.ready_animation || "rocket")
       } catch (e) {
         root.units = "F"
       }
@@ -1260,41 +1681,147 @@ Panel {
           spacing: Style.spacing.panelGap
 
           // ---------- Hero: heat glyph · device + state · chamber temp ------
-          PanelHero {
-            title: root.deviceName
-            detail: root.batteryLabel
-            meta: root.metaLabel
-            foreground: root.foreground
-            fontFamily: root.fontFamily
+          Item {
+            id: hero
+            width: parent.width
+            implicitHeight: Math.max(heroOrb.height, heroLabels.implicitHeight, heroReadout.implicitHeight)
 
-            iconComponent: Text {
-              textFormat: Text.PlainText
-              text: "\uf06d"
-              color: root.heatColor
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.display
+            HeatOrb {
+              id: heroOrb
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(62)
+              height: width
+              progress: root.heatProgress
+              tint: root.heatColor
+              lit: root.heating
+              climbing: root.preheating
+              sleeping: !root.connected && !root.connecting && !root.needsSetup
+            }
 
-              Behavior on color { ColorAnimation { duration: 220 } }
+            Burst {
+              id: heroBurst
+              anchors.centerIn: heroOrb
+              width: heroOrb.width
+              height: width
+            }
 
-              // Breathes only while the chamber is actually climbing.
-              SequentialAnimation on opacity {
-                running: root.preheating && root.opened
-                loops: Animation.Infinite
-                alwaysRunToEnd: true
-                NumberAnimation { from: 1.0; to: 0.45; duration: 900; easing.type: Easing.InOutSine }
-                NumberAnimation { from: 0.45; to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+            Column {
+              id: heroLabels
+              anchors.left: heroOrb.right
+              anchors.leftMargin: Style.space(12)
+              anchors.right: heroReadout.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(3)
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.deviceName
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.heading
+                font.bold: true
+                elide: Text.ElideRight
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.space(6)
+
+                Rectangle {
+                  id: stateDot
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(7)
+                  height: width
+                  radius: width / 2
+                  color: root.stateColor
+
+                  Behavior on color { ColorAnimation { duration: 260 } }
+
+                  // A soft halo that swells while something is happening.
+                  Rectangle {
+                    z: -1
+                    anchors.centerIn: parent
+                    width: parent.width * 2.4
+                    height: width
+                    radius: width / 2
+                    color: Util.alpha(root.stateColor, 0.28)
+                    visible: root.heating || root.connecting || root.resting
+
+                    SequentialAnimation on scale {
+                      running: parent.visible && root.opened
+                      loops: Animation.Infinite
+                      NumberAnimation { from: 0.5; to: 1.0; duration: 900; easing.type: Easing.OutSine }
+                      NumberAnimation { from: 1.0; to: 0.5; duration: 900; easing.type: Easing.InSine }
+                    }
+                  }
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - stateDot.width - parent.spacing
+                  textFormat: Text.PlainText
+                  text: root.metaLabel.toUpperCase()
+                  color: root.connected ? root.stateColor : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  font.letterSpacing: 1.2
+                  elide: Text.ElideRight
+
+                  Behavior on color { ColorAnimation { duration: 260 } }
+                }
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: root.moodLine
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.italic: true
+                elide: Text.ElideRight
               }
             }
 
-            trailingControl: Text {
-              textFormat: Text.PlainText
-              text: root.tempLabel
-              color: root.connected ? root.foreground : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.display
-              font.bold: true
+            Column {
+              id: heroReadout
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(4)
 
-              Behavior on color { ColorAnimation { duration: 200 } }
+              // Counts toward each new reading instead of snapping to it; once
+              // it lands it shows the daemon's own label, so the two agree.
+              Text {
+                id: heroTemp
+                anchors.right: parent.right
+                textFormat: Text.PlainText
+
+                property real rawF: Number(root.statusData.heater_temp_f)
+                property real shownF: isFinite(rawF) ? rawF : 0
+                Behavior on shownF { NumberAnimation { id: tempCount; duration: 700; easing.type: Easing.OutCubic } }
+
+                text: !root.connected ? "—"
+                  : !isFinite(rawF) || !tempCount.running ? root.tempLabel : root.formatTemp(shownF, undefined)
+                color: !root.connected ? root.dim
+                  : shownF > 120 ? Qt.tint(root.foreground,
+                      Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
+                  : root.heating ? Qt.lighter(root.urgent, 1.15)
+                  : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.display
+                font.bold: true
+
+                Behavior on color { ColorAnimation { duration: 300 } }
+              }
+
+              BatteryPill {
+                anchors.right: parent.right
+                visible: root.connected && root.batteryLabel !== ""
+              }
             }
           }
 
@@ -1315,7 +1842,10 @@ Panel {
             ActionButton {
               width: parent.width
               label: root.needsSetup ? "Finish setup" : (root.resting ? "Waking…" : (root.handedOff ? "Take it back" : (root.connecting ? "Connecting…" : "Connect")))
-              glyph: root.needsSetup ? "\uf0ad" : "\uf293"
+              glyph: root.needsSetup ? "\uf0ad" : (root.connecting || root.resting ? "\uf110" : "\uf293")
+              spinning: !root.needsSetup && (root.connecting || root.resting)
+              tall: true
+              pulse: !root.needsSetup && !root.connecting
               tint: Color.accent
               emphasized: true
               onActivated: root.needsSetup ? root.finishSetup() : root.connectDevice()
@@ -1337,7 +1867,8 @@ Panel {
               width: parent.width
               visible: !root.needsSetup
               label: root.scanning ? "Searching\u2026" : "Find nearby Peaks"
-              glyph: "\uf002"
+              glyph: root.scanning ? "\uf110" : "\uf002"
+              spinning: root.scanning
               onActivated: root.findPeaks()
             }
 
@@ -1348,6 +1879,8 @@ Panel {
                 required property var modelData
                 width: parent ? parent.width : 0
                 label: String(modelData.name || "Peak Pro") + "  \u00b7  " + String(modelData.address || "")
+                glyph: "\uf293"
+                tint: Color.accent
                 onActivated: root.connectDevice(modelData.address)
               }
             }
@@ -1399,9 +1932,11 @@ Panel {
               ActionButton {
                 width: actionRow.cellWidth
                 label: "Heat"
-                glyph: "\uf04b"
+                glyph: "\uf06d"
+                tall: true
                 tint: Color.accent
                 emphasized: !root.heating
+                pulse: root.preheating
                 onActivated: root.run("quickpuff heat start")
               }
 
@@ -1409,6 +1944,8 @@ Panel {
                 width: actionRow.cellWidth
                 label: "Boost"
                 glyph: "\uf0e7"
+                tall: true
+                tint: Qt.tint(Color.accent, Util.alpha(root.urgent, 0.5))
                 onActivated: root.run("quickpuff heat boost")
               }
 
@@ -1416,6 +1953,7 @@ Panel {
                 width: actionRow.cellWidth
                 label: "Stop"
                 glyph: "\uf04d"
+                tall: true
                 tint: root.urgent
                 emphasized: root.heating || root.cooling
                 onActivated: root.run("quickpuff heat stop")
@@ -1428,7 +1966,7 @@ Panel {
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               horizontalAlignment: Text.AlignHCenter
-              text: "Battery " + Math.round(Number(root.statusData.battery)) + "%: the Peak may refuse to heat. Plug it in first."
+              text: "\uf071  Battery " + Math.round(Number(root.statusData.battery)) + "%: the Peak may refuse to heat. Plug it in first."
               color: root.urgent
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -1446,6 +1984,7 @@ Panel {
                 height: width
                 progress: root.timerProgress
                 fillColor: root.atTemp ? Color.accent : root.urgent
+                startColor: root.atTemp ? Qt.lighter(Color.accent, 1.4) : Color.accent
 
                 Text {
                   anchors.centerIn: parent
@@ -1468,7 +2007,7 @@ Panel {
                 Text {
                   width: parent.width
                   textFormat: Text.PlainText
-                  text: root.atTemp ? "Session" : "Heating up"
+                  text: root.atTemp ? "\uf0c2  Session" : "\uf06d  Heating up"
                   color: root.atTemp ? Color.accent : root.urgent
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -1489,9 +2028,14 @@ Panel {
               }
             }
 
+            HeatGraph {
+              visible: root.heatPoints.length >= 2
+            }
+
             Section {
               visible: root.hasProfiles
               title: "HEAT PROFILES"
+              glyph: "\uf06d"
 
               Grid {
                 id: profileGrid
@@ -1515,6 +2059,12 @@ Panel {
                     }
                     readonly property bool active: profileIndex >= 0 && profileIndex === root.currentProfile
                     readonly property string swatch: root.profileColor(profileIndex, modelData.color)
+                    // A cycling profile's dot runs through its colours.
+                    readonly property var cycleColors: profileIndex === root.currentProfile
+                      ? (root.cycleOn ? root.cycleColors : [])
+                      : (modelData.cycle && modelData.cycle.colors ? modelData.cycle.colors : [])
+                    readonly property string dotColor: cycleColors.length
+                      ? cycleColors[root.cycleTick % cycleColors.length] : swatch
                     readonly property real tempF: root.profileTempF(profileIndex, modelData.temp_f)
                     readonly property real timeS: root.profileTime(profileIndex, modelData.time)
                     readonly property string name: {
@@ -1539,18 +2089,54 @@ Panel {
                     implicitHeight: tileBody.implicitHeight + Style.spacing.controlPaddingY * 2
                     radius: Style.cornerRadius
 
-                    color: tileMouse.pressed ? Style.pressedFillFor(root.foreground, Color.accent)
-                      : active ? Style.selectedFillFor(Color.accent, Color.accent)
-                      : hot || editingThis ? Style.hoverFillFor(root.foreground, Color.accent)
-                      : Style.normalFillFor(root.foreground, Color.accent)
+                    // Each tile wears the colour its lantern glows, so the grid
+                    // reads like the Peak's own light ring.
+                    readonly property color tint: swatch !== "" ? swatch : Color.accent
+
+                    // Pale swatches (white) wash out fast, so they tint lighter.
+                    readonly property real tintStrength: tint.hslLightness > 0.8 ? 0.55 : 1
+                    color: tileMouse.pressed ? Util.alpha(tint, 0.22 * tintStrength)
+                      : active ? Util.alpha(tint, 0.15 * tintStrength)
+                      : hot || editingThis ? Util.alpha(tint, 0.09 * tintStrength)
+                      : Util.alpha(tint, 0.045 * tintStrength)
 
                     borderSpec: active
-                      ? Border.flat(Color.accent, Math.max(1, Style.normalBorderWidth))
+                      ? Border.flat(tint, Math.max(1, Style.normalBorderWidth))
                       : (hot || editingThis
-                         ? Border.controlSpec("hover-cursor", root.foreground, Color.accent)
+                         ? Border.flat(Util.alpha(tint, 0.6), Math.max(1, Style.normalBorderWidth))
                          : Border.controlSpec("normal", root.foreground, Color.accent))
 
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Behavior on color { ColorAnimation { duration: 160 } }
+
+                    // A little hop when this becomes the active profile.
+                    onActiveChanged: if (active && root.opened) tileHop.restart()
+                    SequentialAnimation {
+                      id: tileHop
+                      NumberAnimation { target: tile; property: "scale"; to: 1.045; duration: 110; easing.type: Easing.OutQuad }
+                      NumberAnimation { target: tile; property: "scale"; to: 1.0; duration: 260; easing.type: Easing.OutBack }
+                    }
+
+                    // Colour stripe down the leading edge; it breathes while
+                    // this profile is the one heating.
+                    Rectangle {
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      anchors.margins: Math.max(1, Style.normalBorderWidth)
+                      width: Style.space(3)
+                      color: tile.tint
+                      opacity: tile.active ? 1 : 0.35
+
+                      Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                      SequentialAnimation on opacity {
+                        running: tile.active && root.heating && root.opened
+                        loops: Animation.Infinite
+                        alwaysRunToEnd: true
+                        NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
+                      }
+                    }
 
                     // Declared before the body so every control in it swallows
                     // its own taps instead of also reselecting the profile.
@@ -1594,9 +2180,22 @@ Panel {
                             radius: width / 2
                             visible: tile.swatch !== ""
                             anchors.verticalCenter: parent.verticalCenter
-                            color: tile.swatch !== "" ? tile.swatch : "transparent"
+                            color: tile.dotColor !== "" ? tile.dotColor : "transparent"
                             border.width: 1
                             border.color: Util.alpha(root.foreground, 0.25)
+
+                            Behavior on color { ColorAnimation { duration: root.cycleStepMs * 0.9 } }
+
+                            Rectangle {
+                              z: -1
+                              anchors.centerIn: parent
+                              width: parent.width * 1.8
+                              height: width
+                              radius: width / 2
+                              color: Util.alpha(tile.tint, tile.active ? 0.3 : 0)
+
+                              Behavior on color { ColorAnimation { duration: 200 } }
+                            }
                           }
 
                           Text {
@@ -1604,9 +2203,9 @@ Panel {
                             textFormat: Text.PlainText
                             width: nameRow.width
                               - (swatchDot.visible ? swatchDot.width + nameRow.spacing : 0)
-                              - (renameButton.width + nameRow.spacing)
+                              - (tile.hot ? renameButton.width + nameRow.spacing : 0)
                             text: tile.name
-                            color: nameTap.containsMouse || tile.active ? Color.accent : root.foreground
+                            color: nameTap.containsMouse ? Color.accent : (tile.active ? tile.tint : root.foreground)
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.bodySmall
                             font.bold: tile.active
@@ -1614,6 +2213,7 @@ Panel {
                             anchors.verticalCenter: parent.verticalCenter
 
                             Behavior on color { ColorAnimation { duration: 120 } }
+                            Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
 
                             MouseArea {
                               id: nameTap
@@ -1680,9 +2280,11 @@ Panel {
                               return t !== "" ? t : "—"
                             }
                             color: tempTapMouse.containsMouse ? Color.accent
-                              : (tile.active ? root.foreground : root.dim)
+                              : (tile.active ? root.heatRamp(tile.tempF)
+                                 : Qt.tint(root.dim, Util.alpha(root.heatRamp(tile.tempF), 0.45)))
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.bodySmall
+                            font.bold: tile.active
 
                             Behavior on color { ColorAnimation { duration: 120 } }
                           }
@@ -1794,6 +2396,36 @@ Panel {
                           }
                         }
                       }
+                      // ----- Where this temperature sits in the Peak's range -----
+                      Item {
+                        width: parent.width
+                        height: Style.space(7)
+
+                        Rectangle {
+                          anchors.left: parent.left
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          height: Style.space(3)
+                          radius: height / 2
+                          color: Util.alpha(root.foreground, 0.1)
+
+                          Rectangle {
+                            height: parent.height
+                            radius: parent.radius
+                            width: isFinite(tile.tempF)
+                              ? Math.max(parent.height, parent.width * (tile.tempF - root.minTempF) / (root.maxTempF - root.minTempF))
+                              : 0
+                            opacity: tile.active ? 1 : 0.55
+                            gradient: Gradient {
+                              orientation: Gradient.Horizontal
+                              GradientStop { position: 0.0; color: Util.alpha(tile.tint, 0.35) }
+                              GradientStop { position: 1.0; color: tile.tint }
+                            }
+
+                            Behavior on width { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                          }
+                        }
+                      }
                     }
                   }
                 }
@@ -1803,6 +2435,7 @@ Panel {
             Section {
               visible: root.hasProfiles && root.currentProfile >= 0
               title: "VAPOR"
+              glyph: "\uf0c2"
 
               Segmented {
                 width: parent.width
@@ -1817,8 +2450,14 @@ Panel {
               id: boostSection
               visible: root.hasProfiles && root.currentProfile >= 0
               title: "BOOST"
+              glyph: "\uf0e7"
 
               readonly property var active: root.activeProfile || ({})
+
+              // Where a boost lands: the profile's temperature plus the extra.
+              readonly property real boostedF: root.profileTempF(root.currentProfile, active.temp_f)
+                + root.profileBoostTempF(root.currentProfile, active.boost_temp_f)
+              trailing: isFinite(boostedF) ? "Boost peaks at " + root.formatTemp(boostedF, undefined) : ""
 
               StepperRow {
                 width: parent.width
@@ -1840,6 +2479,38 @@ Panel {
                 onRaise: root.stepBoostTime(root.currentProfile, boostSection.active.boost_time, root.boostTimeStepS)
               }
             }
+
+            // What plays over the desktop when the Peak is ready. A registry,
+            // so another animation is one more entry here and in ReadyOverlay.
+            Section {
+              glyph: ""
+              title: "READY ANIMATION"
+              trailing: root.readyAnimation === "off" ? "" : "Plays when it's ready"
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.controlGap
+
+                Segmented {
+                  width: parent.width - previewButton.width - parent.spacing
+                  compact: true
+                  options: root.readyAnimations
+                  value: root.readyAnimation
+                  onPicked: function(value) { root.setReadyAnimation(value) }
+                }
+
+                ActionButton {
+                  id: previewButton
+                  width: Style.space(80)
+                  implicitHeight: Style.space(24)
+                  label: "Preview"
+                  glyph: ""
+                  tint: Color.accent
+                  opacity: root.readyAnimation === "off" ? 0.4 : 1
+                  onActivated: root.previewReadyAnimation()
+                }
+              }
+            }
           }
 
           // ================================================== Lights
@@ -1851,6 +2522,14 @@ Panel {
 
             Section {
               title: "LEDS"
+              glyph: "\uf0eb"
+
+              LanternPreview {
+                width: parent.width
+                glow: root.cycleOn ? root.cycleNow : root.profileTint
+                level: root.brightnessLevel / 255
+                lit: root.lanternOn
+              }
 
               SwitchRow {
                 width: parent.width
@@ -1906,9 +2585,20 @@ Panel {
                 checked: root.stealthOn
                 onToggled: root.toggleStealth()
               }
+
+              StepperRow {
+                width: parent.width
+                label: "Turn off after"
+                valueText: root.formatTimeout(root.lanternTimeoutStops[root.lanternTimeoutStop])
+                canLower: root.lanternTimeoutStop > 0
+                canRaise: root.lanternTimeoutStop < root.lanternTimeoutStops.length - 1
+                onLower: root.stepLanternTimeout(-1)
+                onRaise: root.stepLanternTimeout(1)
+              }
             }
 
             Section {
+              glyph: "\uf1fc"
               title: root.activeProfile
                 ? "PROFILE LIGHT · " + String(root.cleanName(root.activeProfile.name) || ("Profile " + (root.currentProfile + 1))).toUpperCase()
                 : "PROFILE LIGHT"
@@ -1926,36 +2616,137 @@ Panel {
               Grid {
                 id: colorGrid
                 width: parent.width
-                columns: 8
+                columns: 9
                 rowSpacing: Style.space(6)
                 columnSpacing: Style.space(6)
-                readonly property real cell: (width - columnSpacing * 7) / 8
+                readonly property real cell: (width - columnSpacing * 8) / 9
 
                 Repeater {
                   model: root.colorPalette
 
                   Rectangle {
+                    id: swatchChip
                     required property var modelData
                     readonly property bool picked: root.activeProfile
-                      && String(root.profileSwatch(root.activeProfile.color)).toLowerCase() === String(modelData).toLowerCase()
+                      && String(root.profileColor(root.currentProfile, root.activeProfile.color)).toLowerCase() === String(modelData).toLowerCase()
                     width: colorGrid.cell
                     height: colorGrid.cell
                     radius: width / 2
                     color: String(modelData)
                     border.width: picked ? 2 : 1
-                    border.color: picked ? Color.accent : Util.alpha(root.foreground, 0.35)
+                    border.color: picked ? root.foreground : Util.alpha(root.foreground, 0.35)
+                    scale: swatchMouse.pressed ? 0.9 : (swatchMouse.containsMouse ? 1.15 : (picked ? 1.06 : 1))
+
+                    Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
+
+                    // Glow ring around the colour the profile wears.
+                    Rectangle {
+                      z: -1
+                      anchors.centerIn: parent
+                      width: parent.width + Style.space(8)
+                      height: width
+                      radius: width / 2
+                      color: Util.alpha(String(swatchChip.modelData), swatchChip.picked ? 0.3 : 0)
+
+                      Behavior on color { ColorAnimation { duration: 200 } }
+                    }
+
+                    Text {
+                      anchors.centerIn: parent
+                      visible: swatchChip.picked
+                      textFormat: Text.PlainText
+                      text: "\uf00c"
+                      color: root.inkOn(swatchChip.modelData)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
 
                     MouseArea {
+                      id: swatchMouse
                       anchors.fill: parent
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.applyLightColor(String(modelData))
+                      onClicked: {
+                        root.applyLightColor(String(swatchChip.modelData))
+                        if (root.pickerOpen) root.seedPicker(String(swatchChip.modelData))
+                      }
                     }
+                  }
+                }
+
+                // Rainbow chip that opens the colour wheel. Wears the custom
+                // colour (with a check) while the profile is on one.
+                Item {
+                  width: colorGrid.cell
+                  height: colorGrid.cell
+                  scale: customMouse.pressed ? 0.9 : (customMouse.containsMouse ? 1.15 : (root.pickerOpen || root.customLight ? 1.06 : 1))
+
+                  Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
+
+                  Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width + Style.space(8)
+                    height: width
+                    radius: width / 2
+                    color: Util.alpha(root.customLight ? root.activeLightHex : root.foreground, root.pickerOpen || root.customLight ? 0.3 : 0)
+
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                  }
+
+                  ConicalRing {
+                    anchors.fill: parent
+                    rotating: customMouse.containsMouse || root.pickerOpen
+                  }
+
+                  Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width * 0.56
+                    height: width
+                    radius: width / 2
+                    color: root.customLight ? root.activeLightHex : Color.background
+                    border.width: 1
+                    border.color: Util.alpha(root.foreground, 0.35)
+
+                    Text {
+                      anchors.centerIn: parent
+                      textFormat: Text.PlainText
+                      text: root.customLight ? "\uf00c" : (root.pickerOpen ? "\uf00d" : "+")
+                      color: root.customLight ? root.inkOn(root.activeLightHex) : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+                  }
+
+                  MouseArea {
+                    id: customMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.togglePicker()
                   }
                 }
               }
 
+              Loader {
+                width: parent.width
+                active: root.pickerOpen && root.onLights
+                visible: active
+                sourceComponent: ColorPicker {}
+                // Scroll just far enough to bring the whole picker into view.
+                onLoaded: Qt.callLater(function() {
+                  var bottom = pickerLoader.mapToItem(content, 0, pickerLoader.height).y
+                  scroller.contentY = Math.max(scroller.contentY,
+                    Math.min(bottom - scroller.height, scroller.contentHeight - scroller.height))
+                })
+                id: pickerLoader
+              }
+
             }
+
+            CycleSection {}
+
+            MyLightsSection {}
 
           }
 
@@ -1968,7 +2759,17 @@ Panel {
 
             Section {
               title: "BATTERY"
+              glyph: "\uf240"
               trailing: root.batteryHealthLabel !== "" ? root.batteryHealthLabel + " health" : ""
+
+              MeterBar {
+                width: parent.width
+                visible: root.batteryHealthLabel !== ""
+                value: parseFloat(root.batteryHealthLabel) / 100
+                fill: parseFloat(root.batteryHealthLabel) < 70 ? root.urgent
+                  : parseFloat(root.batteryHealthLabel) < 80 ? "#ffb347"
+                  : Color.accent
+              }
 
               SwitchRow {
                 width: parent.width
@@ -1999,7 +2800,18 @@ Panel {
 
             Section {
               title: "CLEANING"
+              glyph: "\uf0c3"
               trailing: root.cleanDue ? "Due" : root.cleanRemaining + " left"
+
+              // Fills up as dabs pile on; turns urgent once a clean is due.
+              MeterBar {
+                width: parent.width
+                value: root.cleanDue ? 1 : 1 - root.cleanRemaining / Math.max(1, root.cleanEvery)
+                fill: root.cleanDue ? root.urgent
+                  : (1 - root.cleanRemaining / Math.max(1, root.cleanEvery)) > 0.75 ? "#ffb347"
+                  : Color.accent
+                throb: root.cleanDue
+              }
 
               SwitchRow {
                 width: parent.width
@@ -2030,17 +2842,35 @@ Panel {
                 font.pixelSize: Style.font.caption
               }
 
-              ActionButton {
+              Item {
                 width: parent.width
-                label: "Mark cleaned"
-                emphasized: root.cleanDue
-                tint: root.cleanDue ? root.urgent : root.foreground
-                onActivated: root.markCleaned()
+                implicitHeight: cleanButton.implicitHeight
+
+                ActionButton {
+                  id: cleanButton
+                  width: parent.width
+                  label: "Mark cleaned"
+                  glyph: "\uf0d0"
+                  emphasized: root.cleanDue
+                  tint: root.cleanDue ? root.urgent : root.foreground
+                  onActivated: {
+                    root.markCleaned()
+                    cleanBurst.fire()
+                  }
+                }
+
+                Burst {
+                  id: cleanBurst
+                  anchors.centerIn: cleanButton
+                  width: cleanButton.height * 2
+                  height: width
+                }
               }
             }
 
             Section {
               title: "GOALS"
+              glyph: "\uf140"
               trailing: root.dailyLimit > 0
                 ? Number(root.telemetry.today || 0) + " of " + root.dailyLimit + " today"
                 : ""
@@ -2053,6 +2883,13 @@ Panel {
                 canRaise: root.dailyLimit < 50
                 onLower: root.stepDailyLimit(-1)
                 onRaise: root.stepDailyLimit(1)
+              }
+
+              MeterBar {
+                width: parent.width
+                visible: root.dailyLimit > 0
+                value: Number(root.telemetry.today || 0) / Math.max(1, root.dailyLimit)
+                fill: Number(root.telemetry.today || 0) >= root.dailyLimit ? root.urgent : Color.accent
               }
 
               Text {
@@ -2153,15 +2990,22 @@ Panel {
               spacing: Style.spacing.controlGap
               readonly property real cellWidth: (width - spacing * 3) / 4
 
-              SummaryCell { width: summaryRow.cellWidth; title: "Today"; value: root.countLabel(root.telemetry.today) }
-              SummaryCell { width: summaryRow.cellWidth; title: "Week"; value: root.countLabel(root.telemetry.this_week) }
-              SummaryCell { width: summaryRow.cellWidth; title: "Month"; value: root.countLabel(root.telemetry.this_month) }
-              SummaryCell { width: summaryRow.cellWidth; title: "Lifetime"; value: root.countLabel(root.statusData.total_dabs) }
+              SummaryCell { width: summaryRow.cellWidth; title: "Today"; glyph: "\uf185"; highlight: true; value: root.countLabel(root.telemetry.today) }
+              SummaryCell { width: summaryRow.cellWidth; title: "Week"; glyph: "\uf073"; value: root.countLabel(root.telemetry.this_week) }
+              SummaryCell { width: summaryRow.cellWidth; title: "Month"; glyph: "\uf274"; value: root.countLabel(root.telemetry.this_month) }
+              SummaryCell { width: summaryRow.cellWidth; title: "Lifetime"; glyph: "\uf091"; value: root.countLabel(root.statusData.total_dabs) }
             }
 
             Section {
+              id: dailySection
               title: "DAILY"
-              trailing: "Avg " + (Number(root.telemetry.avg_per_day) || 0) + "/day"
+              glyph: "\uf073"
+              // Hovering a bar swaps the average for that day's count.
+              property int hoverIndex: -1
+              trailing: hoverIndex >= 0 && hoverIndex < root.dailySeries.length
+                ? String(root.dailySeries[hoverIndex].day || "") + " \u00b7 " + (Number(root.dailySeries[hoverIndex].count) || 0)
+                  + ((Number(root.dailySeries[hoverIndex].count) || 0) === 1 ? " dab" : " dabs")
+                : "Avg " + (Number(root.telemetry.avg_per_day) || 0) + "/day"
 
               Item {
                 width: parent.width
@@ -2186,15 +3030,42 @@ Panel {
 
                       readonly property int count: Number(modelData.count) || 0
                       readonly property bool isToday: index === root.dailySeries.length - 1
+                      readonly property bool hovered: dailySection.hoverIndex === index
 
                       Rectangle {
+                        id: dayBar
                         width: parent.width
-                        height: Math.max(Style.space(2), parent.height * (parent.count / root.chartPeak))
+                        // Grows up from the baseline when the page opens.
+                        height: root.onUsageStats
+                          ? Math.max(Style.space(2), parent.height * (parent.count / root.chartPeak))
+                          : Style.space(2)
                         anchors.bottom: parent.bottom
                         radius: Math.min(2, Style.cornerRadius)
-                        color: parent.isToday ? Color.accent
-                          : parent.count > 0 ? Util.alpha(Color.accent, 0.6)
+                        readonly property color barTop: parent.hovered ? Qt.lighter(Color.accent, 1.35)
+                          : parent.isToday ? Color.accent
+                          : parent.count > 0 ? Util.alpha(Color.accent, 0.75)
                           : Util.alpha(root.foreground, 0.12)
+                        gradient: Gradient {
+                          GradientStop { position: 0.0; color: dayBar.barTop }
+                          GradientStop { position: 1.0; color: Util.alpha(dayBar.barTop, dayBar.barTop.a * 0.45) }
+                        }
+
+                        // Bars rise in a left-to-right ripple.
+                        Behavior on height {
+                          SequentialAnimation {
+                            PauseAnimation { duration: Math.min(dayBar.parent.index, 40) * 14 }
+                            NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
+                          }
+                        }
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onContainsMouseChanged: {
+                          if (containsMouse) dailySection.hoverIndex = parent.index
+                          else if (dailySection.hoverIndex === parent.index) dailySection.hoverIndex = -1
+                        }
                       }
                     }
                   }
@@ -2227,6 +3098,7 @@ Panel {
 
             Section {
               title: "HABITS"
+              glyph: "\uf005"
 
               Grid {
                 width: parent.width
@@ -2239,6 +3111,8 @@ Panel {
                 StatCard {
                   width: parent.cellWidth
                   title: "Streak"
+                  glyph: "\uf06d"
+                  glyphColor: (Number(root.telemetry.streak) || 0) > 0 ? root.urgent : root.dim
                   value: (Number(root.telemetry.streak) || 0) + "d"
                   meta: (Number(root.telemetry.streak_best) || 0) > 0
                     ? "Best " + Math.round(Number(root.telemetry.streak_best)) + "d"
@@ -2254,6 +3128,7 @@ Panel {
                         height: Style.space(8)
                         radius: width / 2
                         color: Number(modelData.count) > 0 ? Color.accent : "transparent"
+                        scale: modelData.today ? 1.2 : 1
                         border.width: modelData.today ? 1 : (Number(modelData.count) > 0 ? 0 : 1)
                         border.color: modelData.today ? Color.accent : Util.alpha(root.foreground, 0.3)
                       }
@@ -2264,6 +3139,7 @@ Panel {
                 StatCard {
                   width: parent.cellWidth
                   title: "Peak hour"
+                  glyph: "\uf017"
                   value: root.formatHour(root.telemetry.top_hour)
                   meta: Number(root.telemetry.top_hour_share) > 0
                     ? Math.round(Number(root.telemetry.top_hour_share) * 100) + "% of sessions"
@@ -2306,6 +3182,7 @@ Panel {
                 StatCard {
                   width: parent.cellWidth
                   title: "Avg duration"
+                  glyph: "\uf252"
                   value: root.formatDuration(root.telemetry.avg_time_s)
                   meta: root.telemetry.avg_time_s == null ? "Not enough data" : "Per session"
                 }
@@ -2313,6 +3190,7 @@ Panel {
                 StatCard {
                   width: parent.cellWidth
                   title: "Avg temperature"
+                  glyph: "\uf2c9"
                   value: root.formatAvgTemp(root.telemetry.avg_temp_f)
                   meta: root.telemetry.avg_temp_f == null ? "Not enough data" : "Per session"
                 }
@@ -2322,6 +3200,7 @@ Panel {
             Section {
               visible: root.profileUsage.length > 0
               title: "PROFILES"
+              glyph: "\uf0ca"
               trailing: "Last " + (Number(root.telemetry.profile_days) || 30) + " days"
 
               Repeater {
@@ -2376,10 +3255,20 @@ Panel {
                     color: Style.normalFillFor(root.foreground, Color.accent)
 
                     Rectangle {
-                      width: Math.max(parent.height, parent.width * Math.min(1, Number(usageRow.modelData.share) || 0))
+                      id: shareBar
+                      readonly property color tint: root.profileUsageColor(usageRow.modelData.index)
+                      width: root.onUsageStats
+                        ? Math.max(parent.height, parent.width * Math.min(1, Number(usageRow.modelData.share) || 0))
+                        : parent.height
                       height: parent.height
                       radius: height / 2
-                      color: root.profileUsageColor(usageRow.modelData.index)
+                      gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: Util.alpha(shareBar.tint, 0.45) }
+                        GradientStop { position: 1.0; color: shareBar.tint }
+                      }
+
+                      Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
                     }
                   }
                 }
@@ -2389,6 +3278,7 @@ Panel {
             Section {
               visible: root.colorSeries.length > 0
               title: "TOP COLORS"
+              glyph: "\uf1fb"
 
               Row {
                 width: parent.width
@@ -2397,10 +3287,12 @@ Panel {
                   model: root.colorSeries
                   Rectangle {
                     required property var modelData
-                    height: Style.space(8)
+                    height: Style.space(12)
                     width: Math.max(Style.space(16), (parent.width - parent.spacing * Math.max(0, root.colorSeries.length - 1)) / Math.max(1, root.colorSeries.length))
-                    radius: 2
+                    radius: height / 2
                     color: String(modelData)
+                    border.width: 1
+                    border.color: Util.alpha(root.foreground, 0.2)
                   }
                 }
               }
@@ -2432,6 +3324,7 @@ Panel {
 
             Section {
               title: "NAME"
+              glyph: "\uf02b"
 
               Item {
                 width: parent.width
@@ -2492,6 +3385,7 @@ Panel {
 
             Section {
               title: "DETAILS"
+              glyph: "\uf05a"
 
               InfoRow { width: parent.width; label: "Model"; value: (root.statusData.product && root.statusData.product.label) || "" }
               InfoRow { width: parent.width; label: "Chamber"; value: root.chamberLabel }
@@ -2515,6 +3409,7 @@ Panel {
 
             Section {
               title: "FAULT LOG"
+              glyph: "\uf071"
               trailing: root.faultLog !== null && !root.faultsLoading
                 ? root.faultLog.length + (root.faultLog.length === 1 ? " fault" : " faults")
                 : ""
@@ -2573,16 +3468,19 @@ Panel {
 
             Section {
               title: "SHOW ON DEVICE"
+              glyph: "\uf10b"
 
               ActionButton {
                 width: parent.width
                 label: "Battery level"
+                glyph: "\uf240"
                 onActivated: root.run("quickpuff battery")
               }
             }
 
             Section {
               title: "CONNECTION"
+              glyph: "\uf293"
 
               Text {
                 width: parent.width
@@ -2604,6 +3502,7 @@ Panel {
 
             Section {
               title: "POWER"
+              glyph: "\uf011"
 
               ActionButton {
                 width: parent.width
@@ -2622,6 +3521,7 @@ Panel {
 
               Section {
                 title: "STOCK HEAT"
+                glyph: "\uf2c9"
                 trailing: "Factory"
 
                 Grid {
@@ -2640,6 +3540,7 @@ Panel {
                       width: parent.cellWidth
                       value: root.formatTemp(modelData.temp_f, undefined)
                       title: modelData.color + " · " + modelData.name
+                      stripe: root.stockSwatches[modelData.color] || ""
                     }
                   }
                 }
@@ -2657,6 +3558,7 @@ Panel {
 
               Section {
                 title: "CARE"
+                glyph: "\uf004"
 
                 Repeater {
                   model: root.peakTips
@@ -2672,6 +3574,7 @@ Panel {
 
               Section {
                 title: "LIGHTS"
+                glyph: "\uf0eb"
 
                 Repeater {
                   model: root.peakLights
@@ -2706,17 +3609,20 @@ Panel {
     }
   }
 
-  // Circular progress track; children (the countdown) sit in the middle.
+  // Circular progress track; children (the countdown) sit in the middle. The
+  // arc runs from `startColor` to `fillColor` and carries a glowing head.
   component TimerRing: Item {
     id: ring
 
     property real progress: 0
     property color fillColor: Color.accent
-    property color trackColor: Util.alpha(root.foreground, 0.15)
+    property color startColor: fillColor
+    property color trackColor: Util.alpha(root.foreground, 0.12)
     property real thickness: Style.space(6)
 
     onProgressChanged: canvas.requestPaint()
     onFillColorChanged: canvas.requestPaint()
+    onStartColorChanged: canvas.requestPaint()
     onTrackColorChanged: canvas.requestPaint()
 
     Canvas {
@@ -2729,18 +3635,1617 @@ Panel {
         ctx.reset()
         var cx = width / 2
         var cy = height / 2
-        var r = Math.min(width, height) / 2 - ring.thickness / 2
+        var r = Math.min(width, height) / 2 - ring.thickness
         ctx.lineWidth = ring.thickness
-        ctx.lineCap = Style.cornerRadius > 0 ? "round" : "butt"
+        ctx.lineCap = "round"
         ctx.strokeStyle = ring.trackColor
         ctx.beginPath()
         ctx.arc(cx, cy, r, 0, Math.PI * 2)
         ctx.stroke()
         if (ring.progress <= 0) return
-        ctx.strokeStyle = ring.fillColor
+        var end = -Math.PI / 2 + Math.PI * 2 * ring.progress
+        var grad = ctx.createLinearGradient(0, 0, width, height)
+        grad.addColorStop(0, ring.startColor)
+        grad.addColorStop(1, ring.fillColor)
+        ctx.strokeStyle = grad
         ctx.beginPath()
-        ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ring.progress)
+        ctx.arc(cx, cy, r, -Math.PI / 2, end)
         ctx.stroke()
+        var hx = cx + r * Math.cos(end)
+        var hy = cy + r * Math.sin(end)
+        ctx.fillStyle = Util.alpha(ring.fillColor, 0.3)
+        ctx.beginPath()
+        ctx.arc(hx, hy, ring.thickness * 1.1, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = ring.fillColor
+        ctx.beginPath()
+        ctx.arc(hx, hy, ring.thickness * 0.6, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+
+  // The hero's centrepiece: a ring that fills as the chamber climbs toward
+  // the profile's target, a flame that flickers while lit, wisps of vapour
+  // drifting up while heating, and sleepy z's while the Peak is away.
+  component HeatOrb: Item {
+    id: orb
+
+    property real progress: 0
+    property color tint: Color.accent
+    property bool lit: false
+    property bool climbing: false
+    property bool sleeping: false
+    readonly property bool live: root.opened
+
+    // Soft backlight that swells with the heat.
+    Rectangle {
+      anchors.centerIn: parent
+      width: parent.width * 0.86
+      height: width
+      radius: width / 2
+      color: Util.alpha(orb.tint, orb.lit ? 0.2 : 0.08)
+
+      Behavior on color { ColorAnimation { duration: 400 } }
+
+      SequentialAnimation on scale {
+        running: orb.lit && orb.live
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        NumberAnimation { from: 1.0; to: 1.12; duration: 1100; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 1.12; to: 1.0; duration: 1100; easing.type: Easing.InOutSine }
+      }
+    }
+
+    TimerRing {
+      anchors.fill: parent
+      thickness: Style.space(4)
+      progress: orb.progress
+      fillColor: orb.tint
+      startColor: Color.accent
+      trackColor: Util.alpha(root.foreground, 0.08)
+
+      Behavior on progress { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
+    }
+
+    // Vapour wisps, only while heating.
+    Repeater {
+      model: 4
+
+      Rectangle {
+        id: wisp
+        required property int index
+        readonly property real drift: (index % 2 === 0 ? -1 : 1) * orb.width * (0.08 + 0.04 * index)
+        x: orb.width / 2 - width / 2
+        y: orb.height * 0.34
+        width: orb.width * 0.13
+        height: width
+        radius: width / 2
+        color: Util.alpha(root.foreground, 0.5)
+        opacity: 0
+        visible: orb.lit
+
+        SequentialAnimation {
+          running: orb.lit && orb.live
+          loops: Animation.Infinite
+          PauseAnimation { duration: wisp.index * 420 }
+          ParallelAnimation {
+            NumberAnimation { target: wisp; property: "y"; from: orb.height * 0.34; to: -orb.height * 0.05; duration: 1600; easing.type: Easing.OutSine }
+            NumberAnimation { target: wisp; property: "x"; from: orb.width / 2 - wisp.width / 2; to: orb.width / 2 - wisp.width / 2 + wisp.drift; duration: 1600; easing.type: Easing.InOutSine }
+            NumberAnimation { target: wisp; property: "scale"; from: 0.5; to: 1.6; duration: 1600 }
+            SequentialAnimation {
+              NumberAnimation { target: wisp; property: "opacity"; from: 0; to: 0.55; duration: 300 }
+              NumberAnimation { target: wisp; property: "opacity"; to: 0; duration: 1300; easing.type: Easing.InQuad }
+            }
+          }
+        }
+      }
+    }
+
+    Text {
+      id: flame
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: orb.sleeping ? "" : ""
+      color: orb.sleeping ? root.dim : orb.tint
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.display
+      transformOrigin: Item.Bottom
+
+      Behavior on color { ColorAnimation { duration: 300 } }
+
+      // A lively flicker while lit, a slow breath while climbing to temp.
+      SequentialAnimation {
+        running: orb.lit && orb.live
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        ParallelAnimation {
+          NumberAnimation { target: flame; property: "scale"; to: 1.1; duration: 180; easing.type: Easing.OutQuad }
+          NumberAnimation { target: flame; property: "rotation"; to: -5; duration: 180 }
+        }
+        ParallelAnimation {
+          NumberAnimation { target: flame; property: "scale"; to: 0.95; duration: 240; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: flame; property: "rotation"; to: 4; duration: 240 }
+        }
+        ParallelAnimation {
+          NumberAnimation { target: flame; property: "scale"; to: 1.05; duration: 200 }
+          NumberAnimation { target: flame; property: "rotation"; to: -2; duration: 200 }
+        }
+        ParallelAnimation {
+          NumberAnimation { target: flame; property: "scale"; to: 1.0; duration: 260; easing.type: Easing.OutQuad }
+          NumberAnimation { target: flame; property: "rotation"; to: 0; duration: 260 }
+        }
+      }
+
+      SequentialAnimation on opacity {
+        running: orb.climbing && orb.live
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        NumberAnimation { from: 1.0; to: 0.55; duration: 900; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 0.55; to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+      }
+    }
+
+    // Sleepy z's drifting off to the upper right.
+    Repeater {
+      model: 3
+
+      Text {
+        id: zee
+        required property int index
+        textFormat: Text.PlainText
+        text: "z"
+        visible: orb.sleeping
+        x: orb.width * 0.62
+        y: orb.height * 0.3
+        opacity: 0
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption + zee.index * 2
+        font.bold: true
+
+        SequentialAnimation {
+          running: orb.sleeping && orb.live
+          loops: Animation.Infinite
+          PauseAnimation { duration: zee.index * 700 }
+          ParallelAnimation {
+            NumberAnimation { target: zee; property: "x"; from: orb.width * 0.6; to: orb.width * 0.95; duration: 2100; easing.type: Easing.OutSine }
+            NumberAnimation { target: zee; property: "y"; from: orb.height * 0.3; to: -orb.height * 0.05; duration: 2100; easing.type: Easing.OutSine }
+            SequentialAnimation {
+              NumberAnimation { target: zee; property: "opacity"; from: 0; to: 0.9; duration: 400 }
+              NumberAnimation { target: zee; property: "opacity"; to: 0; duration: 1700 }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Confetti pop. `fire()` flings a ring of dots outward from the centre.
+  component Burst: Item {
+    id: burst
+
+    property real t: 0
+    readonly property var colors: [Color.accent, root.urgent, root.foreground, root.profileTint]
+
+    function fire() { burstAnim.restart() }
+
+    visible: burstAnim.running
+
+    NumberAnimation {
+      id: burstAnim
+      target: burst
+      property: "t"
+      from: 0
+      to: 1
+      duration: 750
+      easing.type: Easing.OutCubic
+    }
+
+    Repeater {
+      model: 14
+
+      Rectangle {
+        required property int index
+        readonly property real angle: index / 14 * Math.PI * 2 + (index % 2) * 0.2
+        readonly property real reach: burst.width * (0.55 + (index % 3) * 0.12) * burst.t
+        width: Style.space(index % 3 === 0 ? 5 : 4)
+        height: width
+        radius: index % 2 === 0 ? width / 2 : 1
+        rotation: burst.t * 180
+        x: burst.width / 2 + Math.cos(angle) * reach - width / 2
+        y: burst.height / 2 + Math.sin(angle) * reach - height / 2
+        color: burst.colors[index % burst.colors.length]
+        opacity: 1 - burst.t * burst.t
+      }
+    }
+  }
+
+  // Mini battery: a body that fills to the charge, a nub, and the label.
+  component BatteryPill: Row {
+    id: pill
+
+    readonly property real level: Math.max(0, Math.min(1, Number(root.statusData.battery) / 100 || 0))
+    readonly property color fill: level <= 0.15 && !root.pluggedIn ? root.urgent
+      : root.pluggedIn ? Color.accent
+      : Util.alpha(root.foreground, 0.85)
+
+    spacing: Style.space(5)
+
+    Row {
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: 1
+
+      Rectangle {
+        width: Style.space(22)
+        height: Style.space(11)
+        radius: Math.min(3, Style.space(3))
+        color: "transparent"
+        border.width: 1
+        border.color: Util.alpha(root.foreground, 0.55)
+
+        Rectangle {
+          anchors.left: parent.left
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          anchors.margins: 2
+          width: Math.max(0, (parent.width - 4) * pill.level)
+          radius: 1
+          color: pill.fill
+
+          Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+
+          // Shimmers while it's taking a charge.
+          SequentialAnimation on opacity {
+            running: root.pluggedIn && pill.level < 1 && root.opened
+            loops: Animation.Infinite
+            alwaysRunToEnd: true
+            NumberAnimation { to: 0.45; duration: 800; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0; duration: 800; easing.type: Easing.InOutSine }
+          }
+        }
+      }
+
+      Rectangle {
+        anchors.verticalCenter: parent.verticalCenter
+        width: 2
+        height: Style.space(5)
+        radius: 1
+        color: Util.alpha(root.foreground, 0.55)
+      }
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: root.batteryLabel
+      color: pill.level <= 0.15 && !root.pluggedIn ? root.urgent : root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.bold: true
+    }
+  }
+
+  // A glowing orb previewing the lantern: the profile's colour at the chosen
+  // brightness, with ripples spreading out while the LEDs are on.
+  component LanternPreview: Item {
+    id: lantern
+
+    property color glow: Color.accent
+    property real level: 1
+    property bool lit: true
+    readonly property real strength: lit ? 0.3 + 0.7 * level : 0.12
+
+    implicitHeight: Style.space(78)
+
+    Repeater {
+      model: 2
+
+      Rectangle {
+        id: ripple
+        required property int index
+        anchors.centerIn: parent
+        width: lantern.height * 0.5
+        height: width
+        radius: width / 2
+        color: "transparent"
+        border.width: 2
+        border.color: Util.alpha(lantern.glow, 0.6 * lantern.strength)
+        opacity: 0
+        visible: lantern.lit
+
+        SequentialAnimation {
+          running: lantern.lit && root.opened && root.onLights
+          loops: Animation.Infinite
+          PauseAnimation { duration: ripple.index * 1100 }
+          ParallelAnimation {
+            NumberAnimation { target: ripple; property: "scale"; from: 1; to: 1.9; duration: 2200; easing.type: Easing.OutSine }
+            NumberAnimation { target: ripple; property: "opacity"; from: 1; to: 0; duration: 2200; easing.type: Easing.InQuad }
+          }
+        }
+      }
+    }
+
+    Rectangle {
+      anchors.centerIn: parent
+      width: lantern.height * 0.78
+      height: width
+      radius: width / 2
+      color: Util.alpha(lantern.glow, 0.14 * lantern.strength)
+
+      Behavior on color { ColorAnimation { duration: 300 } }
+
+      // A lit lantern breathes; an off one holds still.
+      SequentialAnimation on scale {
+        running: lantern.lit && root.opened && root.onLights
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        NumberAnimation { to: 1.1; duration: 1800; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 1.0; duration: 1800; easing.type: Easing.InOutSine }
+      }
+    }
+
+    Rectangle {
+      id: lanternCore
+      anchors.centerIn: parent
+      width: lantern.height * 0.46
+      height: width
+      radius: width / 2
+      color: Util.alpha(lantern.glow, lantern.strength)
+      border.width: 1
+      border.color: Util.alpha(root.foreground, 0.25)
+
+      Behavior on color { ColorAnimation { duration: 300 } }
+
+      Text {
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: lantern.lit ? Math.round(lantern.level * 100) + "%" : "off"
+        color: lantern.lit ? root.inkOn(lantern.glow) : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+    }
+  }
+
+  // Thin rounded progress bar with a gradient fill that eases to its value.
+  component MeterBar: Rectangle {
+    id: meter
+
+    property real value: 0
+    property color fill: Color.accent
+    property bool throb: false
+    readonly property real clamped: isFinite(value) ? Math.max(0, Math.min(1, value)) : 0
+
+    implicitHeight: Style.space(6)
+    height: implicitHeight
+    radius: height / 2
+    color: Util.alpha(root.foreground, 0.1)
+
+    Rectangle {
+      height: parent.height
+      radius: parent.radius
+      width: meter.clamped > 0 ? Math.max(parent.height, parent.width * meter.clamped) : 0
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0.0; color: Util.alpha(meter.fill, 0.45) }
+        GradientStop { position: 1.0; color: meter.fill }
+      }
+
+      Behavior on width { NumberAnimation { duration: 550; easing.type: Easing.OutCubic } }
+
+      SequentialAnimation on opacity {
+        running: meter.throb && root.opened
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        NumberAnimation { to: 0.5; duration: 700; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
+      }
+    }
+  }
+
+  // A hue ring painted once, used for the "custom colour" chip.
+  component ConicalRing: Canvas {
+    id: cring
+
+    property bool rotating: false
+
+    onWidthChanged: requestPaint()
+    onHeightChanged: requestPaint()
+    onPaint: {
+      var ctx = getContext("2d")
+      ctx.reset()
+      var r = Math.min(width, height) / 2
+      var g = ctx.createConicalGradient(width / 2, height / 2, 0)
+      var stops = ["#ff0000", "#ffff00", "#00ff00", "#00ffff", "#0000ff", "#ff00ff", "#ff0000"]
+      for (var i = 0; i < stops.length; i++) g.addColorStop(i / (stops.length - 1), stops[i])
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(width / 2, height / 2, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    RotationAnimation on rotation {
+      running: cring.rotating && root.opened
+      loops: Animation.Infinite
+      from: 0
+      to: 360
+      duration: 3000
+    }
+  }
+
+  // The custom colour picker: a hue/saturation wheel, a brightness slider,
+  // a live preview and a hex field. Releasing the wheel or the slider sends
+  // the colour to the Peak; so does Enter in the hex field.
+  component ColorPicker: BorderSurface {
+    id: picker
+
+    radius: Style.cornerRadius
+    color: Util.alpha(root.pickColor, 0.06)
+    borderSpec: Border.flat(Util.alpha(root.pickColor, 0.45), Math.max(1, Style.normalBorderWidth))
+    implicitHeight: pickerRow.implicitHeight + Style.spacing.controlPaddingY * 4
+
+    Behavior on color { ColorAnimation { duration: 120 } }
+
+    Row {
+      id: pickerRow
+      anchors.centerIn: parent
+      width: parent.width - Style.spacing.controlPaddingX * 2
+      spacing: Style.space(14)
+
+      // ----- Wheel -----
+      Item {
+        id: wheel
+        width: Style.space(140)
+        height: width
+        anchors.verticalCenter: parent.verticalCenter
+        readonly property real radius: width / 2
+
+        // Glow in the picked colour behind the wheel.
+        Rectangle {
+          anchors.centerIn: parent
+          width: parent.width + Style.space(10)
+          height: width
+          radius: width / 2
+          color: Util.alpha(root.pickColor, 0.22)
+        }
+
+        // Hue runs round the wheel (red at 3 o'clock, counter-clockwise) and
+        // saturation out from the white centre, at full value; the slider
+        // darkens it. Linear RGB blends between pure hues, and from white to
+        // a hue, are exactly HSV at full value, so the colour under the
+        // cursor is the one the maths below picks.
+        Canvas {
+          id: wheelCanvas
+          anchors.fill: parent
+          onWidthChanged: requestPaint()
+          onHeightChanged: requestPaint()
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var cx = width / 2, cy = height / 2, R = Math.min(width, height) / 2
+            var hues = ["#ff0000", "#ffff00", "#00ff00", "#00ffff", "#0000ff", "#ff00ff", "#ff0000"]
+            var cone = ctx.createConicalGradient(cx, cy, 0)
+            for (var i = 0; i < hues.length; i++) cone.addColorStop(i / (hues.length - 1), hues[i])
+            ctx.fillStyle = cone
+            ctx.beginPath()
+            ctx.arc(cx, cy, R, 0, Math.PI * 2)
+            ctx.fill()
+            var white = ctx.createRadialGradient(cx, cy, 0, cx, cy, R)
+            white.addColorStop(0, "rgba(255,255,255,1)")
+            white.addColorStop(1, "rgba(255,255,255,0)")
+            ctx.fillStyle = white
+            ctx.beginPath()
+            ctx.arc(cx, cy, R, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+
+        // Darkens the whole wheel to match the brightness slider.
+        Rectangle {
+          anchors.fill: parent
+          radius: width / 2
+          color: "black"
+          opacity: 1 - root.pickV
+        }
+
+        // Cursor.
+        Rectangle {
+          id: wheelKnob
+          readonly property real angle: root.pickH * Math.PI * 2
+          readonly property real reach: root.pickS * wheel.radius
+          width: Style.space(wheelMouse.pressed ? 20 : 16)
+          height: width
+          radius: width / 2
+          x: wheel.radius + Math.cos(angle) * reach - width / 2
+          y: wheel.radius - Math.sin(angle) * reach - height / 2
+          color: root.pickColor
+          border.width: 2
+          border.color: "white"
+
+          Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutBack } }
+
+          Rectangle {
+            anchors.fill: parent
+            anchors.margins: -1
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: Util.alpha("black", 0.5)
+          }
+        }
+
+        MouseArea {
+          id: wheelMouse
+          anchors.fill: parent
+          cursorShape: Qt.CrossCursor
+          preventStealing: true
+
+          function pick(mx, my) {
+            var dx = mx - wheel.radius
+            var dy = my - wheel.radius
+            var hue = Math.atan2(-dy, dx) / (Math.PI * 2)
+            if (hue < 0) hue += 1
+            root.pickH = hue
+            root.pickS = Math.min(1, Math.sqrt(dx * dx + dy * dy) / wheel.radius)
+            // A dark colour picked off the wheel is almost never what's meant.
+            if (root.pickV < 0.15) root.pickV = 1
+          }
+
+          onPressed: function(mouse) { pick(mouse.x, mouse.y) }
+          onPositionChanged: function(mouse) { if (pressed) pick(mouse.x, mouse.y) }
+          onReleased: root.schedulePickApply()
+        }
+      }
+
+      // ----- Preview, brightness, hex -----
+      Column {
+        width: pickerRow.width - wheel.width - pickerRow.spacing
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(10)
+
+        Row {
+          spacing: Style.space(10)
+
+          Rectangle {
+            width: Style.space(38)
+            height: width
+            radius: width / 2
+            color: root.pickColor
+            border.width: 1
+            border.color: Util.alpha(root.foreground, 0.35)
+
+            Rectangle {
+              z: -1
+              anchors.centerIn: parent
+              width: parent.width + Style.space(10)
+              height: width
+              radius: width / 2
+              color: Util.alpha(root.pickColor, 0.3)
+            }
+          }
+
+          Column {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(2)
+
+            Text {
+              textFormat: Text.PlainText
+              text: root.pickHex.toUpperCase()
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: {
+                var c = root.pickColor
+                return Math.round(c.r * 255) + " · " + Math.round(c.g * 255) + " · " + Math.round(c.b * 255)
+              }
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        // Brightness (HSV value) slider over a black-to-colour gradient.
+        Column {
+          width: parent.width
+          spacing: Style.space(4)
+
+          Item {
+            width: parent.width
+            implicitHeight: valueLabel.implicitHeight
+
+            Text {
+              id: valueLabel
+              textFormat: Text.PlainText
+              text: "Brightness"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            Text {
+              anchors.right: parent.right
+              textFormat: Text.PlainText
+              text: Math.round(root.pickV * 100) + "%"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          Item {
+            id: valueTrack
+            width: parent.width
+            height: Style.space(16)
+
+            Rectangle {
+              anchors.fill: parent
+              anchors.topMargin: Style.space(3)
+              anchors.bottomMargin: Style.space(3)
+              radius: height / 2
+              border.width: 1
+              border.color: Util.alpha(root.foreground, 0.2)
+              gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "black" }
+                GradientStop { position: 1.0; color: Qt.hsva(root.pickH, root.pickS, 1, 1) }
+              }
+            }
+
+            Rectangle {
+              width: Style.space(valueMouse.pressed ? 18 : 14)
+              height: width
+              radius: width / 2
+              anchors.verticalCenter: parent.verticalCenter
+              x: root.pickV * (valueTrack.width - width)
+              color: root.pickColor
+              border.width: 2
+              border.color: "white"
+
+              Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutBack } }
+            }
+
+            MouseArea {
+              id: valueMouse
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              preventStealing: true
+
+              function set(mx) { root.pickV = Math.max(0, Math.min(1, mx / valueTrack.width)) }
+
+              onPressed: function(mouse) { set(mouse.x) }
+              onPositionChanged: function(mouse) { if (pressed) set(mouse.x) }
+              onReleased: root.schedulePickApply()
+            }
+          }
+        }
+
+        // Exact colour by hex; Enter applies it.
+        TextField {
+          id: hexField
+          width: parent.width
+          foreground: root.foreground
+          accent: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          horizontalPadding: Style.spacing.xs
+          maximumLength: 7
+          placeholderText: "#rrggbb"
+
+          property bool bad: false
+
+          // Follows the wheel until you start typing in it.
+          Binding on text {
+            when: !hexField.activeFocus
+            value: root.pickHex.toUpperCase()
+          }
+
+          onTextChanged: bad = false
+          onAccepted: {
+            if (root.applyTypedHex(text)) {
+              bad = false
+              if (keyCatcher) keyCatcher.forceActiveFocus()
+            } else {
+              bad = true
+            }
+          }
+          Keys.onEscapePressed: function(event) {
+            if (keyCatcher) keyCatcher.forceActiveFocus()
+            event.accepted = true
+          }
+        }
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          text: hexField.bad ? "That's not a colour. Try #ff6a1a."
+            : root.cycleOn ? "Cycling: choose a colour here, then + in Color cycle adds it."
+            : "Let go of the wheel or press Enter to send it to the Peak."
+          color: hexField.bad ? root.urgent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+    }
+  }
+
+  // Colour cycle for the active profile: on/off, a live preview of the
+  // animation, the style, palettes, your own colours and the speed.
+  component CycleSection: Section {
+    id: cycleSection
+
+    glyph: ""
+    title: root.activeProfile
+      ? "COLOR CYCLE · " + String(root.cleanName(root.activeProfile.name) || ("Profile " + (root.currentProfile + 1))).toUpperCase()
+      : "COLOR CYCLE"
+    trailing: root.cycleOn ? "On the Peak" : ""
+
+    SwitchRow {
+      width: parent.width
+      label: "Cycle colors"
+      checked: root.cycleOn
+      onToggled: root.setCycleOn(!root.cycleOn)
+    }
+
+    // A strip of LEDs acting out the chosen style at roughly its pace.
+    Item {
+      id: ledStrip
+      width: parent.width
+      height: Style.space(26)
+      readonly property int leds: 14
+      readonly property int n: Math.max(1, root.cycleColors.length)
+      opacity: root.cycleOn ? 1 : 0.55
+
+      Behavior on opacity { NumberAnimation { duration: 250 } }
+
+      Row {
+        id: ledRow
+        anchors.centerIn: parent
+        spacing: Style.space(5)
+
+        SequentialAnimation on opacity {
+          running: root.cycleStyle === "breathe" && root.opened && root.onLights
+          loops: Animation.Infinite
+          alwaysRunToEnd: true
+          NumberAnimation { to: 0.25; duration: root.cycleStepMs; easing.type: Easing.InOutSine }
+          NumberAnimation { to: 1.0; duration: root.cycleStepMs; easing.type: Easing.InOutSine }
+        }
+
+        Repeater {
+          model: ledStrip.leds
+
+          Rectangle {
+            required property int index
+            readonly property int slot: {
+              var t = root.cycleTick, i = index, n = ledStrip.n, L = ledStrip.leds
+              switch (root.cycleStyle) {
+              case "spin": return Math.floor(i * n / L + t) % n
+              case "disco": return (i * 7 + t * 3 + (i % 3) * t) % n
+              // Two halves, each walking the palette.
+              case "split": return (t + (i < L / 2 ? 0 : Math.floor(n / 2))) % n
+              // A slow wave of colour rolling one way.
+              case "fill": return Math.floor(t / 2 + (L - i) * n / L) % n
+              // Big slow blobs drifting.
+              case "lava": return Math.floor((Math.sin(i * 0.5 + t * 0.35) + 1) / 2 * n) % n
+              // Scattered sparkles.
+              case "confetti": return ((i * 13 + t * 7) ^ (t * 3)) % n
+              default: return t % n
+              }
+            }
+            readonly property color led: root.cycleColors.length ? root.cycleColors[slot] : Color.accent
+            width: (ledStrip.width - ledRow.spacing * (ledStrip.leds - 1)) / ledStrip.leds
+            height: Style.space(14)
+            radius: height / 2
+            color: led
+
+            Behavior on color {
+              ColorAnimation {
+                duration: ["fade", "breathe", "lava", "fill"].indexOf(root.cycleStyle) >= 0
+                  ? root.cycleStepMs * 0.95 : 140
+              }
+            }
+
+            Rectangle {
+              z: -1
+              anchors.centerIn: parent
+              width: parent.width + Style.space(6)
+              height: parent.height + Style.space(6)
+              radius: height / 2
+              color: Util.alpha(parent.led, 0.3)
+            }
+          }
+        }
+      }
+    }
+
+    // The app's animations, two rows of four.
+    Grid {
+      id: styleGrid
+      width: parent.width
+      columns: 4
+      rowSpacing: Style.space(4)
+      columnSpacing: Style.space(4)
+      readonly property real cell: (width - columnSpacing * 3) / 4
+
+      Repeater {
+        model: root.cycleStyles
+
+        Rectangle {
+          id: styleChip
+          required property var modelData
+          readonly property bool picked: root.cycleStyle === modelData.value
+          width: styleGrid.cell
+          height: Style.space(40)
+          radius: Style.cornerRadius
+          color: picked ? Util.alpha(Color.accent, 0.2)
+            : styleMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent)
+            : Style.normalFillFor(root.foreground, Color.accent)
+          border.width: 1
+          border.color: picked ? Color.accent : Util.alpha(root.foreground, 0.12)
+          scale: styleMouse.pressed ? 0.93 : 1
+
+          Behavior on color { ColorAnimation { duration: 140 } }
+          Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
+
+          Column {
+            anchors.centerIn: parent
+            spacing: Style.space(2)
+
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              text: styleChip.modelData.glyph
+              color: styleChip.picked ? Color.accent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              text: styleChip.modelData.label
+              color: styleChip.picked ? root.foreground : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: styleChip.picked
+            }
+          }
+
+          MouseArea {
+            id: styleMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.pickCycleStyle(styleChip.modelData.value)
+          }
+        }
+      }
+    }
+
+    // Palette presets as gradient pills.
+    Grid {
+      id: paletteGrid
+      width: parent.width
+      columns: 3
+      rowSpacing: Style.space(6)
+      columnSpacing: Style.space(6)
+      readonly property real cell: (width - columnSpacing * 2) / 3
+
+      Repeater {
+        model: root.cyclePalettes
+
+        Rectangle {
+          id: paletteChip
+          required property var modelData
+          readonly property bool picked: {
+            var a = root.cycleColors, b = modelData.colors
+            if (a.length !== b.length) return false
+            for (var i = 0; i < a.length; i++) if (String(a[i]).toLowerCase() !== b[i]) return false
+            return true
+          }
+          width: paletteGrid.cell
+          height: Style.space(26)
+          radius: height / 2
+          border.width: picked ? 2 : 1
+          border.color: picked ? root.foreground : Util.alpha(root.foreground, 0.25)
+          scale: paletteMouse.pressed ? 0.94 : (paletteMouse.containsMouse ? 1.05 : 1)
+          gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: paletteChip.modelData.colors[0] }
+            GradientStop { position: 0.5; color: paletteChip.modelData.colors[Math.floor(paletteChip.modelData.colors.length / 2)] }
+            GradientStop { position: 1.0; color: paletteChip.modelData.colors[paletteChip.modelData.colors.length - 1] }
+          }
+
+          Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: paletteLabel.implicitWidth + Style.space(12)
+            height: paletteLabel.implicitHeight + Style.space(2)
+            radius: height / 2
+            color: Util.alpha("black", 0.45)
+
+            Text {
+              id: paletteLabel
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: (paletteChip.picked ? " " : "") + paletteChip.modelData.name
+              color: "white"
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+          }
+
+          MouseArea {
+            id: paletteMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.pickCyclePalette(paletteChip.modelData.colors)
+          }
+        }
+      }
+    }
+
+    // Your colours: tap one to drop it, + adds the colour on the wheel.
+    Item {
+      width: parent.width
+      implicitHeight: yourRow.height + yourHint.implicitHeight + Style.space(6)
+
+      Row {
+        id: yourRow
+        spacing: Style.space(8)
+        height: Style.space(28)
+
+        Repeater {
+          model: root.cycleColors
+
+          Rectangle {
+            id: cycleDot
+            required property var modelData
+            required property int index
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.space(26)
+            height: width
+            radius: width / 2
+            color: String(modelData)
+            border.width: root.cycleColors[root.cycleTick % root.cycleColors.length] === modelData && root.cycleOn ? 2 : 1
+            border.color: border.width > 1 ? root.foreground : Util.alpha(root.foreground, 0.3)
+            scale: dotMouse.containsMouse ? 1.12 : 1
+
+            Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
+
+            Text {
+              anchors.centerIn: parent
+              visible: dotMouse.containsMouse && root.cycleColors.length > 1
+              textFormat: Text.PlainText
+              text: ""
+              color: root.inkOn(cycleDot.modelData)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: dotMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: root.cycleColors.length > 1 ? Qt.PointingHandCursor : Qt.ArrowCursor
+              onClicked: root.removeCycleColor(cycleDot.index)
+            }
+          }
+        }
+
+        Rectangle {
+          visible: root.cycleColors.length < root.maxCycleColors
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(26)
+          height: width
+          radius: width / 2
+          color: addMouse.containsMouse ? Util.alpha(root.foreground, 0.12) : "transparent"
+          border.width: 1
+          border.color: Util.alpha(root.foreground, 0.45)
+
+          Text {
+            anchors.centerIn: parent
+            textFormat: Text.PlainText
+            text: "+"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          MouseArea {
+            id: addMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              if (root.pickerOpen) {
+                root.addCycleColor(root.pickHex)
+              } else {
+                // Open the wheel so the next colour can be picked exactly.
+                root.togglePicker()
+              }
+            }
+          }
+        }
+      }
+
+      Text {
+        id: yourHint
+        anchors.top: yourRow.bottom
+        anchors.topMargin: Style.space(6)
+        width: parent.width
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        text: root.pickerOpen
+          ? "+ adds the colour on the wheel. Tap a colour to drop it."
+          : "+ opens the colour wheel. Tap a colour to drop it."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    Column {
+      width: parent.width
+      spacing: Style.space(4)
+
+      Item {
+        width: parent.width
+        implicitHeight: speedLabel.implicitHeight
+
+        Text {
+          id: speedLabel
+          textFormat: Text.PlainText
+          text: "Speed"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Text {
+          anchors.right: parent.right
+          textFormat: Text.PlainText
+          text: root.cycleTempo < 0.35 ? "Chill" : root.cycleTempo < 0.7 ? "Groovy" : "Rave"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+
+      PanelSlider {
+        width: parent.width
+        bar: root.bar
+        minimum: 10
+        maximum: 100
+        step: 5
+        integer: true
+        value: Math.round(root.cycleTempo * 100)
+        onReleased: function(v) { root.setCycleTempo(v / 100) }
+      }
+    }
+
+    SwitchRow {
+      width: parent.width
+      label: "React to inhales"
+      checked: root.cycleInhale
+      onToggled: root.toggleCycleInhale()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: root.cycleOn
+        ? "The Peak runs the animation itself, even when this computer is away. Turn the LED on above to see it."
+        : "Pick a style and colours, then switch it on."
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  // Lights saved off the Peak. Exclusive moods (Puffcon, Plasma, ...) only
+  // come from Puffco's servers to a signed-in app, so the way to keep one is
+  // to put it on a profile in the app once and save it here.
+  component MyLightsSection: Section {
+    id: lightsSection
+
+    glyph: ""
+    title: "MY LIGHTS"
+    trailing: root.savedLights.length ? root.savedLights.length + " saved" : ""
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: root.savedLights.length
+        ? "Tap one to put it on " + (root.activeProfile ? root.cleanName(root.activeProfile.name) || "this profile" : "this profile") + "."
+        : "Exclusive moods like Puffcon only come from the Puffco app. To keep one: Disconnect here (Device tab), set the mood on a profile in the app, reconnect, then save it below."
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    Repeater {
+      model: root.savedLights
+
+      BorderSurface {
+        id: lightRow
+        required property var modelData
+        readonly property bool worn: root.wornLightId === modelData.id
+        readonly property bool renaming: root.renamingLight === modelData.id
+        readonly property bool confirming: root.confirmDeleteLight === modelData.id
+        readonly property var colors: modelData.colors || []
+
+        width: parent ? parent.width : 0
+        implicitHeight: Style.space(44)
+        radius: Style.cornerRadius
+        color: rowMouse.pressed ? Util.alpha(Color.accent, 0.22)
+          : worn ? Util.alpha(Color.accent, 0.14)
+          : rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent)
+          : Style.normalFillFor(root.foreground, Color.accent)
+        borderSpec: worn
+          ? Border.flat(Color.accent, Math.max(1, Style.normalBorderWidth))
+          : Border.controlSpec(rowMouse.containsMouse ? "hover-cursor" : "normal", root.foreground, Color.accent)
+
+        Behavior on color { ColorAnimation { duration: 140 } }
+
+        MouseArea {
+          id: rowMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          enabled: !lightRow.renaming
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.applySavedLight(lightRow.modelData.id)
+        }
+
+        // The light's colours as a pill, or a rainbow when it keeps them to itself.
+        Item {
+          id: lightSwatch
+          anchors.left: parent.left
+          anchors.leftMargin: Style.spacing.controlPaddingX
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(34)
+          height: Style.space(18)
+
+          Rectangle {
+            anchors.fill: parent
+            visible: lightRow.colors.length > 0
+            radius: height / 2
+            border.width: 1
+            border.color: Util.alpha(root.foreground, 0.25)
+            gradient: Gradient {
+              orientation: Gradient.Horizontal
+              GradientStop { position: 0.0; color: lightRow.colors.length ? lightRow.colors[0] : "black" }
+              GradientStop { position: 0.5; color: lightRow.colors.length ? lightRow.colors[Math.floor(lightRow.colors.length / 2)] : "black" }
+              GradientStop { position: 1.0; color: lightRow.colors.length ? lightRow.colors[lightRow.colors.length - 1] : "black" }
+            }
+          }
+
+          ConicalRing {
+            anchors.centerIn: parent
+            visible: lightRow.colors.length === 0
+            width: parent.height
+            height: width
+            rotating: lightRow.worn
+          }
+        }
+
+        Column {
+          anchors.left: lightSwatch.right
+          anchors.leftMargin: Style.space(10)
+          anchors.right: lightButtons.left
+          anchors.rightMargin: Style.space(6)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+          visible: !lightRow.renaming
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: lightRow.modelData.name
+            color: lightRow.worn ? Color.accent : root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            elide: Text.ElideRight
+          }
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: {
+              var style = String(lightRow.modelData.style || "")
+              var label = style === "custom" ? "Exclusive" : style === "solid" ? "Solid" : style.charAt(0).toUpperCase() + style.slice(1)
+              return lightRow.worn ? " On this profile · " + label : label
+            }
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+        }
+
+        Loader {
+          anchors.left: lightSwatch.right
+          anchors.leftMargin: Style.space(10)
+          anchors.right: parent.right
+          anchors.rightMargin: Style.spacing.controlPaddingX
+          anchors.verticalCenter: parent.verticalCenter
+          active: lightRow.renaming
+
+          sourceComponent: InlineNameField {
+            seed: lightRow.modelData.name
+            onCommitted: function(value) { root.renameSavedLight(lightRow.modelData.id, value) }
+            onCanceled: {
+              root.renamingLight = ""
+              root.refocusPanel()
+            }
+          }
+        }
+
+        Row {
+          id: lightButtons
+          visible: !lightRow.renaming
+          anchors.right: parent.right
+          anchors.rightMargin: Style.spacing.controlPaddingX
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(4)
+
+          TileButton {
+            anchors.verticalCenter: parent.verticalCenter
+            glyph: ""
+            onActivated: {
+              root.namingLight = false
+              root.renamingLight = lightRow.modelData.id
+            }
+          }
+
+          Item {
+            anchors.verticalCenter: parent.verticalCenter
+            width: lightRow.confirming ? sureLabel.implicitWidth + Style.space(12) : Style.space(18)
+            height: Style.space(18)
+
+            Behavior on width { NumberAnimation { duration: 140 } }
+
+            Rectangle {
+              anchors.fill: parent
+              radius: Style.cornerRadius
+              color: lightRow.confirming ? Util.alpha(root.urgent, 0.25)
+                : trashMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+            }
+
+            Text {
+              id: sureLabel
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: lightRow.confirming ? "Delete?" : ""
+              color: lightRow.confirming || trashMouse.containsMouse ? root.urgent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: lightRow.confirming ? Style.font.caption : Style.font.bodySmall
+              font.bold: lightRow.confirming
+            }
+
+            MouseArea {
+              id: trashMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.deleteSavedLight(lightRow.modelData.id)
+            }
+          }
+        }
+      }
+    }
+
+    // Save whatever this profile wears right now.
+    Item {
+      width: parent.width
+      implicitHeight: root.namingLight ? nameLoader.implicitHeight : saveButton.implicitHeight
+
+      ActionButton {
+        id: saveButton
+        visible: !root.namingLight
+        width: parent.width
+        label: root.wearingSaved ? "Already saved" : "Save this profile's light"
+        glyph: root.wearingSaved ? "" : ""
+        tint: Color.accent
+        emphasized: !root.wearingSaved
+        onActivated: {
+          if (root.wearingSaved || root.currentProfile < 0) return
+          root.renamingLight = ""
+          root.namingLight = true
+        }
+      }
+
+      Loader {
+        id: nameLoader
+        width: parent.width
+        active: root.namingLight
+
+        sourceComponent: InlineNameField {
+          seed: root.activeCycle && root.activeCycle.style === "custom"
+            ? "Exclusive " + (root.savedLights.length + 1)
+            : (root.activeProfile ? root.cleanName(root.activeProfile.name) || "My light" : "My light") + " light"
+          placeholderText: "Name it, e.g. Puffcon 2026"
+          onCommitted: function(value) { root.saveCurrentLight(value) }
+          onCanceled: {
+            root.namingLight = false
+            root.refocusPanel()
+          }
+        }
+      }
+    }
+  }
+
+  // One-line name editor: Enter commits, Escape or clicking away cancels.
+  component InlineNameField: TextField {
+    id: nameField
+
+    property string seed: ""
+    property bool armed: false
+    property bool done: false
+
+    signal committed(string value)
+    signal canceled()
+
+    function finish(save) {
+      if (done) return
+      done = true
+      if (save) nameField.committed(nameField.text)
+      else nameField.canceled()
+    }
+
+    foreground: root.foreground
+    accent: Color.accent
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.bodySmall
+    horizontalPadding: Style.spacing.xs
+    maximumLength: 32
+
+    Component.onCompleted: {
+      text = seed
+      Qt.callLater(function() {
+        nameField.selectAll()
+        nameField.forceActiveFocus()
+        nameField.armed = true
+      })
+    }
+
+    onAccepted: nameField.finish(true)
+    Keys.onEscapePressed: function(event) {
+      nameField.finish(false)
+      event.accepted = true
+    }
+    onActiveFocusChanged: {
+      if (!armed || activeFocus) return
+      Qt.callLater(function() { nameField.finish(false) })
+    }
+  }
+
+  // The session's temperature curve: a gradient area under the climb, the
+  // target as a dashed line, Ready and Cooling marked, and a live dot on the
+  // newest reading while the Peak heats.
+  component HeatGraph: Section {
+    id: graph
+
+    glyph: ""
+    title: root.heatTraceLive ? "HEAT CURVE" : "LAST SESSION"
+    trailing: {
+      var pts = root.heatPoints
+      if (!pts.length) return ""
+      return (root.heatTraceLive ? "Live · " : "") + root.formatDuration(pts[pts.length - 1][0])
+    }
+
+    readonly property var pts: root.heatPoints
+    readonly property real targetF: root.heatTrace && isFinite(Number(root.heatTrace.target_f)) ? Number(root.heatTrace.target_f) : NaN
+    readonly property real readyAt: root.heatTrace && root.heatTrace.ready_at !== null && root.heatTrace.ready_at !== undefined ? Number(root.heatTrace.ready_at) : NaN
+    readonly property real fadeAt: root.heatTrace && root.heatTrace.fade_at !== null && root.heatTrace.fade_at !== undefined ? Number(root.heatTrace.fade_at) : NaN
+    readonly property real spanS: pts.length ? Math.max(10, Number(pts[pts.length - 1][0])) : 10
+    readonly property real lowF: {
+      var lo = Infinity
+      for (var i = 0; i < pts.length; i++) lo = Math.min(lo, Number(pts[i][1]))
+      return isFinite(lo) ? Math.max(0, lo - 20) : 0
+    }
+    readonly property real highF: {
+      var hi = isFinite(targetF) ? targetF : 0
+      if (isFinite(root.heatPeakF)) hi = Math.max(hi, root.heatPeakF)
+      return hi + 25
+    }
+
+    Item {
+      id: plot
+      width: parent.width
+      height: Style.space(96)
+
+      readonly property real padTop: Style.space(6)
+      readonly property real padBottom: Style.space(4)
+      function xAt(t) { return Math.max(0, Math.min(1, t / graph.spanS)) * width }
+      function yAt(f) {
+        var frac = (f - graph.lowF) / Math.max(1, graph.highF - graph.lowF)
+        return padTop + (1 - Math.max(0, Math.min(1, frac))) * (height - padTop - padBottom)
+      }
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Style.cornerRadius
+        color: Style.normalFillFor(root.foreground, Color.accent)
+        border.width: 1
+        border.color: Util.alpha(root.foreground, 0.1)
+      }
+
+      Canvas {
+        id: curve
+        anchors.fill: parent
+
+        Connections {
+          target: graph
+          function onPtsChanged() { curve.requestPaint() }
+          function onTargetFChanged() { curve.requestPaint() }
+        }
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.reset()
+          var pts = graph.pts
+          if (pts.length < 2) return
+          var bottom = height - plot.padBottom
+
+          // Area under the curve, hot at the top fading to nothing.
+          var fill = ctx.createLinearGradient(0, plot.padTop, 0, bottom)
+          fill.addColorStop(0, Util.alpha(root.urgent, 0.45))
+          fill.addColorStop(1, Util.alpha(Color.accent, 0.02))
+          ctx.fillStyle = fill
+          ctx.beginPath()
+          ctx.moveTo(plot.xAt(pts[0][0]), bottom)
+          for (var i = 0; i < pts.length; i++) ctx.lineTo(plot.xAt(pts[i][0]), plot.yAt(pts[i][1]))
+          ctx.lineTo(plot.xAt(pts[pts.length - 1][0]), bottom)
+          ctx.closePath()
+          ctx.fill()
+
+          // The curve itself, cool accent climbing into the urgent heat colour.
+          var stroke = ctx.createLinearGradient(0, bottom, 0, plot.padTop)
+          stroke.addColorStop(0, Color.accent)
+          stroke.addColorStop(1, root.urgent)
+          ctx.strokeStyle = stroke
+          ctx.lineWidth = 2
+          ctx.lineJoin = "round"
+          ctx.lineCap = "round"
+          ctx.beginPath()
+          for (var j = 0; j < pts.length; j++) {
+            var x = plot.xAt(pts[j][0]), y = plot.yAt(pts[j][1])
+            if (j === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          ctx.stroke()
+
+          // Target temperature, dashed.
+          if (isFinite(graph.targetF)) {
+            var ty = plot.yAt(graph.targetF)
+            ctx.strokeStyle = Util.alpha(root.foreground, 0.45)
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            for (var dx = 0; dx < width; dx += 8) {
+              ctx.moveTo(dx, ty)
+              ctx.lineTo(Math.min(width, dx + 4), ty)
+            }
+            ctx.stroke()
+          }
+
+          // Phase markers.
+          function marker(t, color) {
+            if (!isFinite(t)) return
+            var mx = plot.xAt(t)
+            ctx.strokeStyle = color
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.moveTo(mx, plot.padTop)
+            ctx.lineTo(mx, bottom)
+            ctx.stroke()
+          }
+          marker(graph.readyAt, Util.alpha(Color.accent, 0.8))
+          marker(graph.fadeAt, Util.alpha(root.foreground, 0.35))
+        }
+      }
+
+      Text {
+        visible: isFinite(graph.targetF)
+        x: Style.space(6)
+        y: plot.yAt(graph.targetF) - implicitHeight - 1
+        textFormat: Text.PlainText
+        text: root.formatTemp(graph.targetF, undefined)
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Text {
+        visible: isFinite(graph.readyAt) && plot.xAt(graph.readyAt) < plot.width - implicitWidth - Style.space(4)
+        x: plot.xAt(graph.readyAt) + Style.space(3)
+        y: plot.height - implicitHeight - Style.space(3)
+        textFormat: Text.PlainText
+        text: "Ready"
+        color: Color.accent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+      }
+
+      Text {
+        visible: isFinite(graph.fadeAt) && plot.xAt(graph.fadeAt) < plot.width - implicitWidth - Style.space(4)
+        x: plot.xAt(graph.fadeAt) + Style.space(3)
+        y: plot.height - implicitHeight - Style.space(3)
+        textFormat: Text.PlainText
+        text: "Cooling"
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      // Newest reading, pulsing while live.
+      Rectangle {
+        id: headDot
+        visible: graph.pts.length > 0
+        readonly property var last: graph.pts.length ? graph.pts[graph.pts.length - 1] : [0, 0]
+        width: Style.space(7)
+        height: width
+        radius: width / 2
+        x: plot.xAt(last[0]) - width / 2
+        y: plot.yAt(last[1]) - height / 2
+        color: root.heatTraceLive ? Qt.lighter(root.urgent, 1.2) : root.dim
+
+        Rectangle {
+          z: -1
+          anchors.centerIn: parent
+          width: parent.width * 2.6
+          height: width
+          radius: width / 2
+          color: Util.alpha(root.urgent, 0.35)
+          visible: root.heatTraceLive
+
+          SequentialAnimation on scale {
+            running: root.heatTraceLive && root.opened
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.4; to: 1.0; duration: 800; easing.type: Easing.OutSine }
+            NumberAnimation { from: 1.0; to: 0.4; duration: 800; easing.type: Easing.InSine }
+          }
+        }
+      }
+    }
+
+    Row {
+      id: graphStats
+      width: parent.width
+      spacing: Style.spacing.controlGap
+      readonly property real cell: (width - spacing * 2) / 3
+
+      SummaryCell {
+        width: graphStats.cell
+        title: "Heat-up"
+        value: isFinite(graph.readyAt) ? root.formatDuration(graph.readyAt) : "…"
+      }
+      SummaryCell {
+        width: graphStats.cell
+        title: "Peak"
+        value: isFinite(root.heatPeakF) ? root.formatTemp(root.heatPeakF, undefined) : "—"
+      }
+      SummaryCell {
+        width: graphStats.cell
+        title: "At temp"
+        value: {
+          if (!isFinite(graph.readyAt)) return "—"
+          var end = isFinite(graph.fadeAt) ? graph.fadeAt : Number(graph.pts[graph.pts.length - 1][0])
+          return root.formatDuration(Math.max(0, end - graph.readyAt))
+        }
       }
     }
   }
@@ -2752,6 +5257,7 @@ Panel {
 
     property string title: ""
     property string trailing: ""
+    property string glyph: ""
     default property alias body: sectionBody.data
 
     width: parent ? parent.width : 0
@@ -2759,11 +5265,25 @@ Panel {
 
     Item {
       width: parent.width
-      implicitHeight: sectionHeader.implicitHeight
+      implicitHeight: Math.max(sectionHeader.implicitHeight, sectionGlyph.implicitHeight)
+
+      Text {
+        id: sectionGlyph
+        visible: section.glyph !== ""
+        width: visible ? implicitWidth : 0
+        anchors.left: parent.left
+        anchors.verticalCenter: sectionHeader.verticalCenter
+        textFormat: Text.PlainText
+        text: section.glyph
+        color: Color.accent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
 
       PanelSectionHeader {
         id: sectionHeader
-        anchors.left: parent.left
+        anchors.left: sectionGlyph.right
+        anchors.leftMargin: sectionGlyph.visible ? Style.space(6) : 0
         text: section.title
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -2788,9 +5308,10 @@ Panel {
     }
   }
 
-  // Equal-width, mutually exclusive choice row built from the shell's own
-  // Button, so tabs and option pickers share the first-party chip styling.
-  component Segmented: Row {
+  // Equal-width, mutually exclusive choice row with a highlight pill that
+  // slides to the picked option. Options may carry a `glyph` (stacked over
+  // the label on the full-size bar, inline on a compact one) and a `badge`.
+  component Segmented: Item {
     id: seg
 
     property var options: []
@@ -2799,24 +5320,114 @@ Panel {
 
     signal picked(string value)
 
-    spacing: compact ? Style.space(4) : Style.spacing.controlGap
-    readonly property real cellWidth: options.length > 0
-      ? (width - spacing * (options.length - 1)) / options.length
-      : 0
+    readonly property int count: options.length
+    readonly property real gap: compact ? Style.space(3) : Style.space(4)
+    readonly property real cellWidth: count > 0 ? (width - gap * (count - 1)) / count : 0
+    readonly property bool stacked: !compact && count > 0 && options[0].glyph !== undefined
+    readonly property int selectedIndex: {
+      for (var i = 0; i < options.length; i++)
+        if (String(options[i].value) === value) return i
+      return -1
+    }
+
+    implicitHeight: stacked ? Style.space(42) : (compact ? Style.space(24) : Style.spacing.controlHeight)
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.foreground, Color.accent)
+      border.width: 1
+      border.color: Util.alpha(root.foreground, 0.12)
+    }
+
+    Rectangle {
+      visible: seg.selectedIndex >= 0
+      x: seg.selectedIndex * (seg.cellWidth + seg.gap)
+      width: seg.cellWidth
+      height: parent.height
+      radius: Style.cornerRadius
+      color: Util.alpha(Color.accent, 0.2)
+      border.width: 1
+      border.color: Color.accent
+
+      Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+      Behavior on width { NumberAnimation { duration: 200 } }
+    }
 
     Repeater {
       model: seg.options
 
-      Button {
+      Item {
+        id: cell
         required property var modelData
+        required property int index
+        readonly property bool selected: index === seg.selectedIndex
+        readonly property bool hot: cellMouse.containsMouse
+        readonly property color ink: selected ? Color.accent : (hot ? root.foreground : root.dim)
+
+        x: index * (seg.cellWidth + seg.gap)
         width: seg.cellWidth
-        text: String(modelData.label)
-        selected: String(modelData.value) === seg.value
-        bordered: true
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-        fontSize: seg.compact ? Style.font.caption : Style.font.bodySmall
-        onClicked: seg.picked(String(modelData.value))
+        height: seg.height
+
+        Grid {
+          anchors.centerIn: parent
+          columns: seg.stacked ? 1 : 2
+          spacing: seg.stacked ? Style.space(2) : Style.space(5)
+          horizontalItemAlignment: Grid.AlignHCenter
+          verticalItemAlignment: Grid.AlignVCenter
+          scale: cellMouse.pressed ? 0.92 : (cell.selected && seg.stacked ? 1.04 : 1)
+
+          Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
+
+          Text {
+            visible: cell.modelData.glyph !== undefined
+            textFormat: Text.PlainText
+            text: String(cell.modelData.glyph || "")
+            color: cell.ink
+            font.family: root.fontFamily
+            font.pixelSize: seg.stacked ? Style.font.subtitle : Style.font.caption
+
+            Behavior on color { ColorAnimation { duration: 160 } }
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: String(cell.modelData.label)
+            color: cell.selected ? root.foreground : cell.ink
+            font.family: root.fontFamily
+            font.pixelSize: seg.compact || seg.stacked ? Style.font.caption : Style.font.bodySmall
+            font.bold: cell.selected
+
+            Behavior on color { ColorAnimation { duration: 160 } }
+          }
+        }
+
+        Rectangle {
+          visible: cell.modelData.badge === true
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.margins: Style.space(5)
+          width: Style.space(6)
+          height: width
+          radius: width / 2
+          color: root.urgent
+
+          SequentialAnimation on scale {
+            running: parent.visible && root.opened
+            loops: Animation.Infinite
+            alwaysRunToEnd: true
+            NumberAnimation { to: 1.4; duration: 600; easing.type: Easing.OutSine }
+            NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InSine }
+          }
+        }
+
+        MouseArea {
+          id: cellMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: seg.picked(String(cell.modelData.value))
+        }
       }
     }
   }
@@ -3014,6 +5625,19 @@ Panel {
     borderSpec: Border.controlSpec(sessionMouse.containsMouse || editingNote ? "hover-cursor" : "normal", root.foreground, Color.accent)
     implicitHeight: sessionCol.implicitHeight + Style.spacing.controlPaddingY * 2
 
+    // The profile's colour down the leading edge, like the heat tiles.
+    Rectangle {
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.margins: Math.max(1, Style.normalBorderWidth)
+      width: Style.space(3)
+      color: sessionCard.session.profile !== null && sessionCard.session.profile !== undefined
+        ? root.profileUsageColor(sessionCard.session.profile)
+        : Color.accent
+      opacity: sessionMouse.containsMouse || sessionCard.editingNote ? 1 : 0.6
+    }
+
     MouseArea {
       id: sessionMouse
       anchors.fill: parent
@@ -3193,11 +5817,22 @@ Panel {
 
     property string title: ""
     property string value: ""
+    property string glyph: ""
+    property bool highlight: false
+    // Optional colour bar along the bottom (the factory heat presets).
+    property string stripe: ""
+
+    // Plain counts tick up to their value; anything else shows as given.
+    readonly property bool numeric: /^\d+$/.test(value)
+    property real shown: numeric ? Number(value) : 0
+    Behavior on shown { NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
 
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.foreground, Color.accent)
-    borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
-    implicitHeight: cellCol.implicitHeight + Style.spacing.controlPaddingY * 2
+    color: highlight ? Util.alpha(Color.accent, 0.12) : Style.normalFillFor(root.foreground, Color.accent)
+    borderSpec: highlight
+      ? Border.flat(Util.alpha(Color.accent, 0.7), Math.max(1, Style.normalBorderWidth))
+      : Border.controlSpec("normal", root.foreground, Color.accent)
+    implicitHeight: cellCol.implicitHeight + Style.spacing.controlPaddingY * 2 + (stripe !== "" ? Style.space(3) : 0)
 
     Column {
       id: cellCol
@@ -3206,9 +5841,18 @@ Panel {
 
       Text {
         anchors.horizontalCenter: parent.horizontalCenter
+        visible: cell.glyph !== ""
         textFormat: Text.PlainText
-        text: cell.value
-        color: root.foreground
+        text: cell.glyph
+        color: cell.highlight ? Color.accent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        textFormat: Text.PlainText
+        text: cell.numeric ? String(Math.round(cell.shown)) : cell.value
+        color: cell.highlight ? Color.accent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.title
         font.bold: true
@@ -3222,6 +5866,16 @@ Panel {
         font.pixelSize: Style.font.caption
       }
     }
+
+    Rectangle {
+      visible: cell.stripe !== ""
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      anchors.margins: Math.max(1, Style.normalBorderWidth)
+      height: Style.space(3)
+      color: cell.stripe !== "" ? cell.stripe : "transparent"
+    }
   }
 
   // Compact metric tile: title, big value, caption, optional extra
@@ -3232,6 +5886,8 @@ Panel {
     property string title: ""
     property string value: ""
     property string meta: ""
+    property string glyph: ""
+    property color glyphColor: Color.accent
     default property alias extra: extraSlot.data
 
     radius: Style.cornerRadius
@@ -3249,12 +5905,24 @@ Panel {
       anchors.topMargin: Style.spacing.controlPaddingY
       spacing: Style.space(4)
 
-      Text {
-        textFormat: Text.PlainText
-        text: metric.title
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+      Row {
+        spacing: Style.space(5)
+
+        Text {
+          visible: metric.glyph !== ""
+          textFormat: Text.PlainText
+          text: metric.glyph
+          color: metric.glyphColor
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: metric.title
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
       }
       Text {
         textFormat: Text.PlainText
@@ -3381,7 +6049,9 @@ Panel {
 
   // Outlined chip: neutral at rest, tinted on hover/press, softly filled while
   // it's the action the current state calls for. `tint` makes Stop read as
-  // destructive (urgent) and Heat as primary (accent).
+  // destructive (urgent) and Heat as primary (accent). `tall` stacks the glyph
+  // over the label, `pulse` makes it glow for attention, `spinning` turns the
+  // glyph, and every press sends a ripple out from the cursor.
   component ActionButton: BorderSurface {
     id: chip
 
@@ -3389,42 +6059,98 @@ Panel {
     property string glyph: ""
     property color tint: root.foreground
     property bool emphasized: false
+    property bool tall: false
+    property bool pulse: false
+    property bool spinning: false
 
     signal activated()
 
     readonly property bool hot: chipMouse.containsMouse
     readonly property bool lit: hot || emphasized
 
-    implicitHeight: Math.max(Style.spacing.controlHeight,
-                             chipRow.implicitHeight + Style.spacing.controlPaddingY * 2)
+    implicitHeight: tall
+      ? Math.max(Style.space(50), chipBody.implicitHeight + Style.spacing.controlPaddingY * 2)
+      : Math.max(Style.spacing.controlHeight, chipBody.implicitHeight + Style.spacing.controlPaddingY * 2)
     radius: Style.cornerRadius
+    clip: true
+    scale: chipMouse.pressed ? 0.96 : 1
+
+    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
 
     color: chipMouse.pressed ? Style.pressedFillFor(tint, tint)
       : hot ? Style.hoverFillFor(tint, tint)
       : emphasized ? Style.selectedFillFor(tint, tint)
       : Style.normalFillFor(tint, tint)
 
-    borderSpec: hot
-      ? Border.controlSpec("hover-cursor", tint, tint)
+    borderSpec: hot || pulse
+      ? Border.flat(Util.alpha(tint, hot ? 0.8 : 0.6), Math.max(1, Style.normalBorderWidth))
       : Border.controlSpec("normal", tint, tint)
 
     Behavior on color { ColorAnimation { duration: 120 } }
 
-    Row {
-      id: chipRow
+    // Attention glow.
+    Rectangle {
+      anchors.fill: parent
+      radius: parent.radius
+      color: chip.tint
+      opacity: 0
+      visible: chip.pulse
+
+      SequentialAnimation on opacity {
+        running: chip.pulse && root.opened
+        loops: Animation.Infinite
+        alwaysRunToEnd: true
+        NumberAnimation { from: 0; to: 0.16; duration: 800; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 0.16; to: 0; duration: 800; easing.type: Easing.InOutSine }
+      }
+    }
+
+    Rectangle {
+      id: ripple
+      property real cx: 0
+      property real cy: 0
+      width: 0
+      height: width
+      radius: width / 2
+      x: cx - width / 2
+      y: cy - height / 2
+      color: chip.tint
+      opacity: 0
+    }
+
+    ParallelAnimation {
+      id: rippleAnim
+      NumberAnimation { target: ripple; property: "width"; from: 0; to: Math.max(chip.width, chip.height) * 2.2; duration: 520; easing.type: Easing.OutCubic }
+      NumberAnimation { target: ripple; property: "opacity"; from: 0.3; to: 0; duration: 520; easing.type: Easing.InQuad }
+    }
+
+    Grid {
+      id: chipBody
       anchors.centerIn: parent
-      spacing: Style.spacing.md
+      columns: chip.tall ? 1 : 2
+      spacing: chip.tall ? Style.space(3) : Style.spacing.md
+      horizontalItemAlignment: Grid.AlignHCenter
+      verticalItemAlignment: Grid.AlignVCenter
 
       Text {
+        id: chipGlyph
         textFormat: Text.PlainText
         visible: chip.glyph !== ""
         text: chip.glyph
-        color: chip.lit ? chip.tint : root.foreground
+        color: chip.lit || chip.tall ? chip.tint : root.foreground
         font.family: root.fontFamily
-        font.pixelSize: chip.label === "" ? Style.font.icon : Style.font.iconSmall
-        anchors.verticalCenter: parent.verticalCenter
+        font.pixelSize: chip.tall ? Style.font.heading : (chip.label === "" ? Style.font.icon : Style.font.iconSmall)
 
         Behavior on color { ColorAnimation { duration: 120 } }
+
+        RotationAnimation on rotation {
+          running: chip.spinning && root.opened
+          loops: Animation.Infinite
+          from: 0
+          to: 360
+          duration: 1000
+          onRunningChanged: if (!running) chipGlyph.rotation = 0
+        }
       }
 
       Text {
@@ -3435,7 +6161,6 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
         font.bold: chip.emphasized
-        anchors.verticalCenter: parent.verticalCenter
 
         Behavior on color { ColorAnimation { duration: 120 } }
       }
@@ -3446,7 +6171,12 @@ Panel {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: chip.activated()
+      onClicked: function(mouse) {
+        ripple.cx = mouse.x
+        ripple.cy = mouse.y
+        rippleAnim.restart()
+        chip.activated()
+      }
     }
   }
 }

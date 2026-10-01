@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import ast
+import io
 import re
+
+import cbor2
 
 HEX6 = re.compile(r"#?([0-9a-fA-F]{6})$")
 C32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -32,7 +35,9 @@ def hexify(obj, key=None):
     if isinstance(obj, dict):
         return {k: hexify(v, k) for k, v in obj.items()}
     if isinstance(obj, list):
-        if key == "color":
+        # A lamp's colour table ("color" on pikaled2, "colors" on migrtn1) is one
+        # packed RGB byte string, as the app's rgbArray format writes it.
+        if key in ("color", "colors"):
             return b"".join(bytes.fromhex(HEX6.fullmatch(x).group(1)) for x in obj)
         if key == "userColors":
             return [bytes.fromhex(HEX6.fullmatch(x).group(1)) for x in obj]
@@ -74,8 +79,8 @@ def _decode(obj, parent=None, key=None):
         return _decode(raw, parent, key) if raw is not None else obj
     if isinstance(obj, (bytes, bytearray)):
         raw = bytes(obj)
-        if key == "color":
-            n = parent.get("colorLen") if isinstance(parent, dict) else None
+        if key in ("color", "colors"):
+            n = parent.get("colorLen") if key == "color" else None if isinstance(parent, dict) else None
             n = int(n) if isinstance(n, int) and n > 0 else len(raw) // 3
             return [_hex(raw[i * 3 : i * 3 + 3]) for i in range(n) if len(raw[i * 3 : i * 3 + 3]) == 3]
         if isinstance(key, str) and key.endswith("Ulid") and len(raw) == 16:
@@ -89,12 +94,20 @@ def decode_puffco_json(payload: dict) -> dict:
     return _decode(payload)
 
 
+def first_cbor_item(raw: bytes) -> bytes:
+    """The bytes of the first CBOR item in `raw`, dropping whatever trails it
+    (the Peak's files keep zero padding after a shorter write)."""
+    fp = io.BytesIO(raw)
+    cbor2.CBORDecoder(fp).decode()
+    return raw[: fp.tell()]
+
+
 def first_color(decoded) -> str | None:
     if not isinstance(decoded, dict):
         return None
     lamp = decoded.get("lamp") or {}
     param = lamp.get("param") or {}
-    colors = param.get("color") or decoded.get("meta", {}).get("userColors") or []
+    colors = param.get("color") or param.get("colors") or decoded.get("meta", {}).get("userColors") or []
     if isinstance(colors, list) and colors:
         value = colors[0]
         if isinstance(value, str) and value.startswith("#"):

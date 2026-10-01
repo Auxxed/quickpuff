@@ -19,6 +19,9 @@ DEFAULTS: dict[str, Any] = {
     # or switched away, and take it back when someone returns.
     "handoff": True,
     "units": "F",
+    # What plays on screen when the Peak reaches temperature (the bar widget's
+    # overlay): see READY_ANIMATIONS.
+    "ready_animation": "rocket",
     "notify_ready": True,
     "notify_low_battery": True,
     "qtip_reminder": True,

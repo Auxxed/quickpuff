@@ -19,6 +19,11 @@ from . import __version__, audit, bluez, faults, history
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
 from .paths import load_config, save_config, socket_path
+from .heat_trace import HeatTrace
+from .lights import normalize_color
+from .moods import MAX_COLORS as MAX_CYCLE_COLORS
+from .moods import normalize_style
+from . import saved_lights
 from .presence import SeatPresence
 from .product_info import is_proxy
 from .utils import PuffcoUtils, clamp_byte
@@ -151,6 +156,8 @@ LOCAL_COMMANDS = frozenset(
         "set_clean_every",
         "mark_cleaned",
         "stats",
+        "rename_saved_light",
+        "delete_saved_light",
     }
 )
 
@@ -351,6 +358,7 @@ class QuickPuffDaemon:
         self.qtip_reminder = _as_bool(load_config().get("qtip_reminder", True))
         self._session_reached_temp = False
         self._cycle_ts: float | None = None
+        self.heat_trace = HeatTrace()
         self.daily_limit = clamp_daily_limit(load_config().get("daily_limit"))
         self.weekly_recap = _as_bool(load_config().get("weekly_recap", True))
         self._recap_task: asyncio.Task | None = None
@@ -383,6 +391,7 @@ class QuickPuffDaemon:
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
+        self.status["saved_lights"] = saved_lights.listing()
         self.status.update(self._clean_fields())
 
     @staticmethod
@@ -494,6 +503,7 @@ class QuickPuffDaemon:
         snap["qtip_reminder"] = self.qtip_reminder
         snap["daily_limit"] = self.daily_limit
         snap["weekly_recap"] = self.weekly_recap
+        snap["saved_lights"] = saved_lights.listing()
         snap.update(self._clean_fields(snap.get("total_dabs", self.status.get("total_dabs"))))
         if (
             snap.get("operating_state_id") == int(OperatingState.HEAT_CYCLE_PREHEAT)
@@ -831,6 +841,7 @@ class QuickPuffDaemon:
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
+        self.status["saved_lights"] = saved_lights.listing()
         self.status.update(self._clean_fields())
         await self._broadcast_event("status", self.status)
         return self.status
@@ -905,6 +916,14 @@ class QuickPuffDaemon:
                         snap = await dev.poll_fast()
                         self._stamp_local(snap)
                         self.status.update(snap)
+                    self.heat_trace.update(
+                        prev_state,
+                        self.status.get("operating_state_id"),
+                        self.status.get("heater_temp_f"),
+                        time.monotonic(),
+                        self._cycle_meta().get("temp_f"),
+                    )
+                    self.status["heat_trace"] = self.heat_trace.as_status()
                     await self._broadcast_event("status", self.status)
                     new_state = self.status.get("operating_state_id")
                     if cycle_just_ended(prev_state, new_state):
@@ -1767,6 +1786,26 @@ class QuickPuffDaemon:
             self.status["current_profile"] = index
             await self._broadcast_event("status", self.status)
             return {"current_profile": index}
+        if cmd == "step_profile":
+            # Next or previous heat profile, wrapping; the bar's scroll wheel.
+            # Left alone mid-session so a stray scroll can't change the heat.
+            if self.status.get("operating_state_id") in CYCLE_STATES:
+                raise ValueError("Can't switch profiles while the Peak is heating")
+            count = len(self.status.get("profiles") or []) or PROFILE_COUNT
+            try:
+                current = int(self.status.get("current_profile"))
+            except (TypeError, ValueError):
+                current = 0
+            step = 1 if int(args.get("delta", 1)) >= 0 else -1
+            index = (current + step) % count
+            await dev.set_current_profile(index)
+            self.status["current_profile"] = index
+            await self._broadcast_event("status", self.status)
+            name = next(
+                (p.get("name") for p in self.status.get("profiles") or [] if p.get("index") == index),
+                f"Profile {index + 1}",
+            )
+            return {"current_profile": index, "name": name}
         if cmd == "set_profile_name":
             index = _validate_index(args)
             await dev.set_profile_name(index, str(args["name"]))
@@ -1820,8 +1859,64 @@ class QuickPuffDaemon:
             await dev.set_profile_solid_color(index, hex_color)
             # The colour preview lights the lantern.
             self._set_lantern(True)
-            self._patch_profile(index, color=("#" + hex_color.lstrip("#")).lower())
+            self._patch_profile(index, color=("#" + hex_color.lstrip("#")).lower(), cycle=None, light_id=None)
             return self._refresh_profiles_soon()
+        if cmd == "set_profile_cycle":
+            index = args.get("index")
+            if index is not None:
+                index = _validate_index({"index": index})
+            style = normalize_style(str(args.get("style") or "fade"))
+            colors = [normalize_color(c) for c in (args.get("colors") or [])][:MAX_CYCLE_COLORS]
+            if not colors:
+                raise ValueError("A colour cycle needs at least one colour")
+            tempo = _clamp(float(args.get("tempo", 0.5)), 0.1, 1.0)
+            inhale = bool(args.get("inhale"))
+            await dev.set_profile_cycle(index, style, colors, tempo, inhale=inhale)
+            self._set_lantern(True)
+            self._patch_profile(
+                index,
+                color=colors[0],
+                light_id=None,
+                cycle={"style": style, "colors": colors, "tempo": round(tempo, 2), "inhale": inhale},
+            )
+            return self._refresh_profiles_soon()
+        if cmd == "save_light":
+            # Copy a profile's light off the Peak, exactly, under a name.
+            index = args.get("index")
+            if index is not None:
+                index = _validate_index({"index": index})
+            raw = await dev.get_profile_colour_raw(index)
+            entry = saved_lights.save(args.get("name"), raw)
+            self.status["saved_lights"] = saved_lights.listing()
+            self._patch_profile(index, light_id=entry["id"])
+            await self._broadcast_event("status", self.status)
+            return entry
+        if cmd == "apply_saved_light":
+            index = args.get("index")
+            if index is not None:
+                index = _validate_index({"index": index})
+            ident = str(args.get("id") or "")
+            raw = saved_lights.get_raw(ident)
+            await dev.set_profile_light_raw(index, raw)
+            self._set_lantern(True)
+            look = saved_lights.describe(raw)
+            self._patch_profile(
+                index,
+                light_id=ident,
+                color=(look["colors"] or [None])[0],
+                cycle=None if look["style"] == "solid" else {"style": look["style"], "colors": look["colors"], "tempo": 0.5, "inhale": False},
+            )
+            return self._refresh_profiles_soon()
+        if cmd == "rename_saved_light":
+            saved_lights.rename(str(args.get("id") or ""), args.get("name"))
+            self.status["saved_lights"] = saved_lights.listing()
+            await self._broadcast_event("status", self.status)
+            return {"saved_lights": self.status["saved_lights"]}
+        if cmd == "delete_saved_light":
+            saved_lights.delete(str(args.get("id") or ""))
+            self.status["saved_lights"] = saved_lights.listing()
+            await self._broadcast_event("status", self.status)
+            return {"saved_lights": self.status["saved_lights"]}
         if cmd == "set_stealth":
             enable = bool(args.get("enable"))
             await dev.set_stealth_mode(enable)

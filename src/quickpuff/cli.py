@@ -9,6 +9,7 @@ import sys
 from typing import Any
 
 from . import __version__
+from .constants import READY_ANIMATIONS
 from .paths import load_config
 from .rpc import DaemonNotRunning, rpc
 from .service import ensure_daemon
@@ -306,6 +307,52 @@ def print_waybar(data: dict) -> None:
     )
 
 
+def find_light(saved: list[dict[str, Any]], target: str | None) -> dict[str, Any]:
+    """A saved light by id, or by name when exactly one has it."""
+    key = str(target or "").strip()
+    if not key:
+        raise SystemExit("Name the saved light (see `quickpuff light list`)")
+    for light in saved:
+        if light.get("id") == key:
+            return light
+    matches = [x for x in saved if str(x.get("name", "")).lower() == key.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    raise SystemExit(f"No saved light called {key!r} (see `quickpuff light list`)")
+
+
+async def light_command(args: argparse.Namespace, raw: bool) -> int:
+    if args.action == "save":
+        if not args.target:
+            raise SystemExit('Give it a name: quickpuff light save "Puffcon 2026"')
+        entry = await call("save_light", {"index": args.index, "name": args.target})
+        print(json.dumps(entry, indent=2) if raw else f"Saved {entry['name']} ({entry['id']})")
+        return 0
+    saved = (await call("status")).get("saved_lights") or []
+    if args.action == "list":
+        if raw:
+            print(json.dumps(saved, indent=2))
+        elif not saved:
+            print("No saved lights yet. Put a mood on a profile, then: quickpuff light save NAME")
+        for light in saved if not raw else []:
+            colors = " ".join(light.get("colors") or [])
+            print(f"{light['id']}  {light['name']:<24} {light.get('style', ''):<9} {colors}")
+        return 0
+    light = find_light(saved, args.target)
+    if args.action == "apply":
+        await call("apply_saved_light", {"id": light["id"], "index": args.index})
+        print_status(await call("status"), raw)
+    elif args.action == "rename":
+        if not args.name:
+            raise SystemExit("Give the new name: quickpuff light rename OLD NEW")
+        await call("rename_saved_light", {"id": light["id"], "name": args.name})
+        print(f"Renamed to {args.name}")
+    elif args.action == "delete":
+        await call("delete_saved_light", {"id": light["id"]})
+        print(f"Deleted {light['name']}")
+    return 0
+
+
 async def async_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="quickpuff",
@@ -347,6 +394,9 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     prof = sub.add_parser("profile")
     prof.add_argument("index", type=int, nargs="?")
+    step = prof.add_mutually_exclusive_group()
+    step.add_argument("--next", action="store_true", help="Switch to the next heat profile")
+    step.add_argument("--prev", action="store_true", help="Switch to the previous heat profile")
     prof.add_argument("--name")
     prof.add_argument("--temp-f", type=float)
     prof.add_argument("--temp-c", type=float)
@@ -359,6 +409,22 @@ async def async_main(argv: list[str] | None = None) -> int:
     color = sub.add_parser("color", help="Set a heat profile's LED color")
     color.add_argument("hex", help="#rrggbb")
     color.add_argument("--index", type=int, help="Profile 0-3 (default: the selected one)")
+
+    cycle = sub.add_parser("cycle", help="Have a heat profile's LED cycle through colors (the Peak animates it)")
+    cycle.add_argument("style", help="fade, spin, breathe, disco, split, fill, lava, confetti")
+    cycle.add_argument("colors", nargs="+", metavar="HEX", help="1-6 #rrggbb colors")
+    cycle.add_argument("--speed", type=float, default=50, help="0-100 (default 50)")
+    cycle.add_argument("--index", type=int, help="Profile 0-3 (default: the selected one)")
+    cycle.add_argument("--inhale", action="store_true", help="Lights react while you inhale (firmware AG+)")
+
+    light = sub.add_parser(
+        "light",
+        help="Save a profile's light off the Peak (e.g. an exclusive mood set in the Puffco app) and put it back later",
+    )
+    light.add_argument("action", choices=["list", "save", "apply", "rename", "delete"])
+    light.add_argument("target", nargs="?", help="save: a name · apply/rename/delete: a saved light's id or name")
+    light.add_argument("name", nargs="?", help="rename: the new name")
+    light.add_argument("--index", type=int, help="Profile 0-3 (default: the selected one)")
 
     peek = sub.add_parser("peek", help="Read a Lorax path (debug)")
     peek.add_argument("path")
@@ -403,6 +469,9 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     name = sub.add_parser("name", help="Rename the Peak")
     name.add_argument("value", nargs="?", help="New device name")
+
+    ready_anim = sub.add_parser("ready-anim", help="What plays on screen when the Peak is ready")
+    ready_anim.add_argument("value", nargs="?", choices=list(READY_ANIMATIONS))
 
     units = sub.add_parser("units")
     units.add_argument("value", choices=["F", "C", "f", "c"])
@@ -519,6 +588,10 @@ async def async_main(argv: list[str] | None = None) -> int:
             raise SystemExit("Give a level or --base/--mid/--glass/--logo")
         print(json.dumps(await call("set_brightness", payload), indent=2 if raw else None, default=str))
     elif cmd == "profile":
+        if args.next or args.prev:
+            result = await call("step_profile", {"delta": 1 if args.next else -1})
+            print(json.dumps(result) if raw else result.get("name", ""))
+            return 0
         if args.index is None:
             print_status(await call("status"), raw)
             return 0
@@ -563,6 +636,17 @@ async def async_main(argv: list[str] | None = None) -> int:
     elif cmd == "color":
         await call("set_profile_color", {"index": args.index, "hex": args.hex})
         print_status(await call("status"), raw)
+    elif cmd == "cycle":
+        await call("set_profile_cycle", {
+            "index": args.index,
+            "style": args.style,
+            "colors": args.colors,
+            "tempo": max(0.0, min(100.0, args.speed)) / 100,
+            "inhale": args.inhale,
+        })
+        print_status(await call("status"), raw)
+    elif cmd == "light":
+        return await light_command(args, raw)
     elif cmd == "peek":
         print(json.dumps(await call("peek", {"path": args.path, "size": args.size}), indent=2 if raw else None, default=str))
     elif cmd == "poke":
@@ -633,6 +717,16 @@ async def async_main(argv: list[str] | None = None) -> int:
             print_status(await call("status"), raw)
             return 0
         print_status(await call("set_device_name", {"name": args.value}), raw)
+    elif cmd == "ready-anim":
+        from .paths import save_config
+
+        cfg = load_config()
+        if args.value is None:
+            print(cfg.get("ready_animation", "rocket"))
+            return 0
+        cfg["ready_animation"] = args.value
+        save_config(cfg)
+        print(f"Ready animation: {args.value}")
     elif cmd == "units":
         from .paths import save_config
 
