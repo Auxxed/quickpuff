@@ -30,8 +30,8 @@ Column {
         panel: lightsPage.panel
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        width: Style.space(58)
-        height: width * 1.6
+        width: Style.space(46)
+        height: width * 2
         colorway: panel.statusData.product ? String(panel.statusData.product.marketing_name || "") : ""
         tint: panel.cycleOn ? panel.cycleNow : panel.profileTint
         glow: panel.lanternOn ? 0.3 + 0.7 * panel.brightnessLevel / 255 : 0.1

@@ -4,13 +4,14 @@ import Quickshell
 import qs.Ui
 import qs.Commons
 
-// A Peak Pro, drawn: the tall glass horn leaning up from the back, the
-// sloped collar carrying the chamber and carb cap on its shelf, and the
-// lower body tapering to an offset foot, finished in this Peak's own
-// colorway. The light ring where the glass meets the base, the glow up the
-// glass and the pool on the desk all take the active profile's colour.
+// A Peak Pro in side profile, traced from Puffco's own product renders: the
+// glass horn leaning up from the angled hood, the chamber on the hood's flat
+// shelf, and the dark pedestal flaring out to the foot. The hood and
+// pedestal take this Peak's colorway; the light ring round the foot, the
+// glow up the glass, the logo and the pool on the desk take the active
+// profile's colour.
 //
-// Drawn on a 100 x 160 grid (see the SVG paths) and scaled to fit.
+// Drawn on an 80 x 160 grid (the SVG paths below) and scaled to fit.
 Item {
   id: art
 
@@ -26,48 +27,47 @@ Item {
   property bool asleep: false
   readonly property bool live: panel ? panel.opened : false
 
-  implicitWidth: Style.space(70)
-  implicitHeight: implicitWidth * 1.6
-  readonly property real u: width / 100
+  implicitWidth: Style.space(60)
+  implicitHeight: implicitWidth * 2
+  readonly property real u: width / 80
 
-  // Base finish per colorway [lighter, darker], from Puffco's product shots.
+  // Per colorway: pedestal [light, dark], hood [light, dark], chamber cap.
   readonly property var finishes: ({
-    "onyx": ["#3a3a3d", "#111113"],
-    "og": ["#353537", "#0f0f10"],
-    "pearl": ["#f7f4ef", "#cbc4b8"],
-    "opal": ["#f3f0f7", "#c3bad0"],
-    "desert": ["#d4b28c", "#8c6946"],
-    "flourish": ["#5f8f6a", "#264030"],
-    "storm": ["#7b8490", "#343a43"],
-    "daybreak": ["#f3be96", "#c06f4c"],
-    "plasma": ["#8a44b8", "#2a0f42"],
-    "glacier": ["#dceef7", "#8bb0c4"],
-    "indiglow": ["#3a4db0", "#121946"],
-    "guardian": ["#4e5c43", "#1c2517"]
+    "onyx": [["#1a1a1c", "#08080a"], ["#4c4c51", "#18181b"], "#1e1e20"],
+    "og": [["#1a1a1c", "#08080a"], ["#45454a", "#161618"], "#1e1e20"],
+    "pearl": [["#e9e4dc", "#c4bcae"], ["#ffffff", "#ddd6cb"], "#f2eee8"],
+    "opal": [["#e6e1ee", "#bdb3cc"], ["#fbf9ff", "#d6cfe2"], "#efeaf5"],
+    "desert": [["#b38d66", "#7a5a3a"], ["#e3c4a0", "#b08960"], "#c9a57e"],
+    "flourish": [["#3f6a4b", "#1d3324"], ["#7fae88", "#3d6448"], "#4f7a5a"],
+    "storm": [["#4d5560", "#262b32"], ["#9aa3ae", "#5a626d"], "#59616c"],
+    "daybreak": [["#d9875f", "#9c5236"], ["#f8cfae", "#d88f68"], "#e9a07a"],
+    "plasma": [["#8a4fd6", "#4b238f"], ["#f2a36f", "#c44f8f"], "#8a4fd6"],
+    "glacier": [["#a9cde0", "#6d95ab"], ["#eef8fd", "#b6d6e6"], "#cfe6f2"],
+    "indiglow": [["#2b3a8f", "#10163f"], ["#5c6fd0", "#27348a"], "#33459e"],
+    "guardian": [["#38432f", "#171e12"], ["#68765b", "#323d29"], "#45523b"]
   })
   readonly property var finish: finishes[String(colorway).toLowerCase()] || finishes["onyx"]
-  readonly property bool lightFinish: Qt.color(finish[0]).hslLightness > 0.6
+  readonly property bool lightFinish: Qt.color(finish[1][0]).hslLightness > 0.7
   readonly property color ringColor: asleep ? Util.alpha(panel.foreground, 0.25) : tint
   readonly property color edge: lightFinish ? "#000000" : "#ffffff"
 
   // The pool of light on the desk, under everything.
   Shape {
     id: pool
-    anchors.horizontalCenter: parent.horizontalCenter
-    anchors.horizontalCenterOffset: art.u * 6
+    x: art.u * 35 - width / 2
     // Centred on the foot once squashed.
-    y: art.u * 156 - height / 2
-    width: art.u * 120
+    y: art.u * 157.5 - height / 2
+    width: art.u * 84
     height: width
     opacity: art.glow
-    transform: Scale { origin.x: pool.width / 2; origin.y: pool.height / 2; yScale: 0.14 }
+    transform: Scale { origin.x: pool.width / 2; origin.y: pool.height / 2; yScale: 0.12 }
     preferredRendererType: Shape.CurveRenderer
     ShapePath {
       strokeColor: "transparent"
       fillGradient: RadialGradient {
         centerX: pool.width / 2; centerY: pool.height / 2; centerRadius: pool.width / 2
         focalX: centerX; focalY: centerY
-        GradientStop { position: 0.0; color: Util.alpha(art.ringColor, 0.7) }
+        GradientStop { position: 0.0; color: Util.alpha(art.ringColor, 0.75) }
         GradientStop { position: 0.4; color: Util.alpha(art.ringColor, 0.25) }
         GradientStop { position: 1.0; color: Util.alpha(art.ringColor, 0) }
       }
@@ -80,94 +80,112 @@ Item {
   }
 
   Shape {
-    width: 100
+    width: 80
     height: 160
     transform: Scale { xScale: art.u; yScale: art.u }
     preferredRendererType: Shape.CurveRenderer
 
-    // ---- glass horn, lit from below
+    // ---- glass horn, lit from below, and the cone inside it
     ShapePath {
-      strokeColor: Util.alpha("#ffffff", art.asleep ? 0.2 : 0.45)
-      strokeWidth: 1.2
+      strokeColor: Util.alpha("#ffffff", art.asleep ? 0.22 : 0.5)
+      strokeWidth: 1
       joinStyle: ShapePath.RoundJoin
       fillGradient: LinearGradient {
-        x1: 0; y1: 5; x2: 0; y2: 104
-        GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0.05) }
-        GradientStop { position: 0.65; color: Util.alpha(art.ringColor, 0.1 * art.glow + (art.vapor ? 0.08 : 0)) }
-        GradientStop { position: 1.0; color: Util.alpha(art.ringColor, 0.55 * art.glow) }
+        x1: 0; y1: 1; x2: 0; y2: 108
+        GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0.04) }
+        GradientStop { position: 0.55; color: Util.alpha(art.ringColor, 0.05 + (art.vapor ? 0.08 : 0)) }
+        GradientStop { position: 1.0; color: Util.alpha(art.ringColor, 0.45 * art.glow) }
       }
-      PathSvg { path: "M51,3 L64,5 L82,108 L32,100 Z" }
+      PathSvg { path: "M12.5,1.5 Q17,0.2 21.5,0.8 L46,93 L9.5,108 Z" }
     }
-    // Highlight down the glass.
     ShapePath {
-      strokeColor: Util.alpha("#ffffff", art.asleep ? 0.12 : 0.32)
-      strokeWidth: 1.6
+      strokeColor: "transparent"
+      fillGradient: LinearGradient {
+        x1: 0; y1: 36; x2: 0; y2: 105
+        GradientStop { position: 0.0; color: Util.alpha("#ffffff", art.asleep ? 0.08 : 0.18) }
+        GradientStop { position: 1.0; color: Util.alpha(art.ringColor, 0.35 * art.glow) }
+      }
+      PathSvg { path: "M17.5,37 Q20,35.8 22.5,36.5 L35,97 L13,105 Z" }
+    }
+    ShapePath {
+      strokeColor: Util.alpha("#ffffff", art.asleep ? 0.1 : 0.28)
+      strokeWidth: 1.3
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
-      PathSvg { path: "M55,12 L44,86" }
+      PathSvg { path: "M14.5,6 L11,100" }
     }
 
-    // ---- lower body, tapering to the foot
+    // ---- pedestal, then the hood over it
     ShapePath {
-      strokeColor: Util.alpha(art.edge, 0.12)
-      strokeWidth: 0.8
+      strokeColor: "transparent"
       fillGradient: LinearGradient {
-        x1: 8; y1: 114; x2: 85; y2: 156
-        GradientStop { position: 0.0; color: art.finish[0] }
-        GradientStop { position: 1.0; color: art.finish[1] }
+        x1: 6; y1: 0; x2: 73; y2: 0
+        GradientStop { position: 0.0; color: art.finish[0][0] }
+        GradientStop { position: 1.0; color: art.finish[0][1] }
       }
-      PathSvg { path: "M8,114 L83,132 L85,150 Q85,156 79,156 L35,156 Q30,156 28,151 Z" }
+      PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C67,107 61,110 56,113.5 C60,126 63,140 64.5,152 Q65,158 60,158 L9.5,158 Q6.5,158 6.5,155 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
     }
-    // ---- collar, a shade lighter, carrying the chamber
+    ShapePath {
+      strokeColor: "transparent"
+      fillGradient: LinearGradient {
+        x1: 6; y1: 93; x2: 73; y2: 130
+        GradientStop { position: 0.0; color: art.finish[1][0] }
+        GradientStop { position: 1.0; color: art.finish[1][1] }
+      }
+      PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C52,116 24,136 6.5,151 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
+    }
     ShapePath {
       strokeColor: Util.alpha(art.edge, 0.14)
-      strokeWidth: 0.8
-      fillGradient: LinearGradient {
-        x1: 6; y1: 100; x2: 83; y2: 132
-        GradientStop { position: 0.0; color: Qt.lighter(art.finish[0], art.lightFinish ? 1.04 : 1.3) }
-        GradientStop { position: 1.0; color: Qt.lighter(art.finish[1], art.lightFinish ? 1.02 : 1.5) }
-      }
-      PathSvg { path: "M6,101 Q6,99 8,99 L82,107 L83,132 L8,114 Z" }
-    }
-    // Swooshes across the body.
-    ShapePath {
-      strokeColor: Util.alpha(art.edge, 0.09)
-      strokeWidth: 1
+      strokeWidth: 0.7
       fillColor: "transparent"
-      PathSvg { path: "M14,122 L84,140 M19,131 L84,146" }
+      PathSvg { path: "M72.3,104.4 C52,116 24,136 6.8,150.6" }
     }
-
-    // ---- light ring where the glass meets the base
     ShapePath {
-      strokeColor: art.ringColor
-      strokeWidth: 2.4
+      strokeColor: Util.alpha("#ffffff", art.lightFinish ? 0.7 : 0.4)
+      strokeWidth: 0.8
+      fillColor: "transparent"
+      PathSvg { path: "M46.5,93.2 L70,93.2 Q72.2,93.2 72.4,95.4" }
+    }
+    // Chrome seat the glass sits in.
+    ShapePath {
+      strokeColor: art.asleep ? "#8a8a8e" : "#d8d8dc"
+      strokeWidth: 1.3
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
-      PathSvg { path: "M33,100 L81,107" }
+      PathSvg { path: "M8.8,108.6 L45.8,93.1" }
     }
 
-    // ---- chamber: bowl with its coil, carb cap, knob
+    // ---- the logo and the light ring round the foot
     ShapePath {
       strokeColor: "transparent"
-      fillColor: Qt.darker(art.finish[0], art.lightFinish ? 1.15 : 1.2)
-      PathSvg { path: "M12,85 H27 Q29,85 29,87 V97 Q29,99 27,99 H12 Q10,99 10,97 V87 Q10,85 12,85 Z" }
+      fillColor: Util.alpha(art.ringColor, 0.35 + 0.65 * art.glow)
+      PathSvg { path: "M12,123 L14.6,121.6 L14.6,128.6 L12,130 Z" }
     }
     ShapePath {
-      strokeColor: art.asleep ? "#7a6a5a" : "#c98a4b"
-      strokeWidth: 1.1
+      strokeColor: art.ringColor
+      strokeWidth: 1.8
+      capStyle: ShapePath.RoundCap
       fillColor: "transparent"
-      PathSvg { path: "M11,88 H28 M11,91 H28 M11,94 H28 M11,97 H28" }
+      PathSvg { path: "M8.5,157 L61,157" }
     }
-    ShapePath {
-      strokeColor: Util.alpha(art.edge, 0.12)
-      strokeWidth: 0.8
-      fillColor: Qt.lighter(art.finish[0], art.lightFinish ? 1.0 : 1.1)
-      PathSvg { path: "M11,76 H28 Q31,76 31,79 V83 Q31,86 28,86 H11 Q8,86 8,83 V79 Q8,76 11,76 Z" }
-    }
+
+    // ---- chamber on the shelf: chrome collar and knurled cap
     ShapePath {
       strokeColor: "transparent"
-      fillColor: Qt.lighter(art.finish[0], art.lightFinish ? 0.95 : 1.3)
-      PathSvg { path: "M17,70.5 H22 Q24,70.5 24,72.5 V76.5 H15 V72.5 Q15,70.5 17,70.5 Z" }
+      fillColor: art.asleep ? "#8a8a8e" : "#c9c9ce"
+      PathSvg { path: "M50.5,90.5 H69.5 V93.5 H50.5 Z" }
+    }
+    ShapePath {
+      strokeColor: Util.alpha(art.edge, 0.15)
+      strokeWidth: 0.5
+      fillColor: art.finish[2]
+      PathSvg { path: "M51.5,80.5 H69 Q71,80.5 71,82.5 V89 Q71,91 69,91 H51.5 Q49.5,91 49.5,89 V82.5 Q49.5,80.5 51.5,80.5 Z" }
+    }
+    ShapePath {
+      strokeColor: Util.alpha(art.edge, 0.1)
+      strokeWidth: 0.6
+      fillColor: "transparent"
+      PathSvg { path: "M52,82 L54,90 M55,82 L57,90 M58,82 L60,90 M61,82 L63,90 M64,82 L66,90 M67,82 L69,90" }
     }
   }
 
@@ -177,7 +195,7 @@ Item {
     Rectangle {
       id: puff
       required property int index
-      width: art.u * 10
+      width: art.u * 8
       height: width
       radius: width / 2
       color: Util.alpha("#ffffff", 0.55)
@@ -189,9 +207,9 @@ Item {
         loops: Animation.Infinite
         PauseAnimation { duration: puff.index * 600 }
         ParallelAnimation {
-          NumberAnimation { target: puff; property: "y"; from: art.u * 92; to: art.u * 14; duration: 2000; easing.type: Easing.OutSine }
-          NumberAnimation { target: puff; property: "x"; from: art.u * (52 + puff.index * 4); to: art.u * (52 + (puff.index % 2 ? 5 : -3)); duration: 2000; easing.type: Easing.InOutSine }
-          NumberAnimation { target: puff; property: "scale"; from: 0.6; to: 1.6; duration: 2000 }
+          NumberAnimation { target: puff; property: "y"; from: art.u * 96; to: art.u * 8; duration: 2000; easing.type: Easing.OutSine }
+          NumberAnimation { target: puff; property: "x"; from: art.u * (20 + puff.index * 4); to: art.u * (13 + (puff.index % 2 ? 4 : 0)); duration: 2000; easing.type: Easing.InOutSine }
+          NumberAnimation { target: puff; property: "scale"; from: 0.6; to: 1.5; duration: 2000 }
           SequentialAnimation {
             NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.45; duration: 300 }
             NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 1700; easing.type: Easing.InQuad }
