@@ -104,17 +104,28 @@ removal.
   battery saver rests the Peak, it keeps showing the last battery reading.
   Left-click opens the panel, right-click starts a heat cycle, middle-click
   refreshes.
+- **Panel header** — a drawing of your Peak Pro, traced from Puffco's own
+  renders, in its colorway (Onyx, OG, Pearl, Opal, Desert, Flourish, Storm,
+  Daybreak, Plasma, Glacier, Indiglow or Guardian; any other draws as Onyx).
+  The light ring, the glow up the glass and the pool on the desk take the
+  active profile's colour. It breathes while the Peak preheats, vapour curls
+  in the glass at temperature, and it goes dark while the Peak is away.
+  Beside it: the chamber temperature, the target profile and heat progress.
 - **Control** — Heat, Boost and Stop, with a countdown ring while the Peak
-  heats up and during the session; the four heat profiles (click one to
-  select it, click a value to type it, or nudge it with − and +); vapor level;
+  heats up and during the session. Heat is the wide button, filled with the
+  profile's colour. The four heat profiles: click one to select it, click a
+  value to type it, or point at a card to show its − and + steppers; vapor level;
   and boost temperature and time. Below 10% battery, unplugged, it warns that
   the Peak may refuse to heat. A heat graph draws the chamber's climb through
   the current session (or the last one), with its heat-up time, peak and time
   at temperature; the daemon records it, so opening the panel mid-session
   still shows the whole curve. **Ready animation** picks what plays over the
-  desktop when the Peak reaches temperature: a rocket, confetti, or nothing.
+  desktop when the Peak reaches temperature: Rocket, Confetti, Lava Lamp,
+  Aurora, Fireworks, Smoke Rings, Neon, or Off. **Preview** plays the one
+  you picked.
 - **Lights** — LED on/off, brightness, stealth mode, the selected
-  profile's LED color. **Color cycle** has the Peak animate a profile's light
+  profile's LED color, previewed on the drawn Peak at the brightness you
+  set (with the cycle playing, if one is on). **Color cycle** has the Peak animate a profile's light
   through up to six colors (Fade, Spin, Breathe, Disco, Split, Fill, Lava and
   Confetti, the same moods the Puffco app has) at the speed you choose, with a
   preview strip in the panel. Ready-made palettes are included, and **React to
@@ -130,7 +141,9 @@ removal.
   heat profiles you used over the last 30 days (with each one's usual
   temperature). **History** lists every dab with its profile, temperature and
   heat-up time; tap one to add a note, and tap again any time to edit it.
-- **Care** — Battery Preservation (charge to 80% only, the same setting as
+- **Care** — a charge bar in the Peak's own battery colours (green, yellow
+  under 60%, red under 30%), marked at 80% while Battery Preservation is on;
+  Battery Preservation (charge to 80% only, the same setting as
   the Puffco app's), battery saver (30 seconds after a session
   or after 10 minutes idle, turns the lantern off and lets the Peak rest), a Q-tip reminder after each dab, and a
   chamber-clean reminder (every 10–100 dabs); under Goals, an optional daily
@@ -248,7 +261,7 @@ quickpuff color '#ff6a1a' --index 0  # a profile's LED color
 quickpuff cycle lava '#ff2d55' '#ff6a1a' '#ffb000' --speed 40  # animate it
 quickpuff light save "Puffcon"     # keep the light a profile is wearing
 quickpuff light list               # then: light apply|rename|delete NAME
-quickpuff ready-anim confetti      # rocket, confetti or off
+quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, smoke, neon or off
 quickpuff surprise on              # a new light after each session
 quickpuff stealth on
 quickpuff battery                  # show the charge on the Peak's own lights
@@ -288,6 +301,14 @@ cd quickpuff
 ~/.local/share/quickpuff/venv/bin/pip install pytest
 ~/.local/share/quickpuff/venv/bin/python -m pytest
 ```
+
+`Panel.qml` holds the state, polling and actions, plus the header and tabs.
+Each tab is a file in `pages/`, and each reusable piece is a file in
+`components/`. Every extracted file takes the panel as a `panel` property
+(`panel: root`) and reads state and calls actions through it; a bare
+`root: root` would bind to itself. Ready animations live in
+`ReadyOverlay.qml`: add a component there, then list it in `READY_ANIMATIONS`
+in `src/quickpuff/constants.py` and in the panel's `readyAnimations`.
 
 Keep virtual environments outside the checkout: `omarchy plugin` refuses
 symlinks inside a plugin folder, and a venv is full of them.
