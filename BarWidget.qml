@@ -74,6 +74,13 @@ BarWidget {
     function toggle(): void { root.togglePanel() }
     // Plays the ready animation now, for trying it out.
     function celebrate(): void { root.playReady("") }
+    // Plays a given ready animation (rocket, confetti, lava, ...).
+    function preview(name: string): void { root.playReady(name) }
+    // Opens the panel on a tab: control, lights, usage, care or device.
+    function openPage(name: string): void {
+      root.open()
+      if (panelLoader.item && "page" in panelLoader.item) panelLoader.item.page = name
+    }
   }
 
   visible: outputText !== ""
