@@ -21,6 +21,7 @@ Each trend compares the earliest sessions with the latest, and stays
 from __future__ import annotations
 
 import statistics
+from bisect import bisect_right
 from datetime import datetime
 from itertools import pairwise
 from typing import Any
@@ -130,7 +131,7 @@ def battery_per_dab(events: list[dict], device_sessions: list[dict]) -> dict[str
         drop = b0 - b1
         if drop <= 0 or t1 - t0 > BATTERY_MAX_GAP_S:
             continue  # charged in between, or long enough for idle drain to blur it
-        if sum(1 for ts in starts if t0 < ts <= t1) != 1:
+        if bisect_right(starts, t1) - bisect_right(starts, t0) != 1:
             continue
         points.append((t1, float(drop)))
     points.sort()
