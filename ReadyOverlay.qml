@@ -818,37 +818,38 @@ PanelWindow {
 
     NumberAnimation on t { from: 0; to: 1; duration: 5600; running: true; onFinished: overlay.finished() }
 
-    Item {
-      id: puffs
-      anchors.fill: parent
-      visible: false
-      layer.enabled: true
+    Repeater {
+      model: 5
+      Item {
+        id: ring
+        required property int index
+        readonly property real p: Math.max(0, Math.min(1, (smoke.t - index * 0.13) / 0.55))
+        readonly property real e: 1 - Math.pow(1 - p, 2)
+        visible: p > 0 && p < 1
+        width: (70 + 300 * e) * smoke.s
+        height: width * 0.36
+        x: Math.max(0, Math.min(smoke.width - width, overlay.originX - width / 2 + Math.sin(p * Math.PI * 2 + index) * 50 * smoke.s))
+        y: overlay.barEdge + smoke.dir * (50 + 520 * e) * smoke.s - height / 2
+        opacity: 1 - p * p
 
-      Repeater {
-        model: 5
-        Rectangle {
-          required property int index
-          readonly property real p: Math.max(0, Math.min(1, (smoke.t - index * 0.13) / 0.55))
-          readonly property real e: 1 - Math.pow(1 - p, 2)
-          visible: p > 0 && p < 1
-          width: (60 + 260 * e) * smoke.s
-          height: width * 0.34
-          radius: height / 2
-          x: Math.max(0, Math.min(smoke.width - width, overlay.originX - width / 2 + Math.sin(p * Math.PI * 2 + index) * 50 * smoke.s))
-          y: overlay.barEdge + smoke.dir * (40 + 520 * e) * smoke.s - height / 2
-          color: "transparent"
-          border.width: (34 - 18 * e) * smoke.s
-          border.color: Util.alpha(Qt.tint("#f2f2f6", Util.alpha(overlay.tint, 0.3)), 0.95 * (1 - p * p))
+        // A few soft layers in place of a blur: a dense core band with
+        // fainter, wider halos either side, so it reads as smoke.
+        Repeater {
+          model: 4
+          Rectangle {
+            required property int index
+            readonly property real spread: index * 5 * smoke.s
+            x: -spread
+            y: -spread * 0.6
+            width: ring.width + spread * 2
+            height: ring.height + spread * 1.2
+            radius: height / 2
+            color: "transparent"
+            border.width: Math.max(2, ring.height * (0.22 - index * 0.03))
+            border.color: Util.alpha(Qt.tint("#f2f2f6", Util.alpha(overlay.tint, 0.3)), [0.55, 0.3, 0.16, 0.08][index])
+          }
         }
       }
-    }
-
-    MultiEffect {
-      anchors.fill: puffs
-      source: puffs
-      blurEnabled: true
-      blurMax: 32
-      blur: 0.45
     }
   }
 
