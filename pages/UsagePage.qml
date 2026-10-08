@@ -146,9 +146,10 @@ Column {
                   : Style.space(2)
                 anchors.bottom: parent.bottom
                 radius: Math.min(2, Style.cornerRadius)
-                readonly property color barTop: parent.hovered ? Qt.lighter(Color.accent, 1.35)
-                  : parent.isToday ? Color.accent
-                  : parent.count > 0 ? Util.alpha(Color.accent, 0.75)
+                // Bars wear the active profile's colour, today's fullest.
+                readonly property color barTop: parent.hovered ? Qt.lighter(panel.profileTint, 1.35)
+                  : parent.isToday ? panel.profileTint
+                  : parent.count > 0 ? Util.alpha(panel.profileTint, 0.7)
                   : Util.alpha(panel.foreground, 0.12)
                 gradient: Gradient {
                   GradientStop { position: 0.0; color: dayBar.barTop }
@@ -220,6 +221,8 @@ Column {
           title: "Streak"
           glyph: "\uf06d"
           glyphColor: (Number(panel.telemetry.streak) || 0) > 0 ? panel.urgent : panel.dim
+          // A live streak is worth showing off.
+          highlight: (Number(panel.telemetry.streak) || 0) > 0
           value: (Number(panel.telemetry.streak) || 0) + "d"
           meta: (Number(panel.telemetry.streak_best) || 0) > 0
             ? "Best " + Math.round(Number(panel.telemetry.streak_best)) + "d"
@@ -234,10 +237,10 @@ Column {
                 width: Style.space(8)
                 height: Style.space(8)
                 radius: width / 2
-                color: Number(modelData.count) > 0 ? Color.accent : "transparent"
+                color: Number(modelData.count) > 0 ? panel.profileTint : "transparent"
                 scale: modelData.today ? 1.2 : 1
                 border.width: modelData.today ? 1 : (Number(modelData.count) > 0 ? 0 : 1)
-                border.color: modelData.today ? Color.accent : Util.alpha(panel.foreground, 0.3)
+                border.color: modelData.today ? panel.profileTint : Util.alpha(panel.foreground, 0.3)
               }
             }
           }
@@ -278,7 +281,7 @@ Column {
                     anchors.bottom: parent.bottom
                     radius: 1
                     color: parent.index === Number(panel.telemetry.top_hour)
-                      ? Color.accent
+                      ? panel.profileTint
                       : Util.alpha(panel.foreground, (Number(panel.hourSeries[parent.index]) || 0) > 0 ? 0.45 : 0.12)
                   }
                 }
@@ -337,8 +340,11 @@ Column {
               elide: Text.ElideRight
               text: panel.profileUsageName(usageRow.modelData.index)
               color: panel.foreground
-              font.family: panel.fontFamily
-              font.pixelSize: Style.font.bodySmall
+              font.family: panel.displayFamily
+              font.pixelSize: Math.round(Style.font.bodySmall * panel.displayScale)
+              font.weight: Font.DemiBold
+              font.capitalization: panel.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+              font.letterSpacing: panel.hasDisplayFont ? 0.6 : 0
             }
 
             Text {

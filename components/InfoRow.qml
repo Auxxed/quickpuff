@@ -37,8 +37,10 @@ Item {
     textFormat: Text.PlainText
     text: info.value
     color: panel.foreground
-    font.family: panel.fontFamily
-    font.pixelSize: Style.font.bodySmall
+    // Values in the display face, a touch larger than the label.
+    font.family: panel.displayFamily
+    font.pixelSize: Math.round(Style.font.bodySmall * panel.displayScale)
+    font.weight: Font.DemiBold
     elide: Text.ElideRight
   }
 }

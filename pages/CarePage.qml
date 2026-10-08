@@ -18,7 +18,34 @@ Column {
     panel: carePage.panel
     title: "BATTERY"
     glyph: "\uf240"
-    trailing: panel.batteryLabel !== "" ? panel.batteryLabel + " charged" : ""
+
+    // Charge as a big readout in the Peak's battery colour, the way the
+    // Puffco app leads its battery card.
+    Item {
+      width: parent.width
+      visible: panel.batteryLabel !== ""
+      implicitHeight: batteryBig.implicitHeight
+
+      Text {
+        id: batteryBig
+        anchors.left: parent.left
+        textFormat: Text.PlainText
+        text: Math.round(Number(panel.statusData.battery)) + "%"
+        color: panel.batteryColor(Number(panel.statusData.battery) / 100)
+        font.family: panel.displayFamily
+        font.pixelSize: Math.round(Style.font.subtitle * panel.displayScale)
+        font.weight: Font.DemiBold
+      }
+      Text {
+        anchors.right: parent.right
+        anchors.baseline: batteryBig.baseline
+        textFormat: Text.PlainText
+        text: panel.pluggedIn ? "\uf0e7  " + String(panel.statusData.charge_state || "Plugged in") : "On battery"
+        color: panel.pluggedIn ? Color.accent : panel.dim
+        font.family: panel.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
 
     // Charge, in the Peak's own battery colours, with the 80% mark while
     // Battery Preservation holds it there (as the Puffco app draws it).
@@ -34,11 +61,12 @@ Column {
 
     Item {
       width: parent.width
-      height: healthLabel.implicitHeight
+      height: Math.max(healthLabel.implicitHeight, healthValue.implicitHeight)
       visible: panel.batteryHealthLabel !== ""
 
       Text {
         id: healthLabel
+        anchors.baseline: healthValue.baseline
         textFormat: Text.PlainText
         text: "Health"
         color: panel.dim
@@ -46,12 +74,15 @@ Column {
         font.pixelSize: Style.font.caption
       }
       Text {
+        id: healthValue
         anchors.right: parent.right
+        anchors.bottom: parent.bottom
         textFormat: Text.PlainText
         text: panel.batteryHealthLabel
-        color: panel.dim
-        font.family: panel.fontFamily
-        font.pixelSize: Style.font.caption
+        color: panel.foreground
+        font.family: panel.displayFamily
+        font.pixelSize: Math.round(Style.font.bodySmall * panel.displayScale)
+        font.weight: Font.DemiBold
       }
     }
 
@@ -62,7 +93,7 @@ Column {
       value: parseFloat(panel.batteryHealthLabel) / 100
       fill: parseFloat(panel.batteryHealthLabel) < 70 ? panel.urgent
         : parseFloat(panel.batteryHealthLabel) < 80 ? "#ffb347"
-        : Color.accent
+        : panel.profileTint
     }
 
     SwitchRow {
@@ -107,7 +138,7 @@ Column {
       value: panel.cleanDue ? 1 : 1 - panel.cleanRemaining / Math.max(1, panel.cleanEvery)
       fill: panel.cleanDue ? panel.urgent
         : (1 - panel.cleanRemaining / Math.max(1, panel.cleanEvery)) > 0.75 ? "#ffb347"
-        : Color.accent
+        : panel.profileTint
       throb: panel.cleanDue
     }
 
@@ -247,7 +278,7 @@ Column {
       width: parent.width
       visible: panel.dailyLimit > 0
       value: Number(panel.telemetry.today || 0) / Math.max(1, panel.dailyLimit)
-      fill: Number(panel.telemetry.today || 0) >= panel.dailyLimit ? panel.urgent : Color.accent
+      fill: Number(panel.telemetry.today || 0) >= panel.dailyLimit ? panel.urgent : panel.profileTint
     }
 
     Text {
