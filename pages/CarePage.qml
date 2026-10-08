@@ -137,6 +137,59 @@ Column {
 
   Section {
     panel: carePage.panel
+    title: "WEAR"
+    glyph: "\uf0ad"
+
+    Grid {
+      width: parent.width
+      columns: 2
+      columnSpacing: Style.spacing.controlGap
+
+      readonly property real cellWidth: (width - columnSpacing) / 2
+
+      TrendCard {
+        panel: carePage.panel
+        width: parent.cellWidth
+        title: panel.wear.heatup && panel.wear.heatup.ref_temp_f
+          ? "Heat-up · " + panel.formatTemp(panel.wear.heatup.ref_temp_f)
+          : "Heat-up"
+        glyph: "\uf2c9"
+        unit: "s"
+        trend: panel.wear.heatup || ({})
+      }
+
+      TrendCard {
+        panel: carePage.panel
+        width: parent.cellWidth
+        title: "Battery per dab"
+        glyph: "\uf240"
+        unit: "%"
+        trend: panel.wear.battery || ({})
+      }
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: {
+        var hints = []
+        if (panel.wear.heatup && panel.wear.heatup.state === "up")
+          hints.push("Heating up slower than it used to. A deep clean of the chamber often fixes it; if not, the atomizer may be wearing out.")
+        if (panel.wear.battery && panel.wear.battery.state === "up")
+          hints.push("Each dab takes more of the battery than it used to, a sign the pack is ageing. Charge to 80% only helps it last.")
+        if (hints.length === 0)
+          return "Heat-up counts cold starts only, scaled to the heat you use now. Both compare your first sessions with your latest."
+        return hints.join(" ")
+      }
+      color: panel.dim
+      font.family: panel.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  Section {
+    panel: carePage.panel
     title: "GOALS"
     glyph: "\uf140"
     trailing: panel.dailyLimit > 0

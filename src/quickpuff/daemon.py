@@ -365,6 +365,7 @@ class QuickPuffDaemon:
         self._surprise_rng = random.Random()
         self._session_reached_temp = False
         self._cycle_ts: float | None = None
+        self._battery_at_start: Any = None
         self.heat_trace = HeatTrace()
         self.daily_limit = clamp_daily_limit(load_config().get("daily_limit"))
         self.weekly_recap = _as_bool(load_config().get("weekly_recap", True))
@@ -906,6 +907,7 @@ class QuickPuffDaemon:
                     if self.device is not dev:
                         return
                     prev_state = self.status.get("operating_state_id")
+                    prev_battery = self.status.get("battery")
                     watching = self._watching()
                     now = time.monotonic()
                     kind = snapshot_kind(
@@ -936,6 +938,9 @@ class QuickPuffDaemon:
                     self.status["heat_trace"] = self.heat_trace.as_status()
                     await self._broadcast_event("status", self.status)
                     new_state = self.status.get("operating_state_id")
+                    if prev_state not in CYCLE_STATES and new_state in CYCLE_STATES:
+                        # The charge before the heater drew anything, for battery per dab.
+                        self._battery_at_start = prev_battery
                     if cycle_just_ended(prev_state, new_state):
                         # The odometer and counters move as a session ends; read them next poll.
                         last_counters = float("-inf")
@@ -945,7 +950,9 @@ class QuickPuffDaemon:
                         elif cycle_just_ended(prev_state, new_state):
                             self._schedule_saver_sleep()
                     if prev_state != new_state and new_state == int(OperatingState.HEAT_CYCLE_ACTIVE):
-                        self._cycle_ts = history.record_cycle(**self._cycle_meta())["ts"]
+                        self._cycle_ts = history.record_cycle(
+                            **self._cycle_meta(), battery_start=self._battery_at_start
+                        )["ts"]
                         self.status["telemetry"] = history.get_stats()
                         await self._count_session()
                         self._spawn(self._sync_usage_safe(delay=5.0))

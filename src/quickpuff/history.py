@@ -21,6 +21,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from . import wear
 from .paths import data_dir, write_json_atomic
 
 RETENTION_DAYS = 730
@@ -165,8 +166,13 @@ def record_cycle(
     temp_f: float | None = None,
     time_s: float | None = None,
     color: str | None = None,
+    battery_start: Any = None,
 ) -> dict[str, Any]:
-    """Log one heat cycle QuickPuff actually watched reach temperature."""
+    """Log one heat cycle QuickPuff actually watched reach temperature.
+
+    `battery_start` is the charge just before it began heating; with the
+    reading `record_battery` adds once it's over, that's what the dab cost.
+    """
     data = _load()
     now = time.time()
     last = data.get("last_total")
@@ -180,6 +186,9 @@ def record_cycle(
         event["time_s"] = float(time_s)
     if color:
         event["color"] = str(color)
+    pct = _battery_pct(battery_start)
+    if pct is not None:
+        event["battery_start"] = pct
     events = data.get("events", [])
     events.append(event)
     cutoff = now - RETENTION_DAYS * 86400
@@ -192,14 +201,19 @@ def record_cycle(
     return event
 
 
-def record_battery(cycle_ts: float, battery: Any) -> bool:
-    """Note the charge left once the cycle logged at `cycle_ts` is over."""
+def _battery_pct(battery: Any) -> int | None:
     try:
         pct = int(battery)
     except (TypeError, ValueError):
-        return False
+        return None
     # A Peak won't heat near 5%, so 0 is a reading that was never taken.
-    if not 1 <= pct <= 100:
+    return pct if 1 <= pct <= 100 else None
+
+
+def record_battery(cycle_ts: float, battery: Any) -> bool:
+    """Note the charge left once the cycle logged at `cycle_ts` is over."""
+    pct = _battery_pct(battery)
+    if pct is None:
         return False
     data = _load()
     for event in reversed(data.get("events", [])):
@@ -488,6 +502,7 @@ def get_stats(days: int = 14) -> dict[str, Any]:
         "colors": colors,
         "profiles": _profile_usage(data.get("device_sessions") or [], time.time()),
         "profile_days": PROFILE_WINDOW_DAYS,
+        "wear": wear.trends(data),
     }
 
 

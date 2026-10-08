@@ -134,7 +134,13 @@ removal.
   the Puffco app's), battery saver (30 seconds after a session
   or after 10 minutes idle, turns the lantern off and lets the Peak rest), a Q-tip reminder after each dab, and a
   chamber-clean reminder (every 10–100 dabs); under Goals, an optional daily
-  limit and a weekly recap on Sunday evenings.
+  limit and a weekly recap on Sunday evenings. **Wear** tracks two slow
+  trends: how long the Peak takes to heat up (cold starts only, scaled to the
+  temperature you use now, from the Peak's own log), and how much battery
+  each dab takes. Each compares your first sessions with your latest and
+  says when one is creeping up: a slower heat-up usually means the chamber
+  needs a deep clean or the atomizer is wearing out, and a costlier dab
+  means the pack is ageing.
 - **Device** — rename the Peak; model, chamber, battery (with time until full
   while charging), battery capacity and health, firmware, serial and uptime;
   the fault log of heater, battery and pairing problems (saved per Peak, so it
@@ -289,7 +295,7 @@ symlinks inside a plugin folder, and a venv is full of them.
 The tests cover the CBOR and color codec, audit-log decoding, dab-history date
 maths, config and profile limits, battery saver resting and waking, the command
 queue, notifications and goals, the mood-light formulas and colour blending,
-saved lights, the heat graph's recording, `quickpuff doctor`, the CLI parser, the daemon
+saved lights, Surprise me, the wear trends, the heat graph's recording, `quickpuff doctor`, the CLI parser, the daemon
 liveness probe, and the plugin manifest. The Bluetooth layer itself needs real
 hardware, so it's exercised by hand against a Peak Pro.
 

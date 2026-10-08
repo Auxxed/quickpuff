@@ -271,6 +271,8 @@ Panel {
   }
 
   readonly property var telemetry: statusData.telemetry || ({})
+  // Heat-up and battery-per-dab trends (wear.py), for the Care tab.
+  readonly property var wear: telemetry.wear || ({})
   readonly property bool showStats: {
     if (connected) return true
     if (telemetry.tracking_since) return true
