@@ -34,7 +34,8 @@ break it. It works with the **Peak Pro only**; Proxy and Pivot are rejected.
   the fault log and LED colours all work across Peak Pro firmware versions.
   Firmware before AF stores LED colours in an older format; QuickPuff writes
   that format the way the Puffco app does, but it has only been tested on
-  newer firmware so far.
+  newer firmware so far. The Lava and Confetti cycles need firmware AF or
+  newer, and React to inhales needs AG.
 - Firmware from before Puffco's current Bluetooth protocol can't connect.
   Update it once in the Puffco app.
 - More than one Peak nearby (or a friend's): choose it with **Find nearby
@@ -82,10 +83,9 @@ omarchy plugin update auxxed.quickpuff && ~/.config/omarchy/plugins/auxxed.quick
 
 Used this back when it was called OmaPuffco or Ember? Remove the old plugin with
 `omarchy plugin remove auxxed.omapuffco --yes` (or `auxxed.ember`), then run the
-install line above. `install.sh` stops the old daemon and carries your settings
-and dab history across.
-`install.sh` moves your settings and dab history across and swaps the old
-widget out, keeping its place in the bar.
+install line above. `install.sh` stops the old daemon, carries your settings
+and dab history across, and swaps the old widget out, keeping its place in the
+bar.
 
 ## Remove
 
@@ -108,9 +108,20 @@ removal.
   heats up and during the session; the four heat profiles (click one to
   select it, click a value to type it, or nudge it with − and +); vapor level;
   and boost temperature and time. Below 10% battery, unplugged, it warns that
-  the Peak may refuse to heat.
+  the Peak may refuse to heat. A heat graph draws the chamber's climb through
+  the current session (or the last one), with its heat-up time, peak and time
+  at temperature; the daemon records it, so opening the panel mid-session
+  still shows the whole curve. **Ready animation** picks what plays over the
+  desktop when the Peak reaches temperature: a rocket, confetti, or nothing.
 - **Lights** — LED on/off, brightness, stealth mode, the selected
-  profile's LED color.
+  profile's LED color. **Color cycle** has the Peak animate a profile's light
+  through up to six colors (Fade, Spin, Breathe, Disco, Split, Fill, Lava and
+  Confetti, the same moods the Puffco app has) at the speed you choose, with a
+  preview strip in the panel. Ready-made palettes are included, and **React to
+  inhales** makes the light respond while you pull. **My lights** saves the
+  light a profile is wearing and puts it back later. That includes exclusive
+  moods like Puffcon, which only the Puffco app can set: set one in the app,
+  reconnect QuickPuff, and save it.
 - **Usage** — today, this week, this month and lifetime counts, a daily chart,
   streaks, your peak hour, average session length and temperature, and which
   heat profiles you used over the last 30 days (with each one's usual
@@ -223,7 +234,12 @@ quickpuff heat start|stop|boost
 quickpuff profile 0 --temp-f 510 --time 75 --color '#ff6a1a'
 quickpuff lantern on
 quickpuff brightness 160
+quickpuff profile --next           # or --prev: switch heat profile
 quickpuff color '#ff6a1a' --index 0  # a profile's LED color
+quickpuff cycle lava '#ff2d55' '#ff6a1a' '#ffb000' --speed 40  # animate it
+quickpuff light save "Puffcon"     # keep the light a profile is wearing
+quickpuff light list               # then: light apply|rename|delete NAME
+quickpuff ready-anim confetti      # rocket, confetti or off
 quickpuff stealth on
 quickpuff battery                  # show the charge on the Peak's own lights
 quickpuff preserve on              # stop charging at 80% (off: charge to 100%)
@@ -268,7 +284,8 @@ symlinks inside a plugin folder, and a venv is full of them.
 
 The tests cover the CBOR and color codec, audit-log decoding, dab-history date
 maths, config and profile limits, battery saver resting and waking, the command
-queue, notifications and goals, `quickpuff doctor`, the CLI parser, the daemon
+queue, notifications and goals, the mood-light formulas and colour blending,
+saved lights, the heat graph's recording, `quickpuff doctor`, the CLI parser, the daemon
 liveness probe, and the plugin manifest. The Bluetooth layer itself needs real
 hardware, so it's exercised by hand against a Peak Pro.
 
