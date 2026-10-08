@@ -731,6 +731,14 @@ class QuickPuffDaemon:
         self._end_rest()
         self._yielded = False
         self.status["handed_off"] = False
+        # A start charge from the last link may belong to a session that went
+        # on without us, or to another Peak; better none than a wrong one.
+        self._battery_at_start = None
+        if self.status.get("operating_state_id") not in CYCLE_STATES:
+            # Whatever session the last link saw begin ended out of sight; its
+            # end must not land on the next session, aborted preheat or not.
+            self._session_reached_temp = False
+            self._cycle_ts = None
         self._start_poll()
         await self._refresh_clean(self.status.get("total_dabs"), notify=True)
         if sync:
@@ -950,8 +958,11 @@ class QuickPuffDaemon:
                         elif cycle_just_ended(prev_state, new_state):
                             self._schedule_saver_sleep()
                     if prev_state != new_state and new_state == int(OperatingState.HEAT_CYCLE_ACTIVE):
+                        # Taken once: a dab started from the fade of the last one
+                        # has no clean start of its own, and must not borrow that one's.
+                        battery_start, self._battery_at_start = self._battery_at_start, None
                         self._cycle_ts = history.record_cycle(
-                            **self._cycle_meta(), battery_start=self._battery_at_start
+                            **self._cycle_meta(), battery_start=battery_start
                         )["ts"]
                         self.status["telemetry"] = history.get_stats()
                         await self._count_session()
@@ -1448,6 +1459,8 @@ class QuickPuffDaemon:
         if prev_state in CYCLE_STATES and new_state not in CYCLE_STATES:
             reached, self._session_reached_temp = self._session_reached_temp, False
             cycle_ts, self._cycle_ts = self._cycle_ts, None
+            # An aborted preheat's start charge isn't the next session's.
+            self._battery_at_start = None
             if reached:
                 if cycle_ts is not None:
                     # This poll just read the battery, after the heater let go.
@@ -1477,6 +1490,10 @@ class QuickPuffDaemon:
                 if not self.surprise_light or not dev or not dev.is_connected:
                     return
                 index = int(await dev.get_current_profile())
+                if not 0 <= index < PROFILE_COUNT:
+                    return  # custom temperatures: no profile to carry a light
+                if await dev.get_led_api() == 2:
+                    return  # firmware this old takes one colour, never a cycle or a saved light
                 cfg = load_config()
                 ours = cfg.get("surprise_last") or {}
                 raw = await dev.get_profile_colour_raw(index)
@@ -1502,15 +1519,23 @@ class QuickPuffDaemon:
                     new_raw = saved_lights.get_raw(look["saved"])
                     await dev.set_profile_light_raw(index, new_raw)
                     new_id = look["saved"]
-                    self._patch_profile(index, light_id=new_id)
+                    shown = saved_lights.describe(new_raw)
+                    self._patch_profile(
+                        index,
+                        light_id=new_id,
+                        color=(shown["colors"] or [None])[0],
+                        cycle=None if shown["style"] == "solid" else {"style": shown["style"], "colors": shown["colors"], "tempo": 0.5, "inhale": False},
+                    )
                 else:
-                    await dev.set_profile_cycle(index, look["style"], look["colors"], look["tempo"])
+                    # A light that followed your inhale keeps doing so (the Peak drops it before AG).
+                    inhale = saved_lights.reacts_to_inhale(raw) and api >= PuffcoUtils.revision_string_to_number("AG")
+                    await dev.set_profile_cycle(index, look["style"], look["colors"], look["tempo"], inhale=inhale)
                     new_id = saved_lights.light_id(await dev.get_profile_colour_raw(index))
                     self._patch_profile(
                         index,
                         color=look["colors"][0],
                         light_id=None,
-                        cycle={"style": look["style"], "colors": look["colors"], "tempo": look["tempo"], "inhale": False},
+                        cycle={"style": look["style"], "colors": look["colors"], "tempo": look["tempo"], "inhale": inhale},
                     )
                 cfg = load_config()
                 cfg["surprise_last"] = {**(cfg.get("surprise_last") or {}), str(index): new_id}
@@ -1519,7 +1544,8 @@ class QuickPuffDaemon:
                 self.status["saved_lights"] = saved_lights.listing()
                 log.info("Surprise: %s gets %s next", self._profile_name(index), look["key"])
             await self._broadcast_event("status", self.status)
-        except (LoraxError, OSError, asyncio.TimeoutError) as exc:
+        except Exception as exc:
+            # A link that drops mid-way, or a light that won't decode: try again next session.
             log.warning("Surprise: couldn't change the light: %s", exc)
 
     async def _set_surprise(self, enable: bool) -> dict[str, Any]:

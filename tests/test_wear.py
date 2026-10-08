@@ -95,3 +95,18 @@ def test_record_cycle_keeps_the_charge_it_started_with():
 def test_record_cycle_ignores_a_reading_never_taken():
     assert "battery_start" not in history.record_cycle(battery_start=0)
     assert "battery_start" not in history.record_cycle(battery_start=None)
+
+
+# ------------------------------------------------------------- cost
+
+def test_trends_stay_cheap_on_two_years_of_history():
+    # They run on every status read. Readings half an hour apart with a dab
+    # between each are the old-readings fallback's worst case.
+    import time
+
+    device = [{"index": i, "ts": T0 + i * 1800 - 60, "preheat_s": 27.0, "temp_c": 272} for i in range(6000)]
+    events = [{"ts": T0 + i * 1800, "delta": 1, "battery": 100 - i % 20} for i in range(6000)]
+    began = time.perf_counter()
+    out = wear.trends({"device_sessions": device, "events": events})
+    assert time.perf_counter() - began < 0.25
+    assert out["battery"]["samples"] == 5700

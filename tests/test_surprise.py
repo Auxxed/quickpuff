@@ -61,13 +61,16 @@ def test_a_lone_saved_light_that_just_played_gives_way_to_a_cycle():
 class FakePeak:
     is_connected = True
 
-    def __init__(self, raw: bytes, api: str = "AW"):
-        self.raw = {1: raw}
+    def __init__(self, raw: bytes, api: str = "AW", led_api: int = 3, profile: int = 1):
+        self.raw = {profile: raw}
         self.api = PuffcoUtils.revision_string_to_number(api)
+        self.led_api = led_api
+        self.profile = profile
         self.cycles = []
+        self.inhale = []
 
     async def get_current_profile(self):
-        return 1
+        return self.profile
 
     async def get_profile_colour_raw(self, index=None):
         return self.raw[index]
@@ -75,8 +78,12 @@ class FakePeak:
     async def get_api_version(self):
         return self.api
 
+    async def get_led_api(self):
+        return self.led_api
+
     async def set_profile_cycle(self, index, style, colors, tempo, *, inhale=False):
         self.cycles.append((index, style, colors, tempo))
+        self.inhale.append(inhale)
         self.raw[index] = cbor2.dumps({"style": style, "colors": colors})
 
     async def set_profile_light_raw(self, index, raw):
@@ -169,3 +176,115 @@ def test_aborted_preheat_changes_nothing(tmp_path):
 
     asyncio.run(go())
     assert peak.cycles == []
+
+
+def test_old_single_colour_firmware_is_left_alone(tmp_path):
+    # LED API 2 takes one colour per profile: no cycle, no saved light, and
+    # nothing saved to My lights for a change that can't happen.
+    peak = FakePeak(b"\xff\x00\x00\x00\x00\x00\x00\x00", api="AE", led_api=2)
+    d = daemon(tmp_path, peak)
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.cycles == []
+    assert saved_lights.listing() == []
+
+
+def test_custom_temperatures_have_no_light_to_change(tmp_path):
+    peak = FakePeak(b"\xa1\x61x\x01", profile=-1)
+    d = daemon(tmp_path, peak)
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.cycles == []
+    assert saved_lights.listing() == []
+
+
+class DroppingPeak(FakePeak):
+    async def get_api_version(self):
+        self.is_connected = False
+        raise RuntimeError("Client not connected")
+
+
+def test_a_link_dropping_mid_way_is_logged_not_raised(tmp_path, caplog):
+    peak = DroppingPeak(b"\xa1\x61x\x01")
+    d = daemon(tmp_path, peak)
+    asyncio.run(d._set_surprise(True))
+    tasks = []
+
+    async def go():
+        await d._track_session_end(PREHEAT, ACTIVE)
+        await d._track_session_end(ACTIVE, IDLE)
+        tasks.extend(d._tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(go())
+    assert all(t.exception() is None for t in tasks)
+    assert peak.cycles == []
+    assert "couldn't change the light" in caplog.text
+    # The light was saved before the drop, so it's still safe.
+    assert len(saved_lights.listing()) == 1
+
+
+class GarbledPeak(FakePeak):
+    async def get_profile_colour_raw(self, index=None):
+        raise cbor2.CBORDecodeError("premature end of stream")
+
+
+def test_a_light_that_wont_decode_is_logged_not_raised(tmp_path, caplog):
+    peak = GarbledPeak(b"")
+    d = daemon(tmp_path, peak)
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.cycles == []
+    assert "couldn't change the light" in caplog.text
+
+
+def inhale_light():
+    raw = cbor2.dumps({"inhale": True})
+    saved_lights.remember_cycle(raw, {"style": "fade", "colors": ["#ff0000"], "tempo": 0.5, "inhale": True})
+    return raw
+
+
+def test_a_light_that_followed_your_inhale_still_does(tmp_path):
+    peak = FakePeak(inhale_light(), api="AW")
+    d = daemon(tmp_path, peak)
+    d._surprise_rng.random = lambda: 1.0  # always a fresh cycle
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.inhale == [True]
+    assert d.status["profiles"][0]["cycle"]["inhale"] is True
+
+
+def test_inhale_stays_off_before_ag_firmware(tmp_path):
+    peak = FakePeak(inhale_light(), api="AF")
+    d = daemon(tmp_path, peak)
+    d._surprise_rng.random = lambda: 1.0
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.inhale == [False]
+    assert d.status["profiles"][0]["cycle"]["inhale"] is False
+
+
+def test_a_plain_light_gets_a_plain_cycle(tmp_path):
+    peak = FakePeak(b"\xa1\x61x\x01")
+    d = daemon(tmp_path, peak)
+    d._surprise_rng.random = lambda: 1.0
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    assert peak.inhale == [False]
+
+
+def test_a_saved_pick_shows_its_own_colours_straight_away(tmp_path):
+    mine = cbor2.dumps({"saved": 1})
+    saved_lights.remember_cycle(mine, {"style": "spin", "colors": ["#00ff00", "#0000ff"], "tempo": 0.5, "inhale": False})
+    entry = saved_lights.save("Mine", mine)
+    peak = FakePeak(b"\xa1\x61x\x01")
+    d = daemon(tmp_path, peak)
+    d.status["profiles"][0].update(color="#ff0000", cycle=None)
+    d._surprise_rng.random = lambda: 0.0  # always reach for saved lights
+    asyncio.run(d._set_surprise(True))
+    session(d)
+    profile = d.status["profiles"][0]
+    assert peak.raw[1] == mine
+    assert profile["light_id"] == entry["id"]
+    assert profile["color"] == "#00ff00"
+    assert profile["cycle"]["style"] == "spin"

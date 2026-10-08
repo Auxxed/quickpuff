@@ -49,6 +49,15 @@ def describe(raw: bytes) -> dict[str, Any]:
     return {"style": "solid", "colors": [color] if color else []}
 
 
+def reacts_to_inhale(raw: bytes) -> bool:
+    """Whether a light follows your inhale, so a light replacing it can too."""
+    try:
+        cycle = recall_cycle(raw) or decode_cycle(decode_puffco_json(cbor2.loads(raw)))
+    except Exception:
+        return False
+    return bool((cycle or {}).get("inhale"))
+
+
 def _load() -> list[dict[str, Any]]:
     try:
         data = json.loads(_path().read_text())
