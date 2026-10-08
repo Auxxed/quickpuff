@@ -80,6 +80,7 @@ Panel {
       pendingLantern = undefined
       pendingSaver = undefined
       pendingQtip = undefined
+      pendingSurprise = undefined
       pendingCleanEvery = -1
       pendingBrightness = -1
       pendingDeviceName = ""
@@ -395,6 +396,7 @@ Panel {
   property var pendingLantern: undefined
   property var pendingSaver: undefined
   property var pendingQtip: undefined
+  property var pendingSurprise: undefined
   property int pendingCleanEvery: -1
   property int pendingBrightness: -1
   property string page: "control"
@@ -926,6 +928,9 @@ Panel {
   readonly property bool qtipOn: pendingQtip !== undefined
     ? pendingQtip === true
     : statusData.qtip_reminder === true
+  readonly property bool surpriseOn: pendingSurprise !== undefined
+    ? pendingSurprise === true
+    : statusData.surprise_light === true
   readonly property bool saverOn: pendingSaver !== undefined
     ? pendingSaver === true
     : statusData.battery_saver === true
@@ -1028,6 +1033,12 @@ Panel {
     var next = !qtipOn
     pendingQtip = next
     run("quickpuff qtip " + (next ? "on" : "off"))
+  }
+
+  function toggleSurprise() {
+    var next = !surpriseOn
+    pendingSurprise = next
+    run("quickpuff surprise " + (next ? "on" : "off"))
   }
 
   function toggleSaver() {
@@ -1585,6 +1596,7 @@ Panel {
       root.pendingStealth = undefined
       root.pendingLantern = undefined
       root.pendingSaver = undefined
+      root.pendingSurprise = undefined
       root.pendingCleanEvery = -1
       root.pendingBrightness = -1
       root.pendingDeviceName = ""

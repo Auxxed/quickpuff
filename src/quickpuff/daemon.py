@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import signal
 import subprocess
 import time
@@ -22,7 +23,7 @@ from .paths import load_config, save_config, socket_path
 from .heat_trace import HeatTrace
 from .lights import normalize_color
 from .moods import MAX_COLORS as MAX_CYCLE_COLORS
-from .moods import normalize_style
+from .moods import normalize_style, surprise_pick
 from . import saved_lights
 from .presence import SeatPresence
 from .product_info import is_proxy
@@ -83,6 +84,9 @@ CYCLE_STATES = HEAT_STATES | {int(OperatingState.HEAT_CYCLE_FADE)}
 BATTERY_SAVER_SLEEP_S = 30.0
 # The Q-tip reminder waits this long after a session ends.
 QTIP_REMINDER_DELAY_S = 12.0
+# Surprise me changes the light once the heater has let go after a session,
+# well before battery saver rests the Peak.
+SURPRISE_DELAY_S = 4.0
 
 # Polling: quick while heating, steady while the panel is open, and slow the
 # rest of the time so the Peak's radio isn't kept busy all day.
@@ -150,6 +154,7 @@ LOCAL_COMMANDS = frozenset(
         "set_weekly_recap",
         "recap",
         "set_qtip_reminder",
+        "set_surprise",
         "set_battery_saver",
         "set_handoff",
         "claim",
@@ -356,6 +361,8 @@ class QuickPuffDaemon:
         self._battery_raw: Any = None
         self._low_battery_warned = False
         self.qtip_reminder = _as_bool(load_config().get("qtip_reminder", True))
+        self.surprise_light = _as_bool(load_config().get("surprise_light"))
+        self._surprise_rng = random.Random()
         self._session_reached_temp = False
         self._cycle_ts: float | None = None
         self.heat_trace = HeatTrace()
@@ -389,6 +396,7 @@ class QuickPuffDaemon:
         self.status["battery_saver"] = self.battery_saver
         self.status["handoff"] = self._handoff
         self.status["qtip_reminder"] = self.qtip_reminder
+        self.status["surprise_light"] = self.surprise_light
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -501,6 +509,7 @@ class QuickPuffDaemon:
         snap["brightness"] = dict(self.brightness)
         snap["battery_saver"] = self.battery_saver
         snap["qtip_reminder"] = self.qtip_reminder
+        snap["surprise_light"] = self.surprise_light
         snap["daily_limit"] = self.daily_limit
         snap["weekly_recap"] = self.weekly_recap
         snap["saved_lights"] = saved_lights.listing()
@@ -839,6 +848,7 @@ class QuickPuffDaemon:
         self.status["battery_saver"] = self.battery_saver
         self.status["handoff"] = self._handoff
         self.status["qtip_reminder"] = self.qtip_reminder
+        self.status["surprise_light"] = self.surprise_light
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -1436,6 +1446,8 @@ class QuickPuffDaemon:
                     # This poll just read the battery, after the heater let go.
                     history.record_battery(cycle_ts, self.status.get("battery"))
                 self._spawn(self._notify_qtip())
+                if self.surprise_light:
+                    self._spawn(self._surprise_next())
 
     async def _notify_qtip(self) -> None:
         await asyncio.sleep(QTIP_REMINDER_DELAY_S)
@@ -1445,12 +1457,80 @@ class QuickPuffDaemon:
         if self.qtip_reminder:
             self._desktop_notify(title, body)
 
+    async def _surprise_next(self) -> None:
+        """Surprise me: give the profile just used a new light for next time.
+
+        A light Surprise didn't put there (one you made, or an exclusive mood
+        from the app) is saved to My lights first, so it's never lost.
+        """
+        await asyncio.sleep(SURPRISE_DELAY_S)
+        try:
+            async with self._cmd_lock:
+                dev = self.device
+                if not self.surprise_light or not dev or not dev.is_connected:
+                    return
+                index = int(await dev.get_current_profile())
+                cfg = load_config()
+                ours = cfg.get("surprise_last") or {}
+                raw = await dev.get_profile_colour_raw(index)
+                ident = saved_lights.light_id(raw)
+                known = {x["id"] for x in saved_lights.listing()}
+                if ident != ours.get(str(index)) and ident not in known:
+                    name = f"{self._profile_name(index)} before Surprise"
+                    try:
+                        saved_lights.save(name, raw)
+                        log.info("Surprise: saved %s's light as %r", self._profile_name(index), name)
+                    except ValueError as exc:
+                        log.warning("Surprise: left the light alone, it couldn't be saved first: %s", exc)
+                        return
+                api = await dev.get_api_version()
+                look = surprise_pick(
+                    self._surprise_rng,
+                    advanced=api >= PuffcoUtils.revision_string_to_number("AF"),
+                    # Never "change" to the light it's already wearing.
+                    saved_ids=[x["id"] for x in saved_lights.listing() if x["id"] != ident],
+                    last=cfg.get("surprise_key"),
+                )
+                if "saved" in look:
+                    new_raw = saved_lights.get_raw(look["saved"])
+                    await dev.set_profile_light_raw(index, new_raw)
+                    new_id = look["saved"]
+                    self._patch_profile(index, light_id=new_id)
+                else:
+                    await dev.set_profile_cycle(index, look["style"], look["colors"], look["tempo"])
+                    new_id = saved_lights.light_id(await dev.get_profile_colour_raw(index))
+                    self._patch_profile(
+                        index,
+                        color=look["colors"][0],
+                        light_id=None,
+                        cycle={"style": look["style"], "colors": look["colors"], "tempo": look["tempo"], "inhale": False},
+                    )
+                cfg = load_config()
+                cfg["surprise_last"] = {**(cfg.get("surprise_last") or {}), str(index): new_id}
+                cfg["surprise_key"] = look["key"]
+                save_config(cfg)
+                self.status["saved_lights"] = saved_lights.listing()
+                log.info("Surprise: %s gets %s next", self._profile_name(index), look["key"])
+            await self._broadcast_event("status", self.status)
+        except (LoraxError, OSError, asyncio.TimeoutError) as exc:
+            log.warning("Surprise: couldn't change the light: %s", exc)
+
+    async def _set_surprise(self, enable: bool) -> dict[str, Any]:
+        self.surprise_light = bool(enable)
+        cfg = load_config()
+        cfg["surprise_light"] = self.surprise_light
+        save_config(cfg)
+        self.status["surprise_light"] = self.surprise_light
+        await self._broadcast_event("status", self.status)
+        return {"surprise_light": self.surprise_light}
+
     async def _set_qtip_reminder(self, enable: bool) -> dict[str, Any]:
         self.qtip_reminder = bool(enable)
         cfg = load_config()
         cfg["qtip_reminder"] = self.qtip_reminder
         save_config(cfg)
         self.status["qtip_reminder"] = self.qtip_reminder
+        self.status["surprise_light"] = self.surprise_light
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         await self._broadcast_event("status", self.status)
@@ -1691,6 +1771,8 @@ class QuickPuffDaemon:
             return self._recap_preview()
         if cmd == "set_qtip_reminder":
             return await self._set_qtip_reminder(_as_bool(args.get("enable")))
+        if cmd == "set_surprise":
+            return await self._set_surprise(_as_bool(args.get("enable")))
         if cmd == "set_battery_saver":
             return await self._set_battery_saver(_as_bool(args.get("enable")))
         if cmd == "set_handoff":

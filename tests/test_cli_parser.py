@@ -17,7 +17,7 @@ def test_help_builds_for_every_command(capsys):
         assert command in out
 
 
-@pytest.mark.parametrize("command", ["preserve", "battery", "sessions", "note", "limit", "recap", "qtip", "saver"])
+@pytest.mark.parametrize("command", ["preserve", "battery", "sessions", "note", "limit", "recap", "qtip", "surprise", "saver"])
 def test_each_subcommand_help_formats(command, capsys):
     with pytest.raises(SystemExit) as exit_info:
         asyncio.run(async_main([command, "--help"]))

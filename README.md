@@ -118,7 +118,10 @@ removal.
   through up to six colors (Fade, Spin, Breathe, Disco, Split, Fill, Lava and
   Confetti, the same moods the Puffco app has) at the speed you choose, with a
   preview strip in the panel. Ready-made palettes are included, and **React to
-  inhales** makes the light respond while you pull. **My lights** saves the
+  inhales** makes the light respond while you pull. **Surprise me** gives the
+  profile you just used a new cycle (or one of My lights) after each session,
+  so the next dab looks different; a light you made yourself is saved to My
+  lights before it's replaced. **My lights** saves the
   light a profile is wearing and puts it back later. That includes exclusive
   moods like Puffcon, which only the Puffco app can set: set one in the app,
   reconnect QuickPuff, and save it.
@@ -240,6 +243,7 @@ quickpuff cycle lava '#ff2d55' '#ff6a1a' '#ffb000' --speed 40  # animate it
 quickpuff light save "Puffcon"     # keep the light a profile is wearing
 quickpuff light list               # then: light apply|rename|delete NAME
 quickpuff ready-anim confetti      # rocket, confetti or off
+quickpuff surprise on              # a new light after each session
 quickpuff stealth on
 quickpuff battery                  # show the charge on the Peak's own lights
 quickpuff preserve on              # stop charging at 80% (off: charge to 100%)

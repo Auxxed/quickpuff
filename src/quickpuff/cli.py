@@ -462,6 +462,8 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     qtip = sub.add_parser("qtip", help="Q-tip reminder notification after each dab")
     qtip.add_argument("action", choices=["on", "off"])
+    surprise = sub.add_parser("surprise", help="Give the profile you used a new light after each session")
+    surprise.add_argument("action", choices=["on", "off"])
 
     clean = sub.add_parser("clean", help="Chamber-clean reminder after N dabs")
     clean.add_argument("action", choices=["done"], nargs="?", help="Reset the countdown after you clean")
@@ -697,6 +699,9 @@ async def async_main(argv: list[str] | None = None) -> int:
     elif cmd == "qtip":
         await call("set_qtip_reminder", {"enable": args.action == "on"})
         print_status(await call("status"), raw)
+    elif cmd == "surprise":
+        result = await call("set_surprise", {"enable": args.action == "on"})
+        print(json.dumps(result) if raw else f"Surprise me: {args.action}")
     elif cmd == "clean":
         if args.every is not None:
             await call("set_clean_every", {"dabs": args.every})

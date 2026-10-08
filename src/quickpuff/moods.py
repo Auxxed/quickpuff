@@ -399,3 +399,51 @@ def decode_cycle(decoded: Any) -> dict[str, Any] | None:
     scale = 256 if style == "spin" else 160
     tempo = 0.5 if (style in ("disco", "split", "fill") and speed == 64) else math.sqrt(max(0.0, speed) / scale)
     return {"style": style, "colors": colors, "tempo": round(min(1.0, tempo), 2), "inhale": inhale}
+
+
+# ------------------------------------------------------------------ surprise
+# The panel's ready-made palettes (Panel.qml `cyclePalettes`), for Surprise me.
+PALETTES = {
+    "Rainbow": ["#ff0000", "#ffaa00", "#f6f600", "#00e05a", "#0080ff", "#a020ff"],
+    "Sunset": ["#ff2d55", "#ff6a1a", "#ffb000"],
+    "Ocean": ["#0040ff", "#00b4ff", "#00ffd0"],
+    "Vapor": ["#ff4fa3", "#a855f7", "#3b9eff"],
+    "Fire": ["#ff1a00", "#ff5a00", "#ffae00"],
+    "Forest": ["#1f8f3a", "#8fd400", "#00c090"],
+}
+# Breathe is the app's retired style; Surprise sticks to the current ones.
+SURPRISE_STYLES = ("fade", "spin", "disco", "split", "fill", "lava", "confetti")
+# How often Surprise reaches for one of your saved lights, when you have any.
+SAVED_SHARE = 0.25
+
+
+def surprise_pick(
+    rng: Any,
+    *,
+    advanced: bool,
+    saved_ids: list[str],
+    last: str | None = None,
+) -> dict[str, Any]:
+    """A light for the next session: {"saved": id} for one of your saved
+    lights, or {"style", "colors", "tempo", "key"} for a fresh cycle.
+
+    `advanced` is whether the Peak runs Lava and Confetti (firmware AF+).
+    `last` is the previous pick's key, so the same look never plays twice in
+    a row when there's anything else to choose.
+    """
+    styles = [s for s in SURPRISE_STYLES if advanced or s not in ADVANCED_STYLES]
+    looks: list[dict[str, Any]] = [
+        {"style": s, "palette": p, "key": f"{s}/{p}"} for s in styles for p in PALETTES
+    ]
+    saved = [{"saved": i, "key": f"saved/{i}"} for i in saved_ids]
+    pool = saved if saved and rng.random() < SAVED_SHARE else looks
+    # A lone saved light that just played gives way to a fresh cycle.
+    fresh = [look for look in pool if look["key"] != last] or [look for look in looks if look["key"] != last]
+    look = dict(rng.choice(fresh))
+    if "saved" in look:
+        return look
+    palette = look.pop("palette")
+    look["colors"] = list(PALETTES[palette])
+    # The middle of the speed slider, give or take: lively, never frantic.
+    look["tempo"] = round(rng.uniform(0.35, 0.7), 2)
+    return look

@@ -381,4 +381,23 @@ Section {
     font.family: panel.fontFamily
     font.pixelSize: Style.font.caption
   }
+
+  SwitchRow {
+    panel: cycleSection.panel
+    width: parent.width
+    label: "Surprise me after each session"
+    checked: panel.surpriseOn
+    onToggled: panel.toggleSurprise()
+  }
+
+  Text {
+    width: parent.width
+    visible: panel.surpriseOn
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    text: "After each dab, the profile you used gets a new cycle or one of My lights for next time. A light you made yourself is saved to My lights before it's replaced."
+    color: panel.dim
+    font.family: panel.fontFamily
+    font.pixelSize: Style.font.caption
+  }
 }
