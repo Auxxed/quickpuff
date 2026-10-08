@@ -14,6 +14,8 @@ BorderSurface {
   property string value: ""
   property string glyph: ""
   property bool highlight: false
+  // Highlight colour: the active profile's, like the Control tab.
+  property color tint: panel.profileTint
   // Optional colour bar along the bottom (the factory heat presets).
   property string stripe: ""
 
@@ -23,11 +25,24 @@ BorderSurface {
   Behavior on shown { NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
 
   radius: Style.cornerRadius
-  color: highlight ? Util.alpha(Color.accent, 0.12) : Style.normalFillFor(panel.foreground, Color.accent)
+  color: highlight ? Util.alpha(tint, 0.06) : Style.normalFillFor(panel.foreground, Color.accent)
   borderSpec: highlight
-    ? Border.flat(Util.alpha(Color.accent, 0.7), Math.max(1, Style.normalBorderWidth))
+    ? Border.flat(Util.alpha(tint, 0.7), Math.max(1, Style.normalBorderWidth))
     : Border.controlSpec("normal", panel.foreground, Color.accent)
   implicitHeight: cellCol.implicitHeight + Style.spacing.controlPaddingY * 2 + (stripe !== "" ? Style.space(3) : 0)
+
+  // Highlighted cells get the profile cards' wash: tint at the head,
+  // fading out toward the foot.
+  Rectangle {
+    visible: cell.highlight
+    anchors.fill: parent
+    anchors.margins: Math.max(1, Style.normalBorderWidth)
+    radius: Math.max(0, cell.radius - anchors.margins)
+    gradient: Gradient {
+      GradientStop { position: 0.0; color: Util.alpha(cell.tint, 0.12) }
+      GradientStop { position: 1.0; color: Util.alpha(Qt.darker(cell.tint, 1.6), 0) }
+    }
+  }
 
   Column {
     id: cellCol
@@ -39,7 +54,7 @@ BorderSurface {
       visible: cell.glyph !== ""
       textFormat: Text.PlainText
       text: cell.glyph
-      color: cell.highlight ? Color.accent : panel.dim
+      color: cell.highlight ? cell.tint : panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption
     }
@@ -47,7 +62,7 @@ BorderSurface {
       anchors.horizontalCenter: parent.horizontalCenter
       textFormat: Text.PlainText
       text: cell.numeric ? String(Math.round(cell.shown)) : cell.value
-      color: cell.highlight ? Color.accent : panel.foreground
+      color: cell.highlight ? cell.tint : panel.foreground
       font.family: panel.displayFamily
       font.pixelSize: Math.round(Style.font.title * panel.displayScale)
       font.weight: Font.DemiBold

@@ -16,13 +16,31 @@ BorderSurface {
   property string value: ""
   property string meta: ""
   property string glyph: ""
-  property color glyphColor: Color.accent
+  property color glyphColor: tint
+  // Accent for the glyph and wash: the active profile's colour.
+  property color tint: panel.profileTint
+  // Lifts the card with the profile cards' wash; keep it for the one
+  // card on a row that has something to celebrate.
+  property bool highlight: false
   default property alias extra: extraSlot.data
 
   radius: Style.cornerRadius
-  color: Style.normalFillFor(panel.foreground, Color.accent)
-  borderSpec: Border.controlSpec("normal", panel.foreground, Color.accent)
+  color: highlight ? Util.alpha(tint, 0.06) : Style.normalFillFor(panel.foreground, Color.accent)
+  borderSpec: highlight
+    ? Border.flat(Util.alpha(tint, 0.6), Math.max(1, Style.normalBorderWidth))
+    : Border.controlSpec("normal", panel.foreground, Color.accent)
   implicitHeight: metricCol.implicitHeight + Style.spacing.controlPaddingY * 2
+
+  Rectangle {
+    visible: metric.highlight
+    anchors.fill: parent
+    anchors.margins: Math.max(1, Style.normalBorderWidth)
+    radius: Math.max(0, metric.radius - anchors.margins)
+    gradient: Gradient {
+      GradientStop { position: 0.0; color: Util.alpha(metric.tint, 0.12) }
+      GradientStop { position: 1.0; color: Util.alpha(Qt.darker(metric.tint, 1.6), 0) }
+    }
+  }
 
   Column {
     id: metricCol

@@ -33,7 +33,7 @@ StatCard {
   }
 
   value: trend && trend.recent != null ? fmt(trend.recent) : "–"
-  glyphColor: rising ? panel.urgent : Color.accent
+  glyphColor: rising ? panel.urgent : tint
   meta: {
     if (!trend || trend.recent == null) return "Not enough data yet"
     if (trendState === "learning")
@@ -71,7 +71,7 @@ StatCard {
             anchors.bottom: parent.bottom
             radius: 1
             color: parent.index === trendCard.months.length - 1
-              ? (trendCard.rising ? panel.urgent : Color.accent)
+              ? (trendCard.rising ? panel.urgent : trendCard.tint)
               : Util.alpha(panel.foreground, 0.3)
           }
         }

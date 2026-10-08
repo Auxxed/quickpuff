@@ -47,23 +47,47 @@ Column {
         spacing: Style.spacing.md
         anchors.verticalCenter: parent.verticalCenter
 
-        Text {
+        // The Peak's name, big and uppercase in the display face, with
+        // its model underneath, like the header of the Puffco app.
+        Column {
           width: parent.width - deviceRename.width - parent.spacing
-          textFormat: Text.PlainText
-          text: panel.shownDeviceName
-          color: deviceNameTap.containsMouse ? Color.accent : panel.foreground
-          font.family: panel.fontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-          elide: Text.ElideRight
           anchors.verticalCenter: parent.verticalCenter
+          spacing: 0
 
-          MouseArea {
-            id: deviceNameTap
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.IBeamCursor
-            onClicked: panel.startEdit(-1, "device")
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: panel.shownDeviceName
+            color: deviceNameTap.containsMouse ? panel.profileTint : panel.foreground
+            font.family: panel.displayFamily
+            font.pixelSize: Math.round(Style.font.title * panel.displayScale)
+            font.weight: Font.DemiBold
+            font.capitalization: panel.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+            font.letterSpacing: panel.hasDisplayFont ? 1.2 : 0
+            elide: Text.ElideRight
+
+            Behavior on color { ColorAnimation { duration: 120 } }
+
+            MouseArea {
+              id: deviceNameTap
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.IBeamCursor
+              onClicked: panel.startEdit(-1, "device")
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: text !== ""
+            textFormat: Text.PlainText
+            text: (panel.statusData.product && panel.statusData.product.label) || ""
+            color: Qt.tint(panel.dim, Util.alpha(panel.profileTint, 0.35))
+            font.family: panel.displayFamily
+            font.pixelSize: Math.round(Style.font.caption * panel.displayScale)
+            font.capitalization: panel.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+            font.letterSpacing: panel.hasDisplayFont ? 1 : 0
+            elide: Text.ElideRight
           }
         }
 

@@ -30,7 +30,7 @@ BorderSurface {
     width: Style.space(3)
     color: sessionCard.session.profile !== null && sessionCard.session.profile !== undefined
       ? panel.profileUsageColor(sessionCard.session.profile)
-      : Color.accent
+      : panel.profileTint
     opacity: sessionMouse.containsMouse || sessionCard.editingNote ? 1 : 0.6
   }
 
@@ -65,11 +65,14 @@ BorderSurface {
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
         elide: Text.ElideRight
+        // Profile and temperature read like the Control tab's cards.
         text: panel.sessionTitle(sessionCard.session)
         color: panel.foreground
-        font.family: panel.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        font.bold: true
+        font.family: panel.displayFamily
+        font.pixelSize: Math.round(Style.font.bodySmall * panel.displayScale)
+        font.weight: Font.DemiBold
+        font.capitalization: panel.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+        font.letterSpacing: panel.hasDisplayFont ? 0.6 : 0
       }
 
       Text {
