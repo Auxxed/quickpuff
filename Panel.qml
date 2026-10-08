@@ -1755,7 +1755,7 @@ Panel {
               anchors.leftMargin: Style.space(10)
               anchors.bottom: parent.bottom
               anchors.bottomMargin: Style.space(2)
-              width: Style.space(70)
+              width: Style.space(80)
               height: width * 1.6
               colorway: root.statusData.product ? String(root.statusData.product.marketing_name || "") : ""
               tint: root.connected ? root.profileTint : root.dim
