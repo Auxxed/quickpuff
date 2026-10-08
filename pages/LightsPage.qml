@@ -19,12 +19,37 @@ Column {
     title: "LEDS"
     glyph: "\uf0eb"
 
-    LanternPreview {
-      panel: lightsPage.panel
+    // Your Peak, showing what its lantern is doing: the profile's colour
+    // (or the cycle as it plays) at the chosen brightness.
+    Item {
       width: parent.width
-      glow: panel.cycleOn ? panel.cycleNow : panel.profileTint
-      level: panel.brightnessLevel / 255
-      lit: panel.lanternOn
+      height: lanternArt.height + Style.space(10)
+
+      PeakArt {
+        id: lanternArt
+        panel: lightsPage.panel
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        width: Style.space(58)
+        height: width * 1.6
+        colorway: panel.statusData.product ? String(panel.statusData.product.marketing_name || "") : ""
+        tint: panel.cycleOn ? panel.cycleNow : panel.profileTint
+        glow: panel.lanternOn ? 0.3 + 0.7 * panel.brightnessLevel / 255 : 0.1
+        Behavior on glow { NumberAnimation { duration: 300 } }
+      }
+
+      Text {
+        anchors.left: lanternArt.right
+        anchors.leftMargin: Style.space(14)
+        anchors.verticalCenter: lanternArt.verticalCenter
+        textFormat: Text.PlainText
+        text: panel.lanternOn ? "LANTERN ON" : "LANTERN OFF"
+        color: panel.lanternOn ? panel.foreground : panel.dim
+        font.family: panel.displayFamily
+        font.pixelSize: Math.round(Style.font.caption * panel.displayScale)
+        font.weight: Font.DemiBold
+        font.letterSpacing: panel.hasDisplayFont ? 1.2 : 0
+      }
     }
 
     SwitchRow {

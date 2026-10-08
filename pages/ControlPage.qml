@@ -19,15 +19,17 @@ Column {
     width: parent.width
     spacing: Style.spacing.controlGap
 
-    readonly property real cellWidth: (width - spacing * 2) / 3
+    // Heat leads, twice as wide, in the colour the Peak will glow.
+    readonly property real cellWidth: (width - spacing * 2) / 4
 
     ActionButton {
       panel: controlPage.panel
-      width: actionRow.cellWidth
-      label: "Heat"
+      width: actionRow.cellWidth * 2
+      label: panel.preheating ? "Heating" : panel.atTemp ? "Ready" : "Heat"
       glyph: "\uf06d"
       tall: true
-      tint: Color.accent
+      tint: panel.profileTint
+      solid: !panel.heating
       emphasized: !panel.heating
       pulse: panel.preheating
       onActivated: panel.run("quickpuff heat start")
@@ -372,6 +374,8 @@ Column {
               TileButton {
                 panel: controlPage.panel
                 id: lowerStep
+                // Out of the way until the card is pointed at, as on Puffco's cards.
+                tooltipHot: tile.hot || tile.editingThis
                 visible: !tile.editingTemp
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -416,6 +420,8 @@ Column {
               TileButton {
                 panel: controlPage.panel
                 id: raiseStep
+                // Out of the way until the card is pointed at, as on Puffco's cards.
+                tooltipHot: tile.hot || tile.editingThis
                 visible: !tile.editingTemp
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -452,6 +458,8 @@ Column {
               TileButton {
                 panel: controlPage.panel
                 id: lowerTime
+                // Out of the way until the card is pointed at, as on Puffco's cards.
+                tooltipHot: tile.hot || tile.editingThis
                 visible: !tile.editingTime
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -491,6 +499,8 @@ Column {
               TileButton {
                 panel: controlPage.panel
                 id: raiseTime
+                // Out of the way until the card is pointed at, as on Puffco's cards.
+                tooltipHot: tile.hot || tile.editingThis
                 visible: !tile.editingTime
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter

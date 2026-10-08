@@ -22,6 +22,10 @@ BorderSurface {
   property bool tall: false
   property bool pulse: false
   property bool spinning: false
+  // Filled with `tint`, shaded darker toward the foot, like the Puffco app's
+  // start button; its ink is whatever reads on the tint.
+  property bool solid: false
+  readonly property color ink: solid ? panel.inkOn(tint) : (lit || tall ? tint : panel.foreground)
 
   signal activated()
 
@@ -42,11 +46,22 @@ BorderSurface {
     : emphasized ? Style.selectedFillFor(tint, tint)
     : Style.normalFillFor(tint, tint)
 
-  borderSpec: hot || pulse
+  borderSpec: solid ? Border.flat(Util.alpha(tint, 0.9), Math.max(1, Style.normalBorderWidth))
+    : hot || pulse
     ? Border.flat(Util.alpha(tint, hot ? 0.8 : 0.6), Math.max(1, Style.normalBorderWidth))
     : Border.controlSpec("normal", tint, tint)
 
   Behavior on color { ColorAnimation { duration: 120 } }
+
+  Rectangle {
+    anchors.fill: parent
+    radius: parent.radius
+    visible: chip.solid
+    gradient: Gradient {
+      GradientStop { position: 0.0; color: chip.hot ? Qt.lighter(chip.tint, 1.15) : chip.tint }
+      GradientStop { position: 1.0; color: Qt.darker(chip.tint, chip.hot ? 1.25 : 1.45) }
+    }
+  }
 
   // Attention glow.
   Rectangle {
@@ -97,7 +112,7 @@ BorderSurface {
       textFormat: Text.PlainText
       visible: chip.glyph !== ""
       text: chip.glyph
-      color: chip.lit || chip.tall ? chip.tint : panel.foreground
+      color: chip.ink
       font.family: panel.fontFamily
       font.pixelSize: chip.tall ? Style.font.heading : (chip.label === "" ? Style.font.icon : Style.font.iconSmall)
 
@@ -117,10 +132,13 @@ BorderSurface {
       textFormat: Text.PlainText
       visible: chip.label !== ""
       text: chip.label
-      color: chip.lit ? chip.tint : panel.foreground
-      font.family: panel.fontFamily
-      font.pixelSize: Style.font.bodySmall
-      font.bold: chip.emphasized
+      color: chip.solid ? chip.ink : (chip.lit ? chip.tint : panel.foreground)
+      // Tall buttons are the big session controls: Puffco's type, in capitals.
+      font.family: chip.tall ? panel.displayFamily : panel.fontFamily
+      font.pixelSize: chip.tall ? Math.round(Style.font.body * panel.displayScale) : Style.font.bodySmall
+      font.weight: chip.tall ? Font.DemiBold : (chip.emphasized ? Font.Bold : Font.Normal)
+      font.capitalization: chip.tall && panel.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+      font.letterSpacing: chip.tall && panel.hasDisplayFont ? 1.5 : 0
 
       Behavior on color { ColorAnimation { duration: 120 } }
     }

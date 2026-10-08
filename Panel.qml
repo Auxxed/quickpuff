@@ -1716,55 +1716,98 @@ Panel {
           width: scroller.width
           spacing: Style.spacing.panelGap
 
-          // ---------- Hero: heat glyph · device + state · chamber temp ------
+          // ---------- Hero: the Peak on its stage · name, state, temperature ------
           Item {
             id: hero
             width: parent.width
-            implicitHeight: Math.max(heroOrb.height, heroLabels.implicitHeight, heroReadout.implicitHeight)
+            implicitHeight: Math.max(heroArt.height + Style.space(14), heroLabels.implicitHeight + Style.space(14))
 
-            HeatOrb {
+            // How brightly the Peak's light ring burns: off while it's away,
+            // a slow breath while preheating, full at temperature.
+            property real glow: !root.connected ? 0.08
+              : root.heating ? 1
+              : root.lanternOn ? 0.8
+              : 0.45
+            Behavior on glow { NumberAnimation { duration: 500 } }
+            property real breath: 1
+            SequentialAnimation on breath {
+              running: root.preheating && root.opened
+              loops: Animation.Infinite
+              alwaysRunToEnd: true
+              NumberAnimation { to: 0.35; duration: 850; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 1; duration: 850; easing.type: Easing.InOutSine }
+            }
+
+            // The stage: a soft wash of the profile's light from below.
+            Rectangle {
+              anchors.fill: parent
+              radius: Style.cornerRadius
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 1.0; color: Util.alpha(root.connected ? root.profileTint : root.dim, 0.05 + 0.1 * hero.glow * hero.breath) }
+              }
+            }
+
+            PeakArt {
+              id: heroArt
               panel: root
-              id: heroOrb
               anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(62)
-              height: width
-              progress: root.heatProgress
-              // The Peak's light ring glows the active profile's colour.
+              anchors.leftMargin: Style.space(10)
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.space(2)
+              width: Style.space(70)
+              height: width * 1.6
+              colorway: root.statusData.product ? String(root.statusData.product.marketing_name || "") : ""
               tint: root.connected ? root.profileTint : root.dim
-              lit: root.heating
-              climbing: root.preheating
-              sleeping: !root.connected && !root.connecting && !root.needsSetup
+              glow: hero.glow * hero.breath
+              vapor: root.atTemp
+              asleep: !root.connected
             }
 
             Burst {
               panel: root
               id: heroBurst
-              anchors.centerIn: heroOrb
-              width: heroOrb.width
+              anchors.centerIn: heroArt
+              width: heroArt.width * 1.6
               height: width
             }
 
             Column {
               id: heroLabels
-              anchors.left: heroOrb.right
-              anchors.leftMargin: Style.space(12)
-              anchors.right: heroReadout.left
-              anchors.rightMargin: Style.space(8)
+              anchors.left: heroArt.right
+              anchors.leftMargin: Style.space(18)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(4)
               anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(3)
+              spacing: Style.space(2)
 
-              Text {
+              Item {
                 width: parent.width
-                textFormat: Text.PlainText
-                text: root.deviceName
-                color: root.foreground
-                font.family: root.displayFamily
-                font.pixelSize: Math.round(Style.font.heading * root.displayScale)
-                font.weight: Font.DemiBold
-                font.capitalization: root.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
-                font.letterSpacing: root.hasDisplayFont ? 1 : 0
-                elide: Text.ElideRight
+                height: nameText.implicitHeight
+
+                Text {
+                  id: nameText
+                  anchors.left: parent.left
+                  anchors.right: heroBattery.left
+                  anchors.rightMargin: Style.space(8)
+                  textFormat: Text.PlainText
+                  text: root.deviceName
+                  color: root.foreground
+                  font.family: root.displayFamily
+                  font.pixelSize: Math.round(Style.font.subtitle * root.displayScale)
+                  font.weight: Font.DemiBold
+                  font.capitalization: root.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+                  font.letterSpacing: root.hasDisplayFont ? 1.2 : 0
+                  elide: Text.ElideRight
+                }
+
+                BatteryPill {
+                  id: heroBattery
+                  panel: root
+                  anchors.right: parent.right
+                  anchors.verticalCenter: nameText.verticalCenter
+                  visible: root.connected && root.batteryLabel !== ""
+                }
               }
 
               Row {
@@ -1816,8 +1859,83 @@ Panel {
                 }
               }
 
+              // The chamber, big, as the Puffco app's session screen shows it.
+              // Counts toward each new reading instead of snapping to it; once
+              // it lands it shows the daemon's own label, so the two agree.
+              Row {
+                id: heroTempRow
+                spacing: Style.space(2)
+
+                property real rawF: Number(root.statusData.heater_temp_f)
+                property real shownF: isFinite(rawF) ? rawF : 0
+                Behavior on shownF { NumberAnimation { id: tempCount; duration: 700; easing.type: Easing.OutCubic } }
+                readonly property string label: !root.connected ? ""
+                  : !isFinite(rawF) || !tempCount.running ? root.tempLabel : root.formatTemp(shownF, undefined)
+                readonly property color tone: !root.connected ? root.dim
+                  : shownF > 120 ? Qt.tint(root.foreground,
+                      Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
+                  : root.heating ? Qt.lighter(root.urgent, 1.15)
+                  : root.foreground
+
+                Text {
+                  id: heroTemp
+                  textFormat: Text.PlainText
+                  text: heroTempRow.label === "" ? "—" : heroTempRow.label.replace(/°[CF]$/, "")
+                  color: heroTempRow.tone
+                  font.family: root.displayFamily
+                  font.pixelSize: Math.round(Style.font.display * root.displayScale * 1.55)
+                  font.weight: Font.DemiBold
+                  Behavior on color { ColorAnimation { duration: 300 } }
+                }
+                Text {
+                  y: heroTemp.height * 0.16
+                  visible: heroTempRow.label !== ""
+                  textFormat: Text.PlainText
+                  text: root.celsius ? "°C" : "°F"
+                  color: Util.alpha(heroTempRow.tone, 0.7)
+                  font.family: root.displayFamily
+                  font.pixelSize: Math.round(Style.font.title * root.displayScale)
+                  font.weight: Font.DemiBold
+                }
+              }
+
+              // Climb toward the target while heating.
+              Rectangle {
+                width: parent.width
+                height: Style.space(4)
+                radius: height / 2
+                visible: root.connected && (root.preheating || root.atTemp)
+                color: Util.alpha(root.foreground, 0.1)
+
+                Rectangle {
+                  height: parent.height
+                  radius: parent.radius
+                  width: parent.width * root.heatProgress
+                  color: root.profileTint
+                  Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
+                }
+              }
+
               Text {
                 width: parent.width
+                textFormat: Text.PlainText
+                text: {
+                  if (!root.connected || !root.activeProfile) return root.moodLine
+                  var name = String(root.cleanName(root.activeProfile.name) || "").toUpperCase()
+                  var target = root.formatTemp(root.profileTempF(root.currentProfile, root.activeProfile.temp_f), undefined)
+                  return (root.heating ? "→ " : "") + name + (target !== "" ? "  ·  " + target : "")
+                }
+                color: root.connected ? Qt.tint(root.dim, Util.alpha(root.profileTint, 0.35)) : root.dim
+                font.family: root.connected ? root.displayFamily : root.fontFamily
+                font.pixelSize: root.connected ? Math.round(Style.font.caption * root.displayScale) : Style.font.caption
+                font.weight: Font.DemiBold
+                font.letterSpacing: root.connected && root.hasDisplayFont ? 1 : 0
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                visible: root.connected
                 textFormat: Text.PlainText
                 text: root.moodLine
                 color: root.dim
@@ -1825,44 +1943,6 @@ Panel {
                 font.pixelSize: Style.font.caption
                 font.italic: true
                 elide: Text.ElideRight
-              }
-            }
-
-            Column {
-              id: heroReadout
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(4)
-
-              // Counts toward each new reading instead of snapping to it; once
-              // it lands it shows the daemon's own label, so the two agree.
-              Text {
-                id: heroTemp
-                anchors.right: parent.right
-                textFormat: Text.PlainText
-
-                property real rawF: Number(root.statusData.heater_temp_f)
-                property real shownF: isFinite(rawF) ? rawF : 0
-                Behavior on shownF { NumberAnimation { id: tempCount; duration: 700; easing.type: Easing.OutCubic } }
-
-                text: !root.connected ? "—"
-                  : !isFinite(rawF) || !tempCount.running ? root.tempLabel : root.formatTemp(shownF, undefined)
-                color: !root.connected ? root.dim
-                  : shownF > 120 ? Qt.tint(root.foreground,
-                      Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
-                  : root.heating ? Qt.lighter(root.urgent, 1.15)
-                  : root.foreground
-                font.family: root.displayFamily
-                font.pixelSize: Math.round(Style.font.display * root.displayScale)
-                font.weight: Font.DemiBold
-
-                Behavior on color { ColorAnimation { duration: 300 } }
-              }
-
-              BatteryPill {
-                panel: root
-                anchors.right: parent.right
-                visible: root.connected && root.batteryLabel !== ""
               }
             }
           }
