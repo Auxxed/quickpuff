@@ -12,9 +12,7 @@ Row {
   property var panel
 
   readonly property real level: Math.max(0, Math.min(1, Number(panel.statusData.battery) / 100 || 0))
-  readonly property color fill: level <= 0.15 && !panel.pluggedIn ? panel.urgent
-    : panel.pluggedIn ? Color.accent
-    : Util.alpha(panel.foreground, 0.85)
+  readonly property color fill: panel.pluggedIn ? Color.accent : panel.batteryColor(level)
 
   spacing: Style.space(5)
 

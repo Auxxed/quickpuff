@@ -87,9 +87,9 @@ Column {
         textFormat: Text.PlainText
         text: panel.formatDuration(panel.timerSecondsLeft)
         color: panel.foreground
-        font.family: panel.fontFamily
-        font.pixelSize: Style.font.title
-        font.bold: true
+        font.family: panel.displayFamily
+        font.pixelSize: Math.round(Style.font.title * panel.displayScale)
+        font.weight: Font.DemiBold
       }
     }
 
@@ -212,6 +212,20 @@ Column {
             id: tileHop
             NumberAnimation { target: tile; property: "scale"; to: 1.045; duration: 110; easing.type: Easing.OutQuad }
             NumberAnimation { target: tile; property: "scale"; to: 1.0; duration: 260; easing.type: Easing.OutBack }
+          }
+
+          // Puffco's heat-profile cards: the profile's colour, shaded
+          // darker toward the foot.
+          Rectangle {
+            anchors.fill: parent
+            anchors.margins: Math.max(1, Style.normalBorderWidth)
+            radius: Math.max(0, tile.radius - anchors.margins)
+            opacity: tile.active ? 1 : 0.5
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: Util.alpha(tile.tint, 0.2 * tile.tintStrength) }
+              GradientStop { position: 1.0; color: Util.alpha(Qt.darker(tile.tint, 1.6), 0) }
+            }
+            Behavior on opacity { NumberAnimation { duration: 200 } }
           }
 
           // Colour stripe down the leading edge; it breathes while
@@ -383,9 +397,9 @@ Column {
                   color: tempTapMouse.containsMouse ? Color.accent
                     : (tile.active ? panel.heatRamp(tile.tempF)
                        : Qt.tint(panel.dim, Util.alpha(panel.heatRamp(tile.tempF), 0.45)))
-                  font.family: panel.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: tile.active
+                  font.family: panel.displayFamily
+                  font.pixelSize: Math.round(Style.font.subtitle * panel.displayScale)
+                  font.weight: Font.DemiBold
 
                   Behavior on color { ColorAnimation { duration: 120 } }
                 }

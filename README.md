@@ -303,6 +303,10 @@ Protocol work builds on [Fr0st3h/PuffcoBLE](https://github.com/Fr0st3h/PuffcoBLE
 and the [OldGrowthCrypto Linux/BlueZ fork](https://github.com/OldGrowthCrypto/Puffco);
 audit-log decoding follows [puff.social](https://github.com/puff-social/web).
 
+The panel's display type is [Rajdhani](https://fonts.google.com/specimen/Rajdhani)
+by the Indian Type Foundry, the face the Puffco app uses for its numbers and
+headings, bundled in `fonts/` under the SIL Open Font License (`fonts/OFL.txt`).
+
 ## License
 
 [MIT](LICENSE)

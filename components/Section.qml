@@ -43,7 +43,9 @@ Column {
       anchors.leftMargin: sectionGlyph.visible ? Style.space(6) : 0
       text: section.title
       foreground: panel.foreground
-      fontFamily: panel.fontFamily
+      fontFamily: panel.displayFamily
+      fontSize: Math.round(Style.font.caption * panel.displayScale)
+      font.letterSpacing: panel.hasDisplayFont ? 0.8 : 0
     }
 
     Text {

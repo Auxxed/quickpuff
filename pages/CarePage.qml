@@ -18,7 +18,42 @@ Column {
     panel: carePage.panel
     title: "BATTERY"
     glyph: "\uf240"
-    trailing: panel.batteryHealthLabel !== "" ? panel.batteryHealthLabel + " health" : ""
+    trailing: panel.batteryLabel !== "" ? panel.batteryLabel + " charged" : ""
+
+    // Charge, in the Peak's own battery colours, with the 80% mark while
+    // Battery Preservation holds it there (as the Puffco app draws it).
+    MeterBar {
+      panel: carePage.panel
+      width: parent.width
+      visible: panel.batteryLabel !== ""
+      value: Number(panel.statusData.battery) / 100
+      fill: panel.pluggedIn ? Color.accent : panel.batteryColor(Number(panel.statusData.battery) / 100)
+      marker: panel.preserveSupported && panel.preserveOn ? 0.8 : -1
+      throb: panel.pluggedIn && Number(panel.statusData.battery) < 100
+    }
+
+    Item {
+      width: parent.width
+      height: healthLabel.implicitHeight
+      visible: panel.batteryHealthLabel !== ""
+
+      Text {
+        id: healthLabel
+        textFormat: Text.PlainText
+        text: "Health"
+        color: panel.dim
+        font.family: panel.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Text {
+        anchors.right: parent.right
+        textFormat: Text.PlainText
+        text: panel.batteryHealthLabel
+        color: panel.dim
+        font.family: panel.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
 
     MeterBar {
       panel: carePage.panel

@@ -48,9 +48,9 @@ BorderSurface {
       textFormat: Text.PlainText
       text: cell.numeric ? String(Math.round(cell.shown)) : cell.value
       color: cell.highlight ? Color.accent : panel.foreground
-      font.family: panel.fontFamily
-      font.pixelSize: Style.font.title
-      font.bold: true
+      font.family: panel.displayFamily
+      font.pixelSize: Math.round(Style.font.title * panel.displayScale)
+      font.weight: Font.DemiBold
     }
     Text {
       anchors.horizontalCenter: parent.horizontalCenter

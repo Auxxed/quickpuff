@@ -14,6 +14,9 @@ Rectangle {
   property real value: 0
   property color fill: Color.accent
   property bool throb: false
+  // A tick at this fraction (0-1), like the Puffco app's 80% charge-limit
+  // mark; below 0 draws none.
+  property real marker: -1
   readonly property real clamped: isFinite(value) ? Math.max(0, Math.min(1, value)) : 0
 
   implicitHeight: Style.space(6)
@@ -40,5 +43,15 @@ Rectangle {
       NumberAnimation { to: 0.5; duration: 700; easing.type: Easing.InOutSine }
       NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
     }
+  }
+
+  Rectangle {
+    visible: meter.marker >= 0 && meter.marker <= 1
+    x: Math.round(parent.width * meter.marker) - width / 2
+    anchors.verticalCenter: parent.verticalCenter
+    width: Math.max(2, Style.space(2))
+    height: parent.height + Style.space(6)
+    radius: width / 2
+    color: panel.foreground
   }
 }

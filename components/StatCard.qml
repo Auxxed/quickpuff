@@ -57,9 +57,9 @@ BorderSurface {
       textFormat: Text.PlainText
       text: metric.value
       color: panel.foreground
-      font.family: panel.fontFamily
-      font.pixelSize: Style.font.title
-      font.bold: true
+      font.family: panel.displayFamily
+      font.pixelSize: Math.round(Style.font.title * panel.displayScale)
+      font.weight: Font.DemiBold
     }
     Text {
       visible: metric.meta !== ""

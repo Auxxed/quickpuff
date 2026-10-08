@@ -28,6 +28,15 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  // Puffco's own display face (Rajdhani, OFL, bundled in fonts/): big numbers
+  // and headings, as the Puffco app sets them. Body text keeps the theme's font.
+  readonly property string displayFamily: displayFont.status === FontLoader.Ready ? displayFont.name : fontFamily
+  readonly property bool hasDisplayFont: displayFont.status === FontLoader.Ready
+  // Rajdhani runs small for its size; this keeps it level with the theme font.
+  readonly property real displayScale: hasDisplayFont ? 1.3 : 1.0
+
+  FontLoader { id: displayFont; source: Qt.resolvedUrl("fonts/Rajdhani-SemiBold.ttf") }
+  FontLoader { source: Qt.resolvedUrl("fonts/Rajdhani-Medium.ttf") }
 
   // The bar tracks the widget mounted in its slot, not this nested panel, so
   // panel-to-panel Tab handoff has to hand it the host widget's identity.
@@ -236,6 +245,14 @@ Panel {
   }
 
   property var pendingPreserve: undefined
+  // The Peak's own battery colours (three clicks of its button): green down
+  // to 60%, yellow to 30%, red below; the Puffco app's bars use the same.
+  function batteryColor(level) {
+    var l = Number(level)
+    if (!isFinite(l)) return dim
+    return l >= 0.6 ? "#16a909" : l >= 0.3 ? "#ffcb02" : "#ef2b2b"
+  }
+
   readonly property bool preserveSupported: statusData.max_charge !== null && statusData.max_charge !== undefined
   readonly property bool preserveOn: pendingPreserve !== undefined
     ? pendingPreserve === true
@@ -1713,7 +1730,8 @@ Panel {
               width: Style.space(62)
               height: width
               progress: root.heatProgress
-              tint: root.heatColor
+              // The Peak's light ring glows the active profile's colour.
+              tint: root.connected ? root.profileTint : root.dim
               lit: root.heating
               climbing: root.preheating
               sleeping: !root.connected && !root.connecting && !root.needsSetup
@@ -1741,9 +1759,11 @@ Panel {
                 textFormat: Text.PlainText
                 text: root.deviceName
                 color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.heading
-                font.bold: true
+                font.family: root.displayFamily
+                font.pixelSize: Math.round(Style.font.heading * root.displayScale)
+                font.weight: Font.DemiBold
+                font.capitalization: root.hasDisplayFont ? Font.AllUppercase : Font.MixedCase
+                font.letterSpacing: root.hasDisplayFont ? 1 : 0
                 elide: Text.ElideRight
               }
 
@@ -1832,9 +1852,9 @@ Panel {
                       Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
                   : root.heating ? Qt.lighter(root.urgent, 1.15)
                   : root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.display
-                font.bold: true
+                font.family: root.displayFamily
+                font.pixelSize: Math.round(Style.font.display * root.displayScale)
+                font.weight: Font.DemiBold
 
                 Behavior on color { ColorAnimation { duration: 300 } }
               }
