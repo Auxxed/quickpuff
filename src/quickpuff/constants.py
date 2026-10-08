@@ -110,7 +110,7 @@ class BatteryChargeState(IntEnum):
 
 
 # Ready animations the bar widget knows how to play; "off" plays nothing.
-READY_ANIMATIONS = ("off", "confetti", "rocket")
+READY_ANIMATIONS = ("off", "confetti", "rocket", "lava", "aurora", "fireworks", "smoke", "neon")
 
 
 class ChamberType(IntEnum):

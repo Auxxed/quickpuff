@@ -1098,7 +1098,12 @@ Panel {
   readonly property var readyAnimations: [
     { "value": "off", "label": "Off", "glyph": "\uf05e" },
     { "value": "confetti", "label": "Confetti", "glyph": "\uf0d0" },
-    { "value": "rocket", "label": "Rocket", "glyph": "\uf135" }
+    { "value": "rocket", "label": "Rocket", "glyph": "\uf135" },
+    { "value": "lava", "label": "Lava Lamp", "glyph": "\uf06d" },
+    { "value": "aurora", "label": "Aurora", "glyph": "\uf186" },
+    { "value": "fireworks", "label": "Fireworks", "glyph": "\uf005" },
+    { "value": "smoke", "label": "Smoke Rings", "glyph": "\uf0c2" },
+    { "value": "neon", "label": "Neon", "glyph": "\uf0eb" }
   ]
   property string configReadyAnimation: "rocket"
   property string pendingReadyAnimation: ""

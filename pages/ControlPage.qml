@@ -623,30 +623,39 @@ Column {
     title: "READY ANIMATION"
     trailing: panel.readyAnimation === "off" ? "" : "Plays when it's ready"
 
-    Row {
+    Grid {
+      id: animGrid
       width: parent.width
-      spacing: Style.spacing.controlGap
+      columns: 4
+      rowSpacing: Style.spacing.controlGap
+      columnSpacing: Style.spacing.controlGap
 
-      Segmented {
-        panel: controlPage.panel
-        width: parent.width - previewButton.width - parent.spacing
-        compact: true
-        options: panel.readyAnimations
-        value: panel.readyAnimation
-        onPicked: function(value) { panel.setReadyAnimation(value) }
-      }
+      readonly property real cellWidth: (width - columnSpacing * (columns - 1)) / columns
 
-      ActionButton {
-        panel: controlPage.panel
-        id: previewButton
-        width: Style.space(80)
-        implicitHeight: Style.space(24)
-        label: "Preview"
-        glyph: ""
-        tint: Color.accent
-        opacity: panel.readyAnimation === "off" ? 0.4 : 1
-        onActivated: panel.previewReadyAnimation()
+      Repeater {
+        model: panel.readyAnimations
+        ActionButton {
+          panel: controlPage.panel
+          required property var modelData
+          width: animGrid.cellWidth
+          label: modelData.label
+          glyph: modelData.glyph
+          tint: modelData.value === "off" ? panel.foreground : panel.profileTint
+          emphasized: panel.readyAnimation === modelData.value
+          onActivated: panel.setReadyAnimation(modelData.value)
+        }
       }
+    }
+
+    ActionButton {
+      panel: controlPage.panel
+      id: previewButton
+      width: parent.width
+      label: panel.readyAnimation === "off" ? "Pick one to preview" : "Preview it on screen"
+      glyph: "\uf04b"
+      tint: Color.accent
+      opacity: panel.readyAnimation === "off" ? 0.4 : 1
+      onActivated: panel.previewReadyAnimation()
     }
   }
 }
