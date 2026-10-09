@@ -161,6 +161,35 @@ removal.
   so your phone or another computer can connect; power off. **Tips** has the factory heat presets (490 / 510 / 530 / 545°F)
   and a short care list.
 
+### Showtime, sounds and the demo
+
+**Showtime** plays each heat cycle out over the desktop, on top of whatever
+you're doing and without taking a click. **Corner** (the default) puts a card
+under the bar: your Peak, the climbing temperature and a progress bar, then a
+session countdown, then a summary (length, peak temperature, battery used).
+**Stage** turns it into a show: the screen dims and your Peak takes the middle
+of it, its light ring brightening as a big temperature counts up and the heat
+curve draws; Ready lands with a flash and a shockwave from the ring, the ready
+animation plays on the stage, and then it settles into the card. Pick it under
+Control → Showtime or with `quickpuff showtime off|corner|stage`.
+
+**Sounds** give the moments a voice: a soft ignition when the heater starts, a
+signature chime at Ready, a sound for each ready animation (countdown beeps and
+a liftoff for the rocket, a cannon pop for confetti, bubbling lava, an aurora
+shimmer, fireworks, smoke, a neon buzz) and a resolve when the session is over.
+Switch them off under Control → Showtime, or with `quickpuff sounds off`;
+`quickpuff sounds on --volume 50` sets the level. They play through PipeWire's
+`pw-play`.
+
+**Watch a demo cycle** (or `quickpuff demo`) plays a whole heat cycle — preheat,
+the ready show, the session and the cool-down — through the bar, the panel and
+Showtime exactly as a real one would, without sending anything to the Peak or
+counting a dab. `quickpuff demo --preheat 8 --session 15` sets the timing and
+`quickpuff demo stop` ends it early.
+
+Overlays play on the monitor you're looking at. To keep them on one screen,
+name it: `quickpuff overlay-screen DP-2` (`focused` goes back to following you).
+
 ### Notifications and reconnecting
 
 QuickPuff sends a desktop notification when the Peak reaches temperature, once
@@ -263,6 +292,10 @@ quickpuff light save "Puffcon"     # keep the light a profile is wearing
 quickpuff light list               # then: light apply|rename|delete NAME
 quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, smoke, neon or off
 quickpuff surprise on              # a new light after each session
+quickpuff showtime stage           # heat cycles over the desktop: off, corner or stage
+quickpuff sounds on --volume 70    # Showtime and ready-animation sounds
+quickpuff demo                     # a simulated heat cycle (nothing reaches the Peak)
+quickpuff overlay-screen DP-2      # which monitor overlays use (or: focused)
 quickpuff stealth on
 quickpuff battery                  # show the charge on the Peak's own lights
 quickpuff preserve on              # stop charging at 80% (off: charge to 100%)
@@ -327,6 +360,9 @@ audit-log decoding follows [puff.social](https://github.com/puff-social/web).
 The panel's display type is [Rajdhani](https://fonts.google.com/specimen/Rajdhani)
 by the Indian Type Foundry, the face the Puffco app uses for its numbers and
 headings, bundled in `fonts/` under the SIL Open Font License (`fonts/OFL.txt`).
+
+The sounds in `sounds/` were made for QuickPuff with ElevenLabs' sound-effects
+model, then trimmed, levelled and encoded as Ogg Vorbis.
 
 ## License
 

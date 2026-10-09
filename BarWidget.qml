@@ -76,6 +76,8 @@ BarWidget {
     function celebrate(): void { root.playReady("") }
     // Plays a given ready animation (rocket, confetti, lava, ...).
     function preview(name: string): void { root.playReady(name) }
+    // Opens Showtime now (it closes itself when no heat cycle is running).
+    function showtime(): void { root.openShowtime() }
     // Opens the panel on a tab: control, lights, usage, care or device.
     function openPage(name: string): void {
       root.open()
@@ -128,8 +130,15 @@ BarWidget {
         // convention for separating two fields. The Omarchy bar already gaps
         // its widgets, so that reads as two widgets here — collapse it.
         var cls = String(data.class || "")
-        // Reached temperature: celebrate, on the monitor you're looking at.
-        if (root.outputClass === "preheat" && cls === "ready" && root.onFocusedScreen()) root.playReady("")
+        // Reached temperature: celebrate, on the overlay monitor.
+        if (root.outputClass === "preheat" && cls === "ready" && root.isOverlayScreen()) root.playReady("")
+        // A heat cycle began: raise the curtain (once per cycle).
+        if (cls === "preheat" || cls === "ready") {
+          if (!root.showtimeThisCycle && root.showtimeMode !== "off" && root.isOverlayScreen()) root.openShowtime()
+          root.showtimeThisCycle = true
+        } else {
+          root.showtimeThisCycle = false
+        }
         root.outputText = String(data.text || "").replace(/\s+/g, " ").trim()
         root.outputTooltip = String(data.tooltip || "")
         root.outputClass = String(data.class || "")
@@ -244,6 +253,13 @@ BarWidget {
   // Played over the desktop by ReadyOverlay.qml when the Peak reaches
   // temperature; which one comes from `quickpuff ready-anim`.
   property string readyAnimation: "rocket"
+  // Showtime (SessionOverlay.qml): off, corner or stage.
+  property string showtimeMode: "corner"
+  property bool soundsOn: true
+  property real soundVolume: 0.7
+  // Which monitor overlays play on: "focused" or an output name.
+  property string overlayScreen: "focused"
+  property bool showtimeThisCycle: false
 
   FileView {
     path: Quickshell.env("HOME") + "/.config/quickpuff/config.json"
@@ -254,8 +270,24 @@ BarWidget {
       try {
         var cfg = JSON.parse(text() || "{}")
         root.readyAnimation = String(cfg.ready_animation || "rocket")
+        root.showtimeMode = String(cfg.showtime || "corner")
+        root.soundsOn = cfg.sounds !== false
+        var vol = Number(cfg.sound_volume)
+        root.soundVolume = isFinite(vol) ? Math.max(0, Math.min(100, vol)) / 100 : 0.7
+        root.overlayScreen = String(cfg.overlay_screen || "focused")
       } catch (e) {}
     }
+  }
+
+  // The monitor overlays play on: the one named in overlay_screen when it's
+  // connected, otherwise whichever you're looking at.
+  function isOverlayScreen() {
+    var win = button.QsWindow.window
+    if (root.overlayScreen !== "focused" && win && win.screen) {
+      for (var i = 0; i < Quickshell.screens.length; i++)
+        if (Quickshell.screens[i].name === root.overlayScreen) return win.screen.name === root.overlayScreen
+    }
+    return root.onFocusedScreen()
   }
 
   function onFocusedScreen() {
@@ -282,8 +314,44 @@ BarWidget {
     show.originX = p.x
     show.barEdge = atTop ? p.y + button.height : screenH - (win ? win.height : 0) + p.y
     show.fontFamily = root.bar ? root.bar.fontFamily : Style.font.family
+    if ("soundsOn" in show) show.soundsOn = root.soundsOn
+    if ("soundVolume" in show) show.soundVolume = root.soundVolume
     show.animation = which
     show.armed = true
+  }
+
+  // Showtime: the heat cycle played out over the desktop.
+  function openShowtime() {
+    showtimeLoader.active = false
+    showtimeLoader.active = true
+    var show = showtimeLoader.item
+    if (!show) return
+    var win = button.QsWindow.window
+    if (win && win.screen) show.screen = win.screen
+    var p = button.mapToItem(null, button.width / 2, 0)
+    var atTop = !root.bar || root.bar.position !== "bottom"
+    var screenH = win && win.screen ? win.screen.height : 0
+    show.barAtTop = atTop
+    show.originX = p.x
+    show.barEdge = atTop ? p.y + button.height : screenH - (win ? win.height : 0) + p.y
+    show.mode = root.showtimeMode
+    show.soundsOn = root.soundsOn
+    show.soundVolume = root.soundVolume
+    // Hold the stage long enough for the ready animation to play on it.
+    show.chimeOnReady = root.readyAnimation === "off"
+    show.holdAfterReady = root.readyAnimation === "off" ? 2.2 : root.readyAnimation === "rocket" ? 7.4 : 6.2
+    show.armed = true
+  }
+
+  LazyLoader {
+    id: showtimeLoader
+    active: false
+    source: Qt.resolvedUrl("SessionOverlay.qml")
+  }
+
+  Connections {
+    target: showtimeLoader.item
+    function onFinished() { showtimeLoader.active = false }
   }
 
   LazyLoader {

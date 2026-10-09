@@ -658,4 +658,48 @@ Column {
       onActivated: panel.previewReadyAnimation()
     }
   }
+
+  // The heat cycle, played out over the desktop, and its sounds.
+  Section {
+    panel: controlPage.panel
+    glyph: "\uf008"
+    title: "SHOWTIME"
+    trailing: panel.showtimeMode === "stage" ? "Takes the whole screen" : panel.showtimeMode === "corner" ? "A card under the bar" : ""
+
+    Segmented {
+      panel: controlPage.panel
+      width: parent.width
+      compact: true
+      options: panel.showtimeOptions
+      value: panel.showtimeMode
+      onPicked: function(value) { panel.setShowtime(value) }
+    }
+
+    SwitchRow {
+      panel: controlPage.panel
+      width: parent.width
+      label: "Sounds"
+      checked: panel.soundsOn
+      onToggled: panel.toggleSounds()
+    }
+
+    ActionButton {
+      panel: controlPage.panel
+      width: parent.width
+      label: "Watch a demo cycle"
+      glyph: "\uf04b"
+      tint: panel.profileTint
+      onActivated: panel.runDemo()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: "The demo plays a whole heat cycle on screen, from preheat to the ready show to the session, without heating your Peak."
+      color: panel.dim
+      font.family: panel.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
 }

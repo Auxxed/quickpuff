@@ -25,6 +25,9 @@ Item {
   // Vapour rising in the glass while the chamber is hot.
   property bool vapor: false
   property bool asleep: false
+  // Extra light for big, close-up use (Showtime's stage): rim light from the
+  // ring, beams up the glass, and a bloom round the ring.
+  property bool hero: false
   readonly property bool live: panel ? panel.opened : false
 
   implicitWidth: Style.space(60)
@@ -155,6 +158,24 @@ Item {
       PathSvg { path: "M8.8,108.6 L45.8,93.1" }
     }
 
+    // ---- hero light: beams up the glass and the ring's light on the body
+    ShapePath {
+      strokeColor: "transparent"
+      fillGradient: LinearGradient {
+        x1: 0; y1: 104; x2: 0; y2: 30
+        GradientStop { position: 0.0; color: Util.alpha(art.ringColor, art.hero ? 0.32 * art.glow : 0) }
+        GradientStop { position: 1.0; color: Util.alpha(art.ringColor, 0) }
+      }
+      PathSvg { path: "M20,104 L24,40 L27,40 L25,103 Z M30,101 L31,52 L33,52 L35,99 Z" }
+    }
+    ShapePath {
+      strokeColor: Util.alpha(art.ringColor, art.hero ? 0.55 * art.glow : 0)
+      strokeWidth: 0.9
+      capStyle: ShapePath.RoundCap
+      fillColor: "transparent"
+      PathSvg { path: "M64.5,152 C63,140 60,126 56,113.5 M6.8,150.6 C24,136 52,116 72.3,104.4" }
+    }
+
     // ---- the logo and the light ring round the foot
     ShapePath {
       strokeColor: "transparent"
@@ -164,6 +185,21 @@ Item {
     ShapePath {
       strokeColor: art.ringColor
       strokeWidth: 1.8
+      capStyle: ShapePath.RoundCap
+      fillColor: "transparent"
+      PathSvg { path: "M8.5,157 L61,157" }
+    }
+    // Bloom: the ring again, wider and fainter, twice over.
+    ShapePath {
+      strokeColor: Util.alpha(art.ringColor, art.hero ? 0.28 * art.glow : 0)
+      strokeWidth: 5
+      capStyle: ShapePath.RoundCap
+      fillColor: "transparent"
+      PathSvg { path: "M8.5,157 L61,157" }
+    }
+    ShapePath {
+      strokeColor: Util.alpha(art.ringColor, art.hero ? 0.12 * art.glow : 0)
+      strokeWidth: 11
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
       PathSvg { path: "M8.5,157 L61,157" }

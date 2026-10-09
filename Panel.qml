@@ -1115,6 +1115,40 @@ Panel {
   }
   onConfigReadyAnimationChanged: pendingReadyAnimation = ""
 
+  // ---------------------------------------------------- showtime & sound
+  // Showtime (SessionOverlay.qml) plays the heat cycle over the desktop;
+  // both settings live in quickpuff's config, like the ready animation.
+  readonly property var showtimeOptions: [
+    { "value": "off", "label": "Off", "glyph": "\uf05e" },
+    { "value": "corner", "label": "Corner", "glyph": "\uf2d2" },
+    { "value": "stage", "label": "Stage", "glyph": "\uf26c" }
+  ]
+  property string configShowtime: "corner"
+  property string pendingShowtime: ""
+  readonly property string showtimeMode: pendingShowtime !== "" ? pendingShowtime : configShowtime
+  onConfigShowtimeChanged: pendingShowtime = ""
+  function setShowtime(value) {
+    pendingShowtime = value
+    runArgv(["quickpuff", "showtime", value])
+  }
+
+  property bool configSounds: true
+  property var pendingSounds: undefined
+  readonly property bool soundsOn: pendingSounds !== undefined ? pendingSounds === true : configSounds
+  onConfigSoundsChanged: pendingSounds = undefined
+  function toggleSounds() {
+    var next = !soundsOn
+    pendingSounds = next
+    runArgv(["quickpuff", "sounds", next ? "on" : "off"])
+  }
+
+  // A simulated heat cycle: the bar, this panel and the overlays play it
+  // exactly like a real one, and nothing is sent to the Peak.
+  function runDemo() {
+    close()
+    runArgv(["quickpuff", "demo"])
+  }
+
   // The show launches right where this panel sits, so get out of its way.
   function previewReadyAnimation() {
     if (readyAnimation === "off" || !hostWidget || typeof hostWidget.playReady !== "function") return
@@ -1678,6 +1712,8 @@ Panel {
         var cfg = JSON.parse(text() || "{}")
         root.units = String(cfg.units || "F").toUpperCase() === "C" ? "C" : "F"
         root.configReadyAnimation = String(cfg.ready_animation || "rocket")
+        root.configShowtime = String(cfg.showtime || "corner")
+        root.configSounds = cfg.sounds !== false
       } catch (e) {
         root.units = "F"
       }
