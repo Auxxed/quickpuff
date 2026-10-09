@@ -784,7 +784,7 @@ PanelWindow {
   // ------------------------------------------------------------ the card
   Item {
     id: card
-    readonly property real w: 420 * show.u
+    readonly property real w: 470 * show.u
     readonly property real h: 150 * show.u
     width: w
     height: h
@@ -879,7 +879,7 @@ PanelWindow {
           if (isFinite(show.summaryHeatup)) bits.push("Heat-up " + show.fmtTime(show.summaryHeatup))
           bits.push("Peak " + Math.round(show.peakF) + "°F")
           if (isFinite(show.summaryBattery) && show.summaryBattery > 0) bits.push("−" + Math.round(show.summaryBattery) + "% battery")
-          return bits.join("  ·  ")
+          return bits.join(" · ")
         }
         color: Util.alpha("#f4eef6", 0.6)
         font.family: show.display

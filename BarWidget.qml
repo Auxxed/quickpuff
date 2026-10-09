@@ -171,6 +171,44 @@ BarWidget {
     onTriggered: root.refresh()
   }
 
+  // The daemon also pushes every status it takes (several a second while
+  // heating) over its socket. Listening means a heat cycle raises Showtime
+  // and refreshes the label the moment it starts, not at the next poll.
+  property int liveState: -1
+  Socket {
+    id: live
+    path: Quickshell.env("QUICKPUFF_SOCKET") || (Quickshell.env("XDG_RUNTIME_DIR") + "/quickpuff.sock")
+    connected: true
+    parser: SplitParser {
+      onRead: function(line) {
+        if (line.indexOf('"event": "status"') < 0) return
+        var msg
+        try { msg = JSON.parse(line) } catch (e) { return }
+        var d = msg && msg.data
+        if (!d) return
+        var s = d.connected === false ? -1 : Number(d.operating_state_id)
+        if (s === root.liveState) return
+        var was = root.liveState
+        root.liveState = s
+        // A cycle just began (or was found running): curtain up, once.
+        if ((s === 7 || s === 8) && !root.showtimeThisCycle) {
+          root.showtimeThisCycle = true
+          if (root.showtimeMode !== "off" && root.isOverlayScreen()) root.openShowtime()
+        } else if (s !== 7 && s !== 8 && s !== 9) {
+          root.showtimeThisCycle = false
+        }
+        if (was !== -1 || s !== -1) root.refresh()
+      }
+    }
+  }
+  // The daemon restarts now and then; pick the socket back up when it does.
+  Timer {
+    interval: 5000
+    running: !live.connected
+    repeat: true
+    onTriggered: live.connected = true
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
