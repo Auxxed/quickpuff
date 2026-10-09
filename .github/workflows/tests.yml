@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Reads the code, nothing more.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     runs-on: ubuntu-latest
@@ -15,21 +19,29 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v7
+      # Pinned to full commit SHAs: a tag can be moved.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       # No BlueZ here on purpose: these tests cover the pure logic (codec,
       # history, config, limits, adapter-free helpers). The BLE layer needs
       # real hardware, so it stays out of CI.
+      # The same hash-locked install as install.sh, then the test tools locked
+      # the same way: exact versions, every file checked against its SHA-256,
+      # and nothing installed that the locks don't list.
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install "pytest>=7.0"
+          python -m pip install --require-hashes --no-deps -r requirements.txt
+          python -m pip install --require-hashes --no-deps -r requirements-dev.txt
 
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q

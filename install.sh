@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # Sets up QuickPuff's backend: a Python environment for the Bluetooth
 # libraries, the `quickpuff` command, and the user systemd daemon the bar
 # widget talks to. Everything lands in your home directory; no root access is
@@ -22,6 +22,16 @@ INSTALL_LINE="omarchy plugin add https://github.com/Auxxed/quickpuff --enable &&
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'quickpuff: %s\n' "$*" >&2; exit 1; }
+
+# These two are spliced into the generated unit file (sed replacements) and
+# the quickpuff command (a heredoc), so a |, &, %, quote, space or newline in
+# either could break those files or inject into them.
+plain_path() {
+  [[ $1 =~ ^[A-Za-z0-9._/+-]+$ ]] ||
+    die "won't install with $2 at '$1': only letters, digits and . _ / + - can be in that path"
+}
+plain_path "$ROOT" "the plugin"
+plain_path "$VENV" "the Python environment"
 
 say "QuickPuff — Peak Pro controls ($ROOT)"
 
@@ -56,7 +66,18 @@ for legacy in "${LEGACY_NAMES[@]}"; do
       name="$(basename "$item")"
       case $name in
         # Rebuilt below: a venv's scripts hard-code the path it was made at.
-        venv | src) rm -rf "$item" ;;
+        # Deleted only when it is plainly the old one (a real directory with
+        # its marker), never by name alone.
+        venv | src)
+          if [[ -d $item && ! -L $item ]] && {
+            [[ $name == venv && -f $item/pyvenv.cfg ]] ||
+              [[ $name == src && (-d $item/quickpuff || -d $item/omapuffco || -d $item/ember) ]]
+          }; then
+            rm -rf -- "$item"
+          else
+            say "Left $item alone: it doesn't look like the old $legacy $name"
+          fi
+          ;;
         *) [[ -e $DATA_DIR/$name ]] || mv "$item" "$DATA_DIR/$name" ;;
       esac
     done
@@ -70,12 +91,13 @@ done
 say "Python environment ($VENV)"
 mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 [[ -x $VENV/bin/python ]] || python3 -m venv "$VENV"
-"$VENV/bin/pip" install -q --upgrade pip
-"$VENV/bin/pip" install -q -r "$ROOT/requirements.txt"
+# Exactly the versions in requirements.txt, each checked against its SHA-256,
+# and nothing they would pull in besides: the lock lists every dependency.
+"$VENV/bin/pip" install -q --require-hashes --no-deps -r "$ROOT/requirements.txt"
 
 say "quickpuff command ($BIN_DIR/quickpuff)"
 cat > "$BIN_DIR/quickpuff" <<EOF
-#!/usr/bin/env bash
+#!/usr/bin/bash
 export PYTHONPATH="$ROOT/src\${PYTHONPATH:+:\$PYTHONPATH}"
 exec "$VENV/bin/python" -m quickpuff "\$@"
 EOF
