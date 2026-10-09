@@ -1504,14 +1504,32 @@ Panel {
   // Every list the pages draw, and the most the daemon ever sends of it.
   function statusFits(d) {
     if (!d || typeof d !== "object" || Array.isArray(d)) return false
+    var fits = function(v, max) { return v === undefined || v === null || (Array.isArray(v) && v.length <= max) }
     var tel = d.telemetry && typeof d.telemetry === "object" ? d.telemetry : ({})
+    var wear = tel.wear && typeof tel.wear === "object" ? tel.wear : ({})
     var trace = d.heat_trace && typeof d.heat_trace === "object" ? d.heat_trace : ({})
     var lists = [[d.profiles, 8], [d.saved_lights, 40], [trace.points, 360], [tel.daily, 400],
                  [tel.weekdays, 7], [tel.hours, 24], [tel.colors, 64], [tel.profiles, 16]]
-    for (var i = 0; i < lists.length; i++) {
-      var v = lists[i][0]
-      if (v !== undefined && v !== null && (!Array.isArray(v) || v.length > lists[i][1])) return false
+    for (var i = 0; i < lists.length; i++)
+      if (!fits(lists[i][0], lists[i][1])) return false
+    // And the lists inside them: each profile's cycle and each saved light's
+    // colours, and the months behind each wear trend.
+    var inner = []
+    for (i = 0; i < (d.profiles || []).length; i++) {
+      var p = d.profiles[i]
+      if (p && typeof p === "object" && p.cycle && typeof p.cycle === "object") inner.push([p.cycle.colors, 16])
     }
+    for (i = 0; i < (d.saved_lights || []).length; i++) {
+      var l = d.saved_lights[i]
+      if (l && typeof l === "object") inner.push([l.colors, 16])
+    }
+    var trends = ["heatup", "battery"]
+    for (i = 0; i < trends.length; i++) {
+      var t = wear[trends[i]]
+      if (t && typeof t === "object") inner.push([t.months, 240])
+    }
+    for (i = 0; i < inner.length; i++)
+      if (!fits(inner[i][0], inner[i][1])) return false
     return true
   }
 
