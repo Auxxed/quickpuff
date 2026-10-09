@@ -290,7 +290,9 @@ class PuffcoBLE:
             log.debug("wait ServicesResolved: %r", exc)
         return client
 
-    async def _lorax_handshake(self, client: BleakClient) -> None:
+    async def _lorax_handshake(self, client: BleakClient) -> bool:
+        """Set the link up for Lorax commands. True once the Peak is bonded
+        (or already was), which is all the pairing agent was there for."""
         try:
             services = {service.uuid.lower() for service in client.services}
         except Exception:
@@ -303,7 +305,7 @@ class PuffcoBLE:
         self.client = client
         self._notify_started = False
         self.lorax_sequence = 1
-        await self.trigger_bonding()
+        bonded = await self.trigger_bonding()
         await asyncio.sleep(0.35)
         await self._ensure_notify()
         await asyncio.sleep(0.35)
@@ -317,6 +319,7 @@ class PuffcoBLE:
         except Exception as exc:
             log.warning("GetLimits failed: %r — continuing with auth", exc)
         await self.auth_device()
+        return bonded
 
     async def connect(self) -> BleakClient:
         from . import bluez
@@ -354,10 +357,19 @@ class PuffcoBLE:
                         log.debug("on_attempt callback failed", exc_info=True)
                 client = None
                 try:
+                    # The agent says yes for this Peak and nothing else.
+                    agent.allow(address)
                     client = await self._gatt_connect(address)
                     if not client.is_connected:
                         raise ConnectionError("BlueZ reported disconnected after Connect")
-                    await self._lorax_handshake(client)
+                    if await self._lorax_handshake(client):
+                        # Bonded: nothing is left for the agent to do, and
+                        # while it is registered it is the default agent for
+                        # the whole machine. A Peak that didn't bond keeps it
+                        # (still only for this Peak) until disconnect(), so a
+                        # bond the Peak asks for later can still finish.
+                        await agent.stop()
+                        self._pairing_agent = None
                     return client
                 except Exception as exc:
                     last_error = exc
