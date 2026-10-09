@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import __version__, audit, bluez, demo, faults, history
+from . import __version__, ambient, audit, bluez, demo, faults, history
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
 from .paths import (
@@ -102,6 +102,12 @@ QTIP_REMINDER_DELAY_S = 12.0
 # Surprise me changes the light once the heater has let go after a session,
 # well before battery saver rests the Peak.
 SURPRISE_DELAY_S = 4.0
+# Theme and music lights: how often the desktop is checked for a new theme or
+# track, and how long to wait before trying the session bus again.
+AMBIENT_POLL_S = 3.0
+AMBIENT_BUS_RETRY_S = 30.0
+# A new link's lantern is unknown: settled once (theme, music or its own light back).
+AMBIENT_UNSETTLED = ("?",)
 
 # Polling: quick while heating, steady while the panel is open, and slow the
 # rest of the time so the Peak's radio isn't kept busy all day.
@@ -195,12 +201,15 @@ LOCAL_COMMANDS = frozenset(
         "recap",
         "set_qtip_reminder",
         "set_surprise",
+        "set_theme_light",
+        "set_music_light",
         "set_battery_saver",
         "set_handoff",
         "claim",
         "set_clean_every",
         "mark_cleaned",
         "stats",
+        "wrapped",
         "rename_saved_light",
         "delete_saved_light",
     }
@@ -485,6 +494,17 @@ class QuickPuffDaemon:
         self.qtip_reminder = _as_bool(load_config().get("qtip_reminder", True))
         self.surprise_light = _as_bool(load_config().get("surprise_light"))
         self._surprise_rng = random.Random()
+        self.theme_light = _as_bool(load_config().get("theme_light"))
+        self.music_light = _as_bool(load_config().get("music_light"))
+        self._ambient_task: asyncio.Task | None = None
+        # What the lantern was last given, and on which link (a new link starts over).
+        self._ambient_applied: tuple[str, ...] | None = AMBIENT_UNSETTLED
+        self._ambient_link: Any = None
+        self._ambient: dict[str, Any] | None = None
+        self._poll_ambient_now = False
+        self._session_bus: Any = None
+        self._bus_retry_at = 0.0
+        self._art_seen: tuple[str, list[str] | None] = ("", None)
         self._session_reached_temp = False
         self._cycle_ts: float | None = None
         self._battery_at_start: Any = None
@@ -526,6 +546,7 @@ class QuickPuffDaemon:
         self.status["handoff"] = self._handoff
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
+        self.status.update(self._ambient_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -639,6 +660,7 @@ class QuickPuffDaemon:
         snap["battery_saver"] = self.battery_saver
         snap["qtip_reminder"] = self.qtip_reminder
         snap["surprise_light"] = self.surprise_light
+        snap.update(self._ambient_fields())
         snap["daily_limit"] = self.daily_limit
         snap["weekly_recap"] = self.weekly_recap
         snap["saved_lights"] = saved_lights.listing()
@@ -995,6 +1017,7 @@ class QuickPuffDaemon:
         self.status["handoff"] = self._handoff
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
+        self.status.update(self._ambient_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -1726,6 +1749,113 @@ class QuickPuffDaemon:
         await self._broadcast_event("status", self.status)
         return {"surprise_light": self.surprise_light}
 
+    # ---------------------------------------------------------- theme and music lights
+
+    def _ambient_fields(self) -> dict[str, Any]:
+        return {"theme_light": self.theme_light, "music_light": self.music_light, "ambient": self._ambient}
+
+    async def _set_ambient(self, key: str, enable: bool) -> dict[str, Any]:
+        """Turn the theme or music light on or off. The lantern follows within
+        a poll; with both off it gets back the light it had before."""
+        cfg = load_config()
+        cfg[key] = bool(enable)
+        save_config(cfg)
+        setattr(self, key, bool(enable))
+        self._poll_ambient_now = True
+        self.status.update(self._ambient_fields())
+        await self._broadcast_event("status", self.status)
+        return self._ambient_fields()
+
+    async def _music_palette(self) -> tuple[list[str] | None, str]:
+        """The playing track's art palette and name, or (None, "")."""
+        now = time.monotonic()
+        if self._session_bus is None:
+            if now < self._bus_retry_at:
+                return None, ""
+            try:
+                from dbus_fast import BusType
+                from dbus_fast.aio import MessageBus
+
+                self._session_bus = await MessageBus(bus_type=BusType.SESSION).connect()
+            except Exception as exc:
+                self._bus_retry_at = now + AMBIENT_BUS_RETRY_S
+                log.debug("Music light: no session bus: %s", exc)
+                return None, ""
+        try:
+            playing = await asyncio.wait_for(ambient.now_playing(self._session_bus), 5.0)
+        except Exception as exc:
+            log.debug("Music light: couldn't ask the media players: %s", exc)
+            self._session_bus = None
+            return None, ""
+        if not playing or not playing["art"]:
+            return None, ""
+        url = playing["art"]
+        if url != self._art_seen[0]:
+            image = await asyncio.to_thread(ambient.fetch_art, url)
+            thumb = await asyncio.to_thread(ambient.thumbnail, image) if image else None
+            self._art_seen = (url, ambient.art_palette(thumb) if thumb else None)
+        return self._art_seen[1], playing["track"]
+
+    async def _ambient_loop(self) -> None:
+        """Keep the lantern on the music's colours while something plays (music
+        light), else on the theme's (theme light)."""
+        while True:
+            try:
+                await self._ambient_step()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("Theme/music light: %s", exc)
+            for _ in range(int(AMBIENT_POLL_S * 10)):
+                if self._poll_ambient_now:
+                    break
+                await asyncio.sleep(0.1)
+            self._poll_ambient_now = False
+
+    async def _ambient_step(self) -> None:
+        source, colors, track = None, None, ""
+        if self.music_light:
+            colors, track = await self._music_palette()
+            source = "music" if colors else None
+        if not colors and self.theme_light:
+            colors = await asyncio.to_thread(ambient.theme_palette)
+            source = "theme" if colors else None
+        shown = {"source": source, "colors": colors, "track": track} if colors else None
+        if shown != self._ambient:
+            self._ambient = shown
+            self.status.update(self._ambient_fields())
+            await self._broadcast_event("status", self.status)
+        dev = self.device
+        if not dev or not dev.is_connected or self._resting or self._yielded:
+            self._ambient_applied, self._ambient_link = AMBIENT_UNSETTLED, None
+            return
+        if dev is not self._ambient_link:
+            self._ambient_applied, self._ambient_link = AMBIENT_UNSETTLED, dev
+        wanted = tuple(colors) if colors else None
+        if wanted == self._ambient_applied:
+            return
+        async with self._cmd_lock:
+            self._expire_lantern()
+            if wanted:
+                cfg = load_config()
+                if not cfg.get("lantern_before"):
+                    # The light the lantern had, so turning these off gives it back.
+                    try:
+                        cfg["lantern_before"] = (await dev.get_lantern_light_raw()).hex()
+                        self._save_quietly(cfg)
+                    except Exception as exc:
+                        log.debug("Theme/music light: couldn't keep the lantern's own light: %s", exc)
+                await dev.set_lantern_light(list(wanted), show=self.lantern)
+                log.info("Lantern now follows the %s: %s", source, ", ".join(wanted))
+            else:
+                cfg = load_config()
+                before = cfg.pop("lantern_before", None)
+                if before:
+                    await dev.set_lantern_light_raw(bytes.fromhex(before), show=self.lantern)
+                    self._save_quietly(cfg)
+                    log.info("Lantern has its own light back")
+        self._ambient_applied = wanted
+
     async def _set_qtip_reminder(self, enable: bool) -> dict[str, Any]:
         cfg = load_config()
         cfg["qtip_reminder"] = bool(enable)
@@ -1733,6 +1863,7 @@ class QuickPuffDaemon:
         self.qtip_reminder = bool(enable)
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
+        self.status.update(self._ambient_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         await self._broadcast_event("status", self.status)
@@ -2176,6 +2307,18 @@ class QuickPuffDaemon:
             return await self._set_qtip_reminder(_as_bool(args.get("enable")))
         if cmd == "set_surprise":
             return await self._set_surprise(_as_bool(args.get("enable")))
+        if cmd == "wrapped":
+            period = str(args.get("period") or "month")
+            peak = self.status if self.status.get("profiles") else (self._known_peak or {})
+            data = await asyncio.to_thread(history.wrapped, period, None, peak.get("profiles") or [])
+            data["peak_name"] = notify_text(self._peak_name(), 40)
+            if _as_bool(args.get("show")):
+                await self._broadcast_event("wrapped", data)
+            return data
+        if cmd == "set_theme_light":
+            return await self._set_ambient("theme_light", _as_bool(args.get("enable")))
+        if cmd == "set_music_light":
+            return await self._set_ambient("music_light", _as_bool(args.get("enable")))
         if cmd == "set_battery_saver":
             return await self._set_battery_saver(_as_bool(args.get("enable")))
         if cmd == "set_handoff":
@@ -2592,6 +2735,7 @@ class QuickPuffDaemon:
             log.debug("BlueZ disconnect reasons unavailable: %s", exc)
         self._resume_last_device()
         self._recap_task = asyncio.create_task(self._recap_loop())
+        self._ambient_task = asyncio.create_task(self._ambient_loop())
 
     def _clear_stale_socket(self, dir_fd: int) -> None:
         """A daemon that was killed leaves its socket behind: remove that, and

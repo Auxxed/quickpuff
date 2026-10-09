@@ -58,11 +58,17 @@ PanelWindow {
   // Plays sounds/<name>.ogg (one of the bundled cues) through pw-play,
   // fire-and-forget, stopped after ten seconds at most. Nothing when sounds
   // are off.
+  // How many versions each cue has in sounds/: firework, firework-2, ...
+  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2 })
+
   function cue(name) {
     if (!overlay.soundsOn || !/^[a-z]+$/.test(name)) return
     var volume = Math.max(0, Math.min(1, Number(overlay.soundVolume) || 0))
     if (volume <= 0) return
-    var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
+    // A cue with versions plays one of them, so repeats don't sound identical.
+    var versions = cueVersions[name] || 1
+    var pick = Math.floor(Math.random() * versions)
+    var url = String(Qt.resolvedUrl("sounds/" + (pick > 0 ? name + "-" + (pick + 1) : name) + ".ogg"))
     if (url.indexOf("file://") !== 0) return
     Quickshell.execDetached(["/usr/bin/timeout", "-k", "1", "10", "/usr/bin/pw-play",
       "--volume", volume.toFixed(2), "--", decodeURIComponent(url.slice(7))])
@@ -911,7 +917,7 @@ PanelWindow {
     // screen), when it leaves the ground (s), how far its sparks fly (a
     // fraction of the screen height), its colour (into `hues`), and whether
     // it is a gold willow. Everything is out by about 5.9 s.
-    readonly property var plan: [
+    readonly property var basePlan: [
       { "x": 0.50, "y": 0.30, "at": 0.05, "size": 0.26, "hue": 0, "willow": false },
       { "x": 0.18, "y": 0.36, "at": 0.45, "size": 0.21, "hue": 5, "willow": false },
       { "x": 0.80, "y": 0.26, "at": 0.85, "size": 0.24, "hue": 1, "willow": true },
@@ -923,6 +929,19 @@ PanelWindow {
       { "x": 0.26, "y": 0.42, "at": 2.85, "size": 0.20, "hue": 5, "willow": false },
       { "x": 0.70, "y": 0.20, "at": 3.15, "size": 0.28, "hue": 0, "willow": false }
     ]
+    // No two shows alike: every shell bursts a little to one side, higher or
+    // lower, early or late, bigger or smaller, in another of the colours, and
+    // now and then as a willow. Worked out once, when the show starts.
+    readonly property var plan: basePlan.map(function(p) {
+      return {
+        "x": Math.max(0.06, Math.min(0.94, p.x + (Math.random() - 0.5) * 0.12)),
+        "y": Math.max(0.16, Math.min(0.46, p.y + (Math.random() - 0.5) * 0.08)),
+        "at": Math.max(0, p.at + (Math.random() - 0.5) * 0.16),
+        "size": p.size * (0.9 + Math.random() * 0.2),
+        "hue": Math.floor(Math.random() * 7),
+        "willow": Math.random() < 0.2
+      }
+    })
 
     // Seconds a shell takes to climb (higher bursts take longer), and its
     // colour.

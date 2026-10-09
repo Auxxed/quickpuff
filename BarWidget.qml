@@ -84,6 +84,10 @@ BarWidget {
     function preview(name: string): void {
       if (root.readyAnimations.indexOf(name) >= 0) root.playReady(name)
     }
+    // Plays Wrapped for the month, the year or all time.
+    function wrapped(period: string): void {
+      if (["month", "year", "all"].indexOf(period) >= 0) cli.fire(["wrapped", period, "--show"])
+    }
     // Opens Showtime now (it closes itself when no heat cycle is running).
     function showtime(): void { root.openShowtime() }
     // Opens the panel on a tab: control, lights, usage, care or device.
@@ -199,6 +203,8 @@ BarWidget {
       }
       if (was !== -1 || s !== -1) root.refresh()
     }
+    // `quickpuff wrapped --show`: the recap plays on the overlay screen.
+    onWrapped: function(d) { if (root.isOverlayScreen()) root.openWrapped(d) }
   }
   // The daemon restarts now and then; pick the socket back up when it does.
   Timer {
@@ -387,6 +393,30 @@ BarWidget {
       var show = showtimeLoader.item
       if (show && !show.launch) root.playReady("")
     }
+  }
+
+  // Wrapped: the recap of your month or year, played over the desktop.
+  function openWrapped(data) {
+    wrappedLoader.active = false
+    wrappedLoader.active = true
+    var show = wrappedLoader.item
+    if (!show) return
+    var win = button.QsWindow.window
+    if (win && win.screen) show.screen = win.screen
+    show.soundsOn = root.soundsOn
+    show.soundVolume = root.soundVolume
+    show.play(data)
+  }
+
+  LazyLoader {
+    id: wrappedLoader
+    active: false
+    source: Qt.resolvedUrl("WrappedOverlay.qml")
+  }
+
+  Connections {
+    target: wrappedLoader.item
+    function onFinished() { wrappedLoader.active = false }
   }
 
   LazyLoader {

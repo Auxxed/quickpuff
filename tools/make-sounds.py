@@ -359,10 +359,12 @@ def finish(x, seconds, fade):
 CUES = {}
 
 
-def cue(seconds, lufs, fade=0.05):
-    """Register a cue: its length, loudness and the fade at its end."""
+def cue(seconds, lufs, fade=0.05, name=None):
+    """Register a cue: its length, loudness and the fade at its end. `name`
+    gives another version of a cue (firework-2): the overlays pick one of a
+    cue's versions at random, so repeats don't sound identical."""
     def register(fn):
-        CUES[fn.__name__] = (fn, seconds, lufs, fade)
+        CUES[name or fn.__name__] = (fn, seconds, lufs, fade)
         return fn
     return register
 
@@ -446,13 +448,13 @@ def ignite(rng):
 
 
 @cue(3.0, -15.2, fade=0.3)
-def liftoff(rng):
+def liftoff(rng, clip="rocket-launch", onset=0.337):
     """Liftoff: a real rocket motor lighting on the beat (CC0 recording), with a
     sub thump under its first moment, receding as it climbs away."""
     t = clock(3.0)
     n = len(t)
     motor = np.zeros((2, n))
-    place(motor, from_onset(recording("rocket-launch"), 0.337, 0.005), 0)
+    place(motor, from_onset(recording(clip), onset, 0.005), 0)
     motor = swept(motor, lambda f, tt: lp_gain(f, np.interp(tt, [0, 1.0, 3.0], [16000, 9000, 1800]), 1))
     motor *= line(t, [(0, 1), (1.2, 1), (3.0, 0)]) ** 1.5
     thump = sine(line(t, [(0, 80), (0.3, 36), (3, 36)]), n) * hit(t, 0, 0.004, 0.22)
@@ -461,14 +463,14 @@ def liftoff(rng):
 
 
 @cue(2.0, -15.5, fade=0.3)
-def pop(rng):
+def pop(rng, popper_db=-1, cannon_db=-5):
     """Confetti: a real party popper and confetti cannon (CC0 recordings), then
     paper fluttering down."""
     t = clock(2.0)
     n = len(t)
     burst = np.zeros((2, n))
-    place(burst, peaked(from_onset(recording("party-popper"), 0.076, 0.002), -1), 0)
-    place(burst, peaked(from_onset(recording("confetti-cannon"), 0.011, 0.002), -5), 0.004)
+    place(burst, peaked(from_onset(recording("party-popper"), 0.076, 0.002), popper_db), 0)
+    place(burst, peaked(from_onset(recording("confetti-cannon"), 0.011, 0.002), cannon_db), 0.004)
     flutter = np.zeros((2, n))
     falling = lambda x: 380 * np.exp(-(x - 0.12) / 0.55) if x > 0.12 else 0.0
     for when in events(rng, 1.9, falling, 380):
@@ -523,35 +525,66 @@ def shimmer(rng):
 
 
 @cue(3.0, -17.2, fade=0.4)
-def firework(rng):
+def firework(rng, shell=("firework-whistle-burst", 1.163), tail=("firework-burst-crackle", 1.533), tail_db=-6):
     """One shell (CC0 recordings): its whistle as it climbs and the burst 0.92 s
     after launch, when an average shell bursts on screen, with a second shell's
     burst layered in for the crackling tail."""
     t = clock(3.0)
     n = len(t)
     burst = 0.92
-    shell = np.zeros((2, n))
-    place(shell, from_onset(recording("firework-whistle-burst"), 1.163, burst), 0)
-    tail = np.zeros((2, n))
-    place(tail, from_onset(recording("firework-burst-crackle"), 1.533, 0.004), burst - 0.004)
-    mix = peaked(shell, -1) + peaked(tail, -6)
+    climb = np.zeros((2, n))
+    place(climb, from_onset(recording(shell[0]), shell[1], burst), 0)
+    after = np.zeros((2, n))
+    place(after, from_onset(recording(tail[0]), tail[1], 0.004), burst - 0.004)
+    mix = peaked(climb, -1) + peaked(after, tail_db)
     return reverb(soft(mix, -2), rng, seconds=2.2, wet=0.16, predelay=0.03)
 
 
 @cue(4.0, -19.8, fade=0.4)
-def smoke(rng):
+def smoke(rng, puffs=(0.45, 2.30, 4.48, 5.44, 7.57, 8.41, 10.73)):
     """Smoke rings: a soft puff of breath (CC0 recordings of real puffs) as each
     of the seven rings leaves, 0.48 s apart (one every 7.5 % of the 6.4 s show)."""
     t = clock(4.0)
     bus = np.zeros((2, len(t)))
     clip = recording("breath-puffs")
-    puffs = [0.45, 2.30, 4.48, 5.44, 7.57, 8.41, 10.73]
     for i, onset in enumerate(puffs):
         puff = from_onset(clip, onset, 0.02)[:, :n_of(0.6)].copy()
         puff[:, -n_of(0.15):] *= np.linspace(1, 0, n_of(0.15))
         puff = filtered(puff, lowpass(5000, 1))
         place(bus, peaked(puff, -6 - 2 * rng.uniform()) * np.array([[1.0 - 0.3 * (i % 2)], [0.7 + 0.3 * (i % 2)]]), i * 0.48)
     return reverb(bus, rng, seconds=1.2, wet=0.22, predelay=0.012)
+
+
+# Other versions of the busiest cues.
+
+@cue(3.0, -17.2, fade=0.4, name="firework-2")
+def firework_2(rng):
+    """Another shell: zihengc's whistle and burst, a third shell under it."""
+    return firework(rng, shell=("firework-burst-crackle", 1.533), tail=("firework-shells", 4.884), tail_db=-8)
+
+
+@cue(3.0, -17.2, fade=0.4, name="firework-3")
+def firework_3(rng):
+    """A mortar's shell, with zihengc's crackle for its tail."""
+    return firework(rng, shell=("firework-mortar", 1.867), tail=("firework-burst-crackle", 1.533), tail_db=-7)
+
+
+@cue(2.0, -15.5, fade=0.3, name="pop-2")
+def pop_2(rng):
+    """The cannon in front this time."""
+    return pop(rng, popper_db=-6, cannon_db=-1)
+
+
+@cue(4.0, -19.8, fade=0.4, name="smoke-2")
+def smoke_2(rng):
+    """The same rings, other puffs in another order."""
+    return smoke(rng, puffs=(2.30, 0.45, 5.44, 9.67, 8.41, 4.48, 7.57))
+
+
+@cue(3.0, -15.2, fade=0.3, name="liftoff-2")
+def liftoff_2(rng):
+    """The rocket's second launch in the same recording."""
+    return liftoff(rng, clip="rocket-launch-2", onset=0.335)
 
 
 def neon_power(t):

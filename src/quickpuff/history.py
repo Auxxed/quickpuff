@@ -657,3 +657,100 @@ def week_summary(week_start: datetime) -> dict[str, Any]:
     ]
     top = max(sorted(set(profiles)), key=profiles.count) if profiles else None
     return {"start": start, "count": total(start, end), "previous": total(before, start), "top_profile": top}
+
+
+# ------------------------------------------------------------------ wrapped
+
+WRAPPED_PERIODS = ("month", "year", "all")
+WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def _period_bounds(period: str, now: datetime) -> tuple[datetime, datetime | None, str]:
+    """The period's start, the start of the one before it (None for all
+    time), and how to name it."""
+    if period == "month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start, (start - timedelta(days=1)).replace(day=1), start.strftime("%B %Y")
+    if period == "year":
+        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start, start.replace(year=start.year - 1), str(start.year)
+    return datetime.fromtimestamp(0), None, "All time"
+
+
+def _personality(rows: list[dict[str, Any]], top_share: float | None, avg_temp_f: float | None) -> dict[str, str]:
+    """A fun title for how you dab, from the strongest pattern in the rows."""
+    n = len(rows)
+    hours = [datetime.fromtimestamp(r["ts"]).hour for r in rows]
+    late = sum(h >= 22 or h < 5 for h in hours) / n
+    early = sum(5 <= h < 11 for h in hours) / n
+    weekend = sum(datetime.fromtimestamp(r["ts"]).weekday() >= 5 for r in rows) / n
+    if late >= 0.35:
+        return {"title": "Night Owl", "line": "Your best sessions happen after dark."}
+    if early >= 0.35:
+        return {"title": "Early Bird", "line": "You start the day with a dab."}
+    if avg_temp_f is not None and avg_temp_f >= 560:
+        return {"title": "Cloud Chaser", "line": "Hot and heavy: you go for the big clouds."}
+    if avg_temp_f is not None and avg_temp_f <= 500:
+        return {"title": "Flavor Hunter", "line": "Low and slow: you're here for the taste."}
+    if weekend >= 0.45:
+        return {"title": "Weekend Warrior", "line": "Saturdays and Sundays are your sessions."}
+    if top_share is not None and top_share >= 0.7:
+        return {"title": "Creature of Habit", "line": "You know exactly what you like."}
+    return {"title": "Steady Sesher", "line": "Consistent, balanced, always ready."}
+
+
+def wrapped(period: str = "month", now: datetime | None = None, profiles: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Your period in sessions, Spotify Wrapped style: how many (and against
+    the period before), days active and the longest run of days, the busiest
+    day, your favourite profile, hour and weekday, the hottest session, the
+    average heat-up, and a title for how you dab. `profiles` names them."""
+    if period not in WRAPPED_PERIODS:
+        raise ValueError(f"Pick one of: {', '.join(WRAPPED_PERIODS)}")
+    now = now or datetime.now()
+    start, before, label = _period_bounds(period, now)
+    lo, hi = start.timestamp(), now.timestamp()
+    every = _session_rows(_load())
+    rows = sorted((r for r in every if lo <= r["ts"] <= hi), key=lambda r: r["ts"])
+    # Against the same stretch of the period before: the first 9 days of last
+    # month for the first 9 of this one, not all of it.
+    previous = None
+    if before is not None:
+        until = min(lo, before.timestamp() + (hi - lo))
+        previous = sum(before.timestamp() <= r["ts"] < until for r in every)
+    out: dict[str, Any] = {"period": period, "label": label, "sessions": len(rows), "previous": previous}
+    if not rows:
+        return out
+    daily: dict[str, int] = {}
+    for r in rows:
+        key = _day_key(datetime.fromtimestamp(r["ts"]))
+        daily[key] = daily.get(key, 0) + 1
+    busiest = max(sorted(daily), key=daily.get)
+    hours = [datetime.fromtimestamp(r["ts"]).hour for r in rows]
+    weekdays = [datetime.fromtimestamp(r["ts"]).weekday() for r in rows]
+    used = [int(r["profile"]) for r in rows if r.get("profile") is not None]
+    names = {int(p["index"]): p for p in (profiles or []) if isinstance(p, dict) and isinstance(p.get("index"), int)}
+    top = None
+    if used:
+        index = max(sorted(set(used)), key=used.count)
+        meta = names.get(index, {})
+        top = {"index": index, "name": str(meta.get("name") or f"Profile {index + 1}")[:40],
+               "color": meta.get("color") if isinstance(meta.get("color"), str) else None,
+               "count": used.count(index), "share": round(used.count(index) / len(used), 3)}
+    temps = [float(r["temp_f"]) for r in rows if r.get("temp_f") is not None]
+    hottest = max((r for r in rows if r.get("temp_f") is not None), key=lambda r: r["temp_f"], default=None)
+    preheats = [float(r["preheat_s"]) for r in rows if r.get("preheat_s")]
+    avg_temp = _mean(temps)
+    out.update({
+        "first_ts": rows[0]["ts"],
+        "days_active": len(daily),
+        "best_streak": _best_streak(daily),
+        "busiest_day": {"date": busiest, "count": daily[busiest]},
+        "top_profile": top,
+        "top_hour": max(range(24), key=hours.count),
+        "top_weekday": WEEKDAY_NAMES[max(range(7), key=weekdays.count)],
+        "hottest": None if hottest is None else {"temp_f": round(hottest["temp_f"]), "ts": hottest["ts"]},
+        "avg_temp_f": None if avg_temp is None else round(avg_temp),
+        "avg_heatup_s": None if not preheats else round(_mean(preheats)),
+        "personality": _personality(rows, top["share"] if top else None, avg_temp),
+    })
+    return out

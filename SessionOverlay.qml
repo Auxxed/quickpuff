@@ -253,11 +253,17 @@ PanelWindow {
 
   // Plays sounds/<name>.ogg (one of the bundled cues) through pw-play,
   // fire-and-forget, stopped after ten seconds at most.
+  // How many versions each cue has in sounds/: firework, firework-2, ...
+  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2 })
+
   function cue(name) {
     if (!soundsOn || !/^[a-z]+$/.test(name)) return
     var volume = Math.max(0, Math.min(1, Number(soundVolume) || 0))
     if (volume <= 0) return
-    var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
+    // A cue with versions plays one of them, so repeats don't sound identical.
+    var versions = cueVersions[name] || 1
+    var pick = Math.floor(Math.random() * versions)
+    var url = String(Qt.resolvedUrl("sounds/" + (pick > 0 ? name + "-" + (pick + 1) : name) + ".ogg"))
     if (url.indexOf("file://") !== 0) return
     Quickshell.execDetached(["/usr/bin/timeout", "-k", "1", "10", "/usr/bin/pw-play",
       "--volume", volume.toFixed(2), "--", decodeURIComponent(url.slice(7))])

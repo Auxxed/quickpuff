@@ -190,3 +190,45 @@ class TestRetention:
         kept = history._load()["events"]
         assert all(e["delta"] != 99 for e in kept)
         assert len(kept) == 1
+
+
+# ------------------------------------------------------------------ wrapped
+
+def test_wrapped_month_counts_streaks_and_favourites(monkeypatch):
+    from datetime import datetime, timedelta
+    from quickpuff import history as h
+
+    now = datetime(2026, 10, 20, 23, 0)
+    rows = []
+    for day in range(10, 16):            # six days in a row
+        ts = datetime(2026, 10, day, 23, 30).timestamp()
+        rows.append({"key": f"d{day}", "ts": ts, "profile": 1, "temp_f": 520 + day, "preheat_s": 25, "battery": None})
+    rows.append({"key": "d99", "ts": datetime(2026, 10, 18, 7, 0).timestamp(), "profile": 2, "temp_f": 560, "preheat_s": 30, "battery": None})
+    rows.append({"key": "old", "ts": datetime(2026, 9, 5, 12, 0).timestamp(), "profile": 0, "temp_f": 500, "preheat_s": 20, "battery": None})
+    monkeypatch.setattr(h, "_load", lambda: {})
+    monkeypatch.setattr(h, "_session_rows", lambda data: rows)
+    rows.append({"key": "late", "ts": datetime(2026, 9, 28, 12, 0).timestamp(), "profile": 0, "temp_f": 500, "preheat_s": 20, "battery": None})
+    w = h.wrapped("month", now, [{"index": 1, "name": "Flavor", "color": "#ff4fa3"}])
+    assert w["label"] == "October 2026" and w["sessions"] == 7 and w["previous"] == 1
+    assert w["days_active"] == 7 and w["best_streak"] == 6
+    assert w["top_profile"] == {"index": 1, "name": "Flavor", "color": "#ff4fa3", "count": 6, "share": round(6 / 7, 3)}
+    assert w["hottest"]["temp_f"] == 560 and w["top_hour"] == 23
+    assert w["personality"]["title"] == "Night Owl"
+
+
+def test_wrapped_with_nothing_yet(monkeypatch):
+    from datetime import datetime
+    from quickpuff import history as h
+
+    monkeypatch.setattr(h, "_load", lambda: {})
+    monkeypatch.setattr(h, "_session_rows", lambda data: [])
+    w = h.wrapped("year", datetime(2026, 3, 1))
+    assert w == {"period": "year", "label": "2026", "sessions": 0, "previous": 0}
+
+
+def test_wrapped_refuses_other_periods():
+    import pytest
+    from quickpuff import history as h
+
+    with pytest.raises(ValueError):
+        h.wrapped("decade")

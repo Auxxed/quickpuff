@@ -87,6 +87,8 @@ Panel {
       pendingSaver = undefined
       pendingQtip = undefined
       pendingSurprise = undefined
+      pendingThemeLight = undefined
+      pendingMusicLight = undefined
       pendingCleanEvery = -1
       pendingBrightness = -1
       pendingDeviceName = ""
@@ -413,6 +415,8 @@ Panel {
   property var pendingSaver: undefined
   property var pendingQtip: undefined
   property var pendingSurprise: undefined
+  property var pendingThemeLight: undefined
+  property var pendingMusicLight: undefined
   property int pendingCleanEvery: -1
   property int pendingBrightness: -1
   property string page: "control"
@@ -950,6 +954,21 @@ Panel {
   readonly property bool surpriseOn: pendingSurprise !== undefined
     ? pendingSurprise === true
     : statusData.surprise_light === true
+  readonly property bool themeLightOn: pendingThemeLight !== undefined
+    ? pendingThemeLight === true
+    : statusData.theme_light === true
+  readonly property bool musicLightOn: pendingMusicLight !== undefined
+    ? pendingMusicLight === true
+    : statusData.music_light === true
+  // What the lantern follows right now (theme or music), checked rather than
+  // shown as it came: known sources, #rrggbb colours, a plain track name.
+  readonly property var ambientNow: {
+    var a = statusData.ambient
+    if (!a || typeof a !== "object" || (a.source !== "theme" && a.source !== "music") || !Array.isArray(a.colors)) return null
+    var colors = a.colors.filter(function(c) { return typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) }).slice(0, 3)
+    if (!colors.length) return null
+    return { "source": a.source, "colors": colors, "track": Plain.plain(typeof a.track === "string" ? a.track : "", 120) }
+  }
   readonly property bool saverOn: pendingSaver !== undefined
     ? pendingSaver === true
     : statusData.battery_saver === true
@@ -1053,6 +1072,18 @@ Panel {
     var next = !qtipOn
     pendingQtip = next
     runArgv(["quickpuff", "qtip", next ? "on" : "off"])
+  }
+
+  function toggleThemeLight() {
+    var next = !themeLightOn
+    pendingThemeLight = next
+    runArgv(["quickpuff", "theme-light", next ? "on" : "off"])
+  }
+
+  function toggleMusicLight() {
+    var next = !musicLightOn
+    pendingMusicLight = next
+    runArgv(["quickpuff", "music-light", next ? "on" : "off"])
   }
 
   function toggleSurprise() {
@@ -1523,6 +1554,7 @@ Panel {
       var l = d.saved_lights[i]
       if (l && typeof l === "object") inner.push([l.colors, 16])
     }
+    if (d.ambient && typeof d.ambient === "object") inner.push([d.ambient.colors, 3])
     var trends = ["heatup", "battery"]
     for (i = 0; i < trends.length; i++) {
       var t = wear[trends[i]]
@@ -1685,6 +1717,8 @@ Panel {
       root.pendingLantern = undefined
       root.pendingSaver = undefined
       root.pendingSurprise = undefined
+      root.pendingThemeLight = undefined
+      root.pendingMusicLight = undefined
       root.pendingCleanEvery = -1
       root.pendingBrightness = -1
       root.pendingDeviceName = ""

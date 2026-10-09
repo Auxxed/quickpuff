@@ -5,7 +5,7 @@ import Quickshell.Io
 // The daemon's event socket, read as newline-delimited JSON with a ceiling:
 // bytes are counted as they arrive, before any line is assembled, and a line
 // past maxLine drops the connection (the owner may reconnect) instead of
-// buffering on. Only status events are passed on.
+// buffering on. Only status and wrapped events are passed on.
 Socket {
   id: feed
 
@@ -14,6 +14,7 @@ Socket {
   property bool _dropping: false
 
   signal status(var data)
+  signal wrapped(var data)
 
   // QUICKPUFF_SOCKET when it's an absolute path, else quickpuff.sock in the
   // runtime dir. Without a runtime dir there's nothing to connect to; no
@@ -50,10 +51,11 @@ Socket {
           feed.drop()
           return
         }
-        if (line.indexOf('"status"') < 0) continue
+        if (line.indexOf('"status"') < 0 && line.indexOf('"wrapped"') < 0) continue
         var msg = null
         try { msg = JSON.parse(line) } catch (e) {}
         if (msg && msg.event === "status" && msg.data && typeof msg.data === "object") feed.status(msg.data)
+        else if (msg && msg.event === "wrapped" && msg.data && typeof msg.data === "object" && !Array.isArray(msg.data)) feed.wrapped(msg.data)
       }
       if (buf.length > feed.maxLine) {
         feed.drop()

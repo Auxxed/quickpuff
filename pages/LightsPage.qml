@@ -272,6 +272,8 @@ Column {
 
   CycleSection { panel: lightsPage.panel }
 
+  AmbientSection { panel: lightsPage.panel }
+
   MyLightsSection { panel: lightsPage.panel }
 
 }

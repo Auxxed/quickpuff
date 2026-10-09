@@ -529,6 +529,16 @@ async def async_main(argv: list[str] | None = None) -> int:
     surprise = sub.add_parser("surprise", help="Give the profile you used a new light after each session")
     surprise.add_argument("action", choices=["on", "off"])
 
+    wrapped = sub.add_parser("wrapped", help="Your month, year or all time in sessions, Wrapped style")
+    wrapped.add_argument("period", choices=["month", "year", "all"], nargs="?", default="month")
+    wrapped.add_argument("--show", action="store_true", help="Play it on screen as an animated recap (saves the card to ~/Pictures)")
+
+    theme_light = sub.add_parser("theme-light", help="Light the lantern in your Omarchy theme's colours, and follow theme changes")
+    theme_light.add_argument("action", choices=["on", "off"])
+
+    music_light = sub.add_parser("music-light", help="Light the lantern in the colours of the album art playing (overrides the theme light)")
+    music_light.add_argument("action", choices=["on", "off"])
+
     clean = sub.add_parser("clean", help="Chamber-clean reminder after N dabs")
     clean.add_argument("action", choices=["done"], nargs="?", help="Reset the countdown after you clean")
     clean.add_argument("--every", type=int, help="Remind every N dabs (10–100, steps of 10)")
@@ -792,6 +802,14 @@ async def async_main(argv: list[str] | None = None) -> int:
     elif cmd == "surprise":
         result = await call("set_surprise", {"enable": args.action == "on"})
         print(json.dumps(result) if raw else f"Surprise me: {args.action}")
+    elif cmd == "wrapped":
+        result = await call("wrapped", {"period": args.period, "show": args.show})
+        print(json.dumps(result) if raw else wrapped_text(result))
+    elif cmd in ("theme-light", "music-light"):
+        key = cmd.replace("-", "_")
+        result = await call(f"set_{key}", {"enable": args.action == "on"})
+        label = "Theme light" if cmd == "theme-light" else "Music light"
+        print(json.dumps(result) if raw else f"{label}: {args.action} (the lantern follows within a few seconds)")
     elif cmd == "clean":
         if args.every is not None:
             await call("set_clean_every", {"dabs": args.every})
@@ -890,3 +908,22 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def wrapped_text(w: dict) -> str:
+    """Wrapped as a few plain lines."""
+    if not w.get("sessions"):
+        return f"{w.get('label', '')}: no sessions yet."
+    lines = [f"QuickPuff Wrapped · {w['label']}", f"  {w['sessions']} sessions over {w['days_active']} days"]
+    if w.get("previous"):
+        change = round((w["sessions"] - w["previous"]) / w["previous"] * 100)
+        lines[-1] += f" ({change:+d}% on the same stretch of the period before)"
+    lines.append(f"  Longest streak: {w['best_streak']} days in a row · busiest day {w['busiest_day']['date']} ({w['busiest_day']['count']})")
+    if w.get("top_profile"):
+        top = w["top_profile"]
+        lines.append(f"  Favourite profile: {top['name']} ({round(top['share'] * 100)}% of sessions)")
+    lines.append(f"  Favourite time: {w['top_weekday']}s around {w['top_hour']:02d}:00")
+    if w.get("hottest"):
+        lines.append(f"  Hottest session: {w['hottest']['temp_f']}°F · average heat-up {w.get('avg_heatup_s') or '?'} s")
+    lines.append(f"  You're a {w['personality']['title']}: {w['personality']['line']}")
+    return "\n".join(lines)

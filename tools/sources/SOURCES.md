@@ -22,3 +22,6 @@ below) and re-encoded as Ogg Vorbis at 48 kHz.
 | `neon-lamp.ogg` | neon | [Neon Lamp, Switch On, Hum](https://freesound.org/people/Kinoton/sounds/351430/) | Kinoton | first 7 s |
 | `relay-click.ogg` | ignite, neon | [Relay and loud click](https://freesound.org/people/bassmosphere/sounds/384701/) | bassmosphere | whole (0.58 s) |
 | `heater-hum.ogg` | ignite | [space heater run hum electric.wav](https://freesound.org/people/rsellick/sounds/545570/) | rsellick | 10 s, 4 s long |
+| `firework-mortar.ogg` | firework-3 | [tinymortar.wav](https://freesound.org/people/j1987/sounds/140727/) | j1987 | whole (3.3 s) |
+| `firework-shells.ogg` | firework-2 | [Shells1.mp3](https://freesound.org/people/Mr%20Sensible/sounds/14742/) | Mr Sensible | whole (12.8 s) |
+| `rocket-launch-2.ogg` | liftoff-2 | [rocket launch](https://freesound.org/people/Selector/sounds/250200/) | Selector | 17.6 s, 4.4 s long |

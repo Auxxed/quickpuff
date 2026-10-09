@@ -27,6 +27,26 @@ Column {
     }
   }
 
+  // Wrapped: the month or the year played over the desktop as a recap.
+  Row {
+    width: parent.width
+    spacing: Style.space(8)
+
+    ActionButton {
+      panel: usagePages.panel
+      width: (parent.width - parent.spacing) / 2
+      label: "My month, wrapped"
+      onActivated: panel.runArgv(["quickpuff", "wrapped", "month", "--show"])
+    }
+
+    ActionButton {
+      panel: usagePages.panel
+      width: (parent.width - parent.spacing) / 2
+      label: "My year, wrapped"
+      onActivated: panel.runArgv(["quickpuff", "wrapped", "year", "--show"])
+    }
+  }
+
   Column {
     id: historyPage
     width: parent.width

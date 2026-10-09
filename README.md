@@ -207,7 +207,10 @@ signature chime at Ready, a sound for each ready animation (countdown beeps and
 a liftoff for the rocket, a cannon pop for confetti, bubbling lava, an aurora
 shimmer, fireworks, smoke, a neon buzz) and a resolve when the session is over.
 Each one is timed to its picture: a puff leaves with every smoke ring, the neon
-buzz flickers with the sign, and a firework booms as its shell bursts.
+buzz flickers with the sign, and a firework booms as its shell bursts. No two
+shows are quite alike: the fireworks change their layout and colours every
+time, and the busiest sounds (fireworks, confetti, smoke, liftoff) come in
+several versions, picked at random.
 Switch them off under Control → Showtime, or with `quickpuff sounds off`;
 `quickpuff sounds on --volume 50` sets the level. They play through PipeWire's
 `pw-play`.
@@ -220,6 +223,30 @@ counting a dab. `quickpuff demo --preheat 8 --session 15` sets the timing and
 
 Overlays play on the monitor you're looking at. To keep them on one screen,
 name it: `quickpuff overlay-screen DP-2` (`focused` goes back to following you).
+
+### Lantern colors
+
+The Peak's lantern can glow in your desktop's colours, separate from your heat
+profiles' lights (Lights → Lantern colors):
+
+- **Match my Omarchy theme** (`quickpuff theme-light on`): the lantern takes
+  your theme's accent, plus up to two of its other colours as a slow fade, and
+  follows you when you switch themes.
+- **Match the album art playing** (`quickpuff music-light on`): while a media
+  player is playing, the lantern takes the colours of the album art. It wins
+  over the theme light until the music stops.
+
+Switch both off and the lantern gets back the light it had before.
+
+### Wrapped
+
+**My month, wrapped** and **My year, wrapped** on the Usage tab (or
+`quickpuff wrapped month|year|all --show`) play your sessions back over the
+desktop, Spotify Wrapped style: how many and against the same stretch of the
+period before, your longest streak and busiest day, your favourite profile,
+your hottest session, your prime time, and a title for how you dab. It ends on
+a card that's saved to `~/Pictures`. `quickpuff wrapped` without `--show`
+prints the same in the terminal.
 
 ### Notifications and reconnecting
 
@@ -323,6 +350,9 @@ quickpuff light save "Puffcon"     # keep the light a profile is wearing
 quickpuff light list               # then: light apply|rename|delete NAME
 quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, smoke, neon or off
 quickpuff surprise on              # a new light after each session
+quickpuff theme-light on           # the lantern in your Omarchy theme's colours
+quickpuff music-light on           # the lantern in the playing album art's colours
+quickpuff wrapped year --show      # your year in sessions, on screen (month, year or all)
 quickpuff showtime stage           # heat cycles over the desktop: off, corner or stage
 quickpuff sounds on --volume 70    # Showtime and ready-animation sounds
 quickpuff demo                     # a simulated heat cycle (nothing reaches the Peak)
@@ -358,8 +388,18 @@ shows what you have):
 
 ## What it touches
 
-- **Network:** nothing while it runs. Only `install.sh` downloads anything:
-  the pinned, hash-checked packages above, from PyPI.
+- **Network:** nothing while it runs, unless you turn on the music light.
+  Then the daemon downloads the playing track's cover art when a player gives
+  only a web address for it: over HTTPS, from a short list of cover-art hosts
+  (Spotify, YouTube, Apple Music, Tidal, Deezer, SoundCloud, Cover Art
+  Archive), with no redirects and at most 4 MB. The image is decoded by
+  `ffmpeg` into a tiny thumbnail in memory and never stored. Otherwise only
+  `install.sh` downloads anything: the pinned, hash-checked packages above,
+  from PyPI.
+- **Desktop:** with the theme light on, the daemon reads your Omarchy theme's
+  `colors.toml` (in `~/.local/state/omarchy/current/theme`) every few seconds,
+  the same bounded, no-symlink read as its own files. With the music light on
+  it asks media players over MPRIS (the session bus) what's playing.
 - **Bluetooth:** the daemon holds the one connection to your Peak. While it
   connects, it's the system's pairing agent so the Peak can bond without a
   prompt. It says yes only for the Peak it's connecting to, refuses pairing
@@ -382,6 +422,7 @@ shows what you have):
   how much output it reads, and `--no-start`, so the widget never starts the
   daemon itself (the systemd service does). It never reads your files; the
   settings it needs come back from the CLI. It plays sounds with `pw-play`.
+  Wrapped saves its card as a new, timestamped PNG in `~/Pictures`.
 - **Debug commands:** `quickpuff peek` and `poke` (raw reads and writes on
   the Peak) work only when the daemon was started with
   `quickpuff daemon --debug`.

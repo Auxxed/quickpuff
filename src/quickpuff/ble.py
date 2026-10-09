@@ -1097,6 +1097,30 @@ class PuffcoBLE:
             "inhale": inhale,
         })
 
+    async def get_lantern_light_raw(self) -> bytes:
+        """The lantern's own light (apart from the heat profiles), as stored."""
+        return first_cbor_item(await self.read_bytes_all("/p/app/ltrn/colr"))
+
+    async def set_lantern_light_raw(self, raw: bytes, *, show: bool = False) -> None:
+        """Put a light read with get_lantern_light_raw back on the lantern."""
+        await self.write_blob_full("/p/app/ltrn/colr", raw)
+        if show:
+            await self.start_lantern()
+
+    async def set_lantern_light(self, colors: list[str], *, style: str = "fade", tempo: float = 0.3, show: bool = False) -> None:
+        """Light the lantern with one colour, or several the Peak fades between.
+        The heat profiles keep their own lights. `show` relights a lantern
+        that's on, so the change is seen at once."""
+        if not colors:
+            raise ValueError("The lantern needs at least one colour")
+        if await self.get_led_api() == 2:
+            await self.write_short("/p/app/ltrn/colr", 0, 0, rgbt_color(colors[0]))
+        else:
+            payload = solid_color_payload(colors[0]) if len(colors) == 1 else cycle_payload(style, colors, tempo=tempo)
+            await self.write_blob_full("/p/app/ltrn/colr", cbor2.dumps(hexify(payload), canonical=True))
+        if show:
+            await self.start_lantern()
+
     async def set_profile_light_raw(self, index: int | None, raw: bytes) -> None:
         """Put a captured light back on a profile, byte for byte."""
         if await self.get_led_api() == 2:
