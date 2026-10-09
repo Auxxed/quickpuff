@@ -534,34 +534,50 @@ PanelWindow {
     }
     NumberAnimation { id: shock; target: wave; property: "k"; from: 0; to: 1; duration: 1100; easing.type: Easing.OutCubic }
 
-    // Exhaust smoke billowing along the floor.
+    // Exhaust smoke billowing along the floor: soft clouds, faintly lit
+    // pink by the ring below them.
     Repeater {
       model: 18
-      Rectangle {
+      Shape {
         id: puff
         required property int index
         readonly property real side: index % 2 ? 1 : -1
         readonly property real fx: stage.restX + peak.width * (35 / 80)
         readonly property real fy: stage.restY + peak.height * 0.985
         readonly property real reach: (60 + (index * 37) % 110) * show.u
-        width: (34 + (index * 13) % 30) * show.u
-        height: width
-        radius: width / 2
-        color: index % 3 ? "#d9dce3" : "#b7bcc6"
+        readonly property real r: (26 + (index * 13) % 24) * show.u
+        width: r * 2
+        height: r * 2
         opacity: 0
-        x: fx - width / 2
-        y: fy - height / 2
+        x: fx - r
+        y: fy - r
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: puff.r; centerY: puff.r; centerRadius: puff.r
+            focalX: puff.r * 0.8; focalY: puff.r * 0.75
+            GradientStop { position: 0.0; color: Util.alpha(Qt.tint("#e9e6ee", Util.alpha(show.tint, 0.18)), 0.85) }
+            GradientStop { position: 0.55; color: Util.alpha(Qt.tint("#cfcbd6", Util.alpha(show.tint, 0.12)), 0.45) }
+            GradientStop { position: 1.0; color: Util.alpha("#cfcbd6", 0) }
+          }
+          startX: 0; startY: 0
+          PathLine { x: puff.width; y: 0 }
+          PathLine { x: puff.width; y: puff.height }
+          PathLine { x: 0; y: puff.height }
+          PathLine { x: 0; y: 0 }
+        }
         SequentialAnimation {
           running: show.smoking
           loops: Animation.Infinite
           PauseAnimation { duration: (puff.index * 97) % 600 }
           ParallelAnimation {
-            NumberAnimation { target: puff; property: "x"; from: puff.fx - puff.width / 2; to: puff.fx - puff.width / 2 + puff.side * puff.reach * 2.2; duration: 1300; easing.type: Easing.OutCubic }
-            NumberAnimation { target: puff; property: "y"; from: puff.fy - puff.height / 2; to: puff.fy - puff.height / 2 - (puff.index % 4) * 12 * show.u; duration: 1300; easing.type: Easing.OutCubic }
-            NumberAnimation { target: puff; property: "scale"; from: 0.4; to: 2.2; duration: 1300 }
+            NumberAnimation { target: puff; property: "x"; from: puff.fx - puff.r; to: puff.fx - puff.r + puff.side * puff.reach * 2.2; duration: 1500; easing.type: Easing.OutCubic }
+            NumberAnimation { target: puff; property: "y"; from: puff.fy - puff.r; to: puff.fy - puff.r - (puff.index % 4) * 14 * show.u; duration: 1500; easing.type: Easing.OutCubic }
+            NumberAnimation { target: puff; property: "scale"; from: 0.5; to: 2.6; duration: 1500 }
             SequentialAnimation {
-              NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.7; duration: 200 }
-              NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 1100; easing.type: Easing.InQuad }
+              NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.9; duration: 220 }
+              NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 1280; easing.type: Easing.InQuad }
             }
           }
         }
