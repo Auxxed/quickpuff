@@ -516,21 +516,59 @@ PanelWindow {
       opacity: show.stageT
     }
 
-    // Shockwave from the light ring at the Ready moment.
-    Rectangle {
+    // The Ready moment, from the light ring: a bloom of the profile's light
+    // bursting out across the floor, and a soft shockwave racing outward.
+    Item {
       id: wave
       property real k: 0
       readonly property real cx: stage.restX + peak.width * (35 / 80)
       readonly property real cy: stage.restY + peak.height * (157 / 160)
-      width: peak.width * (0.9 + 5 * k)
-      height: width * 0.22
-      radius: height / 2
-      x: cx - width / 2
-      y: cy - height / 2
-      color: "transparent"
-      border.width: Math.max(2, 10 * show.u * (1 - k))
-      border.color: Qt.lighter(show.tint, 1.4)
-      opacity: k > 0 && k < 1 ? (1 - k) * show.stageT : 0
+      anchors.fill: parent
+      visible: k > 0 && k < 1
+
+      Shape {
+        id: bloom
+        readonly property real r: show.height * (0.25 + 0.95 * Math.sqrt(wave.k))
+        x: wave.cx - r
+        y: wave.cy - r
+        width: r * 2
+        height: r * 2
+        opacity: Math.pow(1 - wave.k, 1.6) * show.stageT
+        transform: Scale { origin.x: bloom.r; origin.y: bloom.r; yScale: 0.55 }
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: bloom.r; centerY: bloom.r; centerRadius: bloom.r
+            focalX: centerX; focalY: centerY
+            GradientStop { position: 0.0; color: Util.alpha(Qt.lighter(show.tint, 1.5), 0.9) }
+            GradientStop { position: 0.25; color: Util.alpha(show.tint, 0.55) }
+            GradientStop { position: 0.6; color: Util.alpha(show.tint, 0.16) }
+            GradientStop { position: 1.0; color: Util.alpha(show.tint, 0) }
+          }
+          startX: 0; startY: 0
+          PathLine { x: bloom.width; y: 0 }
+          PathLine { x: bloom.width; y: bloom.height }
+          PathLine { x: 0; y: bloom.height }
+          PathLine { x: 0; y: 0 }
+        }
+      }
+
+      Repeater {
+        model: [{ "w": 34, "a": 0.12 }, { "w": 16, "a": 0.3 }, { "w": 5, "a": 0.95 }]
+        Rectangle {
+          required property var modelData
+          width: peak.width * (0.9 + 3.6 * wave.k)
+          height: width * 0.22
+          radius: height / 2
+          x: wave.cx - width / 2
+          y: wave.cy - height / 2
+          color: "transparent"
+          border.width: Math.max(1, modelData.w * show.u * (1 - 0.6 * wave.k))
+          border.color: Util.alpha(Qt.lighter(show.tint, 1.45), modelData.a)
+          opacity: Math.pow(1 - wave.k, 1.8) * show.stageT
+        }
+      }
     }
     NumberAnimation { id: shock; target: wave; property: "k"; from: 0; to: 1; duration: 1100; easing.type: Easing.OutCubic }
 
@@ -772,13 +810,13 @@ PanelWindow {
   Rectangle {
     id: flashRect
     anchors.fill: parent
-    color: Qt.lighter(show.tint, 1.6)
+    color: Qt.lighter(show.tint, 1.9)
     opacity: 0
   }
   SequentialAnimation {
     id: flash
-    NumberAnimation { target: flashRect; property: "opacity"; to: show.mode === "stage" ? 0.42 : 0.12; duration: 90 }
-    NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: 650; easing.type: Easing.OutCubic }
+    NumberAnimation { target: flashRect; property: "opacity"; to: show.mode === "stage" ? 0.16 : 0.1; duration: 60 }
+    NumberAnimation { target: flashRect; property: "opacity"; to: 0; duration: 420; easing.type: Easing.OutCubic }
   }
 
   // ------------------------------------------------------------ the card
