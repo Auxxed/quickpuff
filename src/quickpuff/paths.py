@@ -22,6 +22,14 @@ DEFAULTS: dict[str, Any] = {
     # What plays on screen when the Peak reaches temperature (the bar widget's
     # overlay): see READY_ANIMATIONS.
     "ready_animation": "rocket",
+    # The heat-up overlay while the Peak preheats: see SHOWTIME_MODES.
+    "showtime": "corner",
+    # The overlays' sounds, and how loud (0-100).
+    "sounds": True,
+    "sound_volume": 70,
+    # Which monitor the overlays play on: "focused" follows you around, or
+    # a monitor name such as "DP-2" pins them there.
+    "overlay_screen": "focused",
     "notify_ready": True,
     "notify_low_battery": True,
     "qtip_reminder": True,

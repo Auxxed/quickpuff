@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from typing import Any
 
 from . import __version__
-from .constants import READY_ANIMATIONS
-from .paths import load_config
+from .constants import READY_ANIMATIONS, SHOWTIME_MODES
+from .paths import DEFAULTS, load_config
 from .rpc import DaemonNotRunning, rpc
 from .service import ensure_daemon
 
@@ -113,7 +114,9 @@ def print_status(data: dict, as_json: bool, units: str | None = None) -> None:
             print("Disconnected")
         return
     product = (data.get("product") or {}).get("label") or "Peak Pro"
-    print(f"{data.get('device_name')}  ·  {product}")
+    # A demo looks like the real thing everywhere; say so here at least.
+    demo = "  ·  demo" if (data.get("demo") or {}).get("badge") else ""
+    print(f"{data.get('device_name')}  ·  {product}{demo}")
     print(f"  {data.get('device_mac')}")
     heat = ""
     if data.get("heater_temp_f") is not None:
@@ -307,6 +310,48 @@ def print_waybar(data: dict) -> None:
     )
 
 
+def _seconds(value: Any) -> str:
+    return f"{float(value):g}"
+
+
+def demo_summary(result: dict) -> str:
+    line = (
+        f"Demo heat cycle on {result.get('name')}: {_seconds(result['preheat'])} s preheat, "
+        f"{_seconds(result['session'])} s session (nothing is sent to the Peak)."
+    )
+    if result.get("stock_peak"):
+        line += "\nNo Peak connected, so it plays on a stock Peak Pro."
+    return line
+
+
+def _switched_on(value: Any) -> bool:
+    # A hand-edited config can say "false", which bool() calls true.
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "on", "yes"}
+    return bool(value)
+
+
+def clamp_volume(value: Any) -> int:
+    try:
+        number = int(round(float(value)))
+    except (TypeError, ValueError):
+        return int(DEFAULTS["sound_volume"])
+    return max(0, min(100, number))
+
+
+# Output names as Hyprland reports them: DP-2, HDMI-A-1, eDP-1.
+MONITOR_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def overlay_screen_value(raw: str) -> str:
+    value = str(raw or "").strip()
+    if value.lower() == "focused":
+        return "focused"
+    if not MONITOR_NAME.fullmatch(value):
+        raise SystemExit("Give focused, or a monitor name like DP-2 (`hyprctl monitors` lists them)")
+    return value
+
+
 def find_light(saved: list[dict[str, Any]], target: str | None) -> dict[str, Any]:
     """A saved light by id, or by name when exactly one has it."""
     key = str(target or "").strip()
@@ -474,6 +519,25 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     ready_anim = sub.add_parser("ready-anim", help="What plays on screen when the Peak is ready")
     ready_anim.add_argument("value", nargs="?", choices=list(READY_ANIMATIONS))
+
+    showtime = sub.add_parser("showtime", help="The heat-up overlay: off, a card in the corner, or the full stage")
+    showtime.add_argument("value", nargs="?", choices=list(SHOWTIME_MODES))
+
+    sounds = sub.add_parser("sounds", help="The overlays' sounds on or off, and how loud")
+    sounds.add_argument("value", nargs="?", choices=["on", "off"])
+    sounds.add_argument("--volume", type=int, metavar="0-100", help="How loud (default 70)")
+
+    overlay_screen = sub.add_parser("overlay-screen", help="Which monitor the overlays play on")
+    overlay_screen.add_argument("value", nargs="?", metavar="focused|NAME", help="focused (the default), or a monitor name like DP-2")
+
+    demo = sub.add_parser("demo", help="Play a pretend heat cycle on the bar and panel; nothing is sent to the Peak")
+    demo.add_argument("action", nargs="?", choices=["stop"], metavar="stop", help="End a demo early")
+    demo.add_argument("--profile", type=int, metavar="N", help="Profile 0-3 (default: the selected one)")
+    demo.add_argument("--preheat", type=float, metavar="S", help="Seconds of preheat (default 12, at least 6)")
+    demo.add_argument("--session", type=float, metavar="S", help="Seconds at temperature (default 20)")
+    demo.add_argument("--cooldown", type=float, metavar="S", help="Seconds of cooling down (default 6)")
+    demo.add_argument("--notify", action="store_true", help="Send the ready notification too")
+    demo.add_argument("--no-badge", action="store_true", help="Leave off the DEMO badge, for filming")
 
     units = sub.add_parser("units")
     units.add_argument("value", choices=["F", "C", "f", "c"])
@@ -732,6 +796,51 @@ async def async_main(argv: list[str] | None = None) -> int:
         cfg["ready_animation"] = args.value
         save_config(cfg)
         print(f"Ready animation: {args.value}")
+    elif cmd == "showtime":
+        from .paths import save_config
+
+        cfg = load_config()
+        if args.value is None:
+            print(cfg.get("showtime") or DEFAULTS["showtime"])
+            return 0
+        cfg["showtime"] = args.value
+        save_config(cfg)
+        print(f"Showtime: {args.value}")
+    elif cmd == "sounds":
+        from .paths import save_config
+
+        cfg = load_config()
+        if args.value is None and args.volume is None:
+            print(f"{'on' if _switched_on(cfg.get('sounds')) else 'off'}, volume {clamp_volume(cfg.get('sound_volume'))}")
+            return 0
+        if args.value is not None:
+            cfg["sounds"] = args.value == "on"
+        if args.volume is not None:
+            cfg["sound_volume"] = clamp_volume(args.volume)
+        save_config(cfg)
+        print(f"Sounds {'on' if _switched_on(cfg.get('sounds')) else 'off'}, volume {clamp_volume(cfg.get('sound_volume'))}")
+    elif cmd == "overlay-screen":
+        from .paths import save_config
+
+        cfg = load_config()
+        if args.value is None:
+            print(cfg.get("overlay_screen") or DEFAULTS["overlay_screen"])
+            return 0
+        cfg["overlay_screen"] = overlay_screen_value(args.value)
+        save_config(cfg)
+        where = "the focused monitor" if cfg["overlay_screen"] == "focused" else cfg["overlay_screen"]
+        print(f"Overlays play on {where}")
+    elif cmd == "demo":
+        if args.action == "stop":
+            result = await call("demo_stop")
+            print(json.dumps(result) if raw else ("Demo stopped." if result.get("stopped") else "No demo is playing."))
+            return 0
+        payload = {"notify": args.notify, "badge": not args.no_badge}
+        for key in ("profile", "preheat", "session", "cooldown"):
+            if getattr(args, key) is not None:
+                payload[key] = getattr(args, key)
+        result = await call("demo", payload)
+        print(json.dumps(result, indent=2) if raw else demo_summary(result))
     elif cmd == "units":
         from .paths import save_config
 
