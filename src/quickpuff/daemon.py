@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import logging
+import math
 import os
 import random
 import signal
 import subprocess
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import __version__, audit, bluez, faults, history
+from . import __version__, audit, bluez, demo, faults, history
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
 from .paths import load_config, save_config, socket_path
@@ -138,8 +141,9 @@ CONCEDE_AFTER_STRIKES = 4
 # Edits to a heat profile re-read just the profiles once taps stop for this long.
 PROFILE_REFRESH_SETTLE_S = 0.8
 # Answered from what the daemon already knows, so they never queue behind a
-# slow Bluetooth command.
-LOCK_FREE_COMMANDS = frozenset({"ping", "status"})
+# slow Bluetooth command. A demo never touches the Peak either, and should
+# start the moment it's asked for.
+LOCK_FREE_COMMANDS = frozenset({"ping", "status", "demo", "demo_stop"})
 # Commands that never touch the Peak, so they leave a resting one alone.
 LOCAL_COMMANDS = frozenset(
     {
@@ -148,6 +152,8 @@ LOCAL_COMMANDS = frozenset(
         "connect",
         "disconnect",
         "status",
+        "demo",
+        "demo_stop",
         "sessions",
         "set_note",
         "set_daily_limit",
@@ -287,6 +293,13 @@ MIN_LANTERN_S, MAX_LANTERN_S = 60.0, 28800.0
 # Chamber-clean reminder. Steps of 10, default one charge (~30 dabs).
 CLEAN_EVERY_MIN, CLEAN_EVERY_MAX, CLEAN_EVERY_STEP = 10, 100, 10
 DEFAULT_CLEAN_EVERY = 30
+# Demo mode. The bar polls every 5 s until it sees a preheat, so a shorter
+# preheat could fall between two polls and the ready animation never play.
+# The session keeps to a real profile's limits.
+MIN_DEMO_PREHEAT_S, MAX_DEMO_PREHEAT_S = 6.0, 120.0
+MIN_DEMO_COOLDOWN_S, MAX_DEMO_COOLDOWN_S = 0.0, 60.0
+# Streaming clients get a fresh demo frame this often: smooth, not busy.
+DEMO_TICK_S = 0.25
 
 
 def snap_clean_every(value: Any) -> int:
@@ -321,6 +334,41 @@ def _validate_index(args: dict) -> int:
     if not 0 <= index < PROFILE_COUNT:
         raise ValueError(f"Profile index must be 0-{PROFILE_COUNT - 1}")
     return index
+
+
+def _seconds_arg(args: dict, key: str, default: float, lo: float, hi: float) -> float:
+    raw = args.get(key)
+    value = default if raw is None else float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{key} must be a number of seconds")
+    return _clamp(value, lo, hi)
+
+
+def _profile_at(profiles: Any, index: int) -> dict[str, Any] | None:
+    for profile in profiles or []:
+        try:
+            if int(profile.get("index")) == index:
+                return profile
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+@dataclass
+class DemoShow:
+    """A demo heat cycle in progress; demo.py does the maths."""
+
+    run: demo.DemoRun
+    started: float
+    profile: int
+    name: str
+    # Laid over every frame: the stock Peak, or the real profiles as they
+    # stood when the demo began (so a dropped link can't empty the tiles).
+    device: dict[str, Any]
+    battery: int
+    badge: bool = True
+    notify: bool = False
+    notified: bool = False
 
 
 class QuickPuffDaemon:
@@ -390,6 +438,9 @@ class QuickPuffDaemon:
         self._wake_task: asyncio.Task | None = None
         self._profiles_dirty_at = 0.0
         self._profile_refresh_task: asyncio.Task | None = None
+        # `quickpuff demo`: shown to clients, never written into self.status.
+        self._demo: DemoShow | None = None
+        self._demo_task: asyncio.Task | None = None
         self._clean_serial: str | None = None
         self._load_clean(load_config().get("last_serial"))
         self._server: asyncio.AbstractServer | None = None
@@ -635,6 +686,9 @@ class QuickPuffDaemon:
                 pass
 
     async def _broadcast_event(self, event: str, data: Any) -> None:
+        if event == "status" and self._demo is not None:
+            # Whatever changed, a demo is playing: send its frame instead.
+            data = self._status_out()
         await self._broadcast({"event": event, "data": data})
 
     async def _connect(self, device_name: str | None, device_mac: str | None, **options: bool) -> dict:
@@ -1431,10 +1485,12 @@ class QuickPuffDaemon:
         await self._broadcast_event("notify", {"title": title, "body": body})
         self._desktop_notify(title, body)
 
-    async def _notify_ready(self) -> None:
-        title = f"{self._peak_name()} is ready"
+    async def _notify_ready(self, name: str | None = None, temp_f: Any = None) -> None:
+        """A demo passes its own Peak and target; a real cycle reads them here."""
+        title = f"{name or self._peak_name()} is ready"
         body = "At temperature. Your session has started."
-        temp_f = self._cycle_meta().get("temp_f")
+        if temp_f is None:
+            temp_f = self._cycle_meta().get("temp_f")
         if temp_f is not None:
             cfg = load_config()
             temp = (
@@ -1736,8 +1792,178 @@ class QuickPuffDaemon:
         await self._broadcast_event("status", self.status)
         return {"battery_saver": self.battery_saver}
 
+    async def _start_demo(self, args: dict) -> dict[str, Any]:
+        """Play a pretend heat cycle that every client sees as a real one.
+
+        Nothing is sent to the Peak. The demo is laid over a copy of the
+        status on its way out (the `status` answer and status broadcasts) and
+        never written into self.status, so the poll loop and all it sets off
+        (history, the Q-tip reminder, Surprise me, the daily limit, battery
+        saver, the cleaning countdown) only ever see the real Peak.
+        """
+        if self.status.get("operating_state_id") in CYCLE_STATES:
+            raise RuntimeError("The Peak is heating for real. Run the demo once it's done.")
+        stock = not (self.status.get("connected") and self.status.get("profiles"))
+        if stock:
+            # No Peak to borrow, or no profiles read yet: show a stock one.
+            device = demo.stock_peak()
+            battery, current = device["battery"], device["current_profile"]
+        else:
+            device = {"profiles": copy.deepcopy(self.status["profiles"])}
+            battery, current = self.status.get("battery"), self.status.get("current_profile")
+        if args.get("profile") is not None:
+            index = _validate_index({"index": args["profile"]})
+        elif isinstance(current, int) and 0 <= current < PROFILE_COUNT:
+            index = current
+        else:
+            index = demo.STOCK_PROFILE
+        profile = _profile_at(device["profiles"], index)
+        if profile is None:
+            profile = demo.stock_profile(index)
+            device["profiles"].append(profile)
+        try:
+            target = float(profile.get("temp_f"))
+        except (TypeError, ValueError):
+            target = 0.0
+        if not MIN_TEMP_F <= target <= MAX_TEMP_F:
+            # A profile that failed to read comes back as 0°F; heat to the
+            # stock temperature, and show it on the tile (this is a copy).
+            target = float(demo.STOCK_PROFILES[index][1])
+            profile.update(temp_f=int(target), temp_c=round(PuffcoUtils.f_to_c(target), 1))
+        defaults = demo.DemoRun()
+        run = demo.DemoRun(
+            preheat_s=_seconds_arg(args, "preheat", defaults.preheat_s, MIN_DEMO_PREHEAT_S, MAX_DEMO_PREHEAT_S),
+            session_s=_seconds_arg(args, "session", defaults.session_s, MIN_TIME_S, MAX_TIME_S),
+            cooldown_s=_seconds_arg(args, "cooldown", defaults.cooldown_s, MIN_DEMO_COOLDOWN_S, MAX_DEMO_COOLDOWN_S),
+            target_f=target,
+        )
+        try:
+            battery = int(battery)
+        except (TypeError, ValueError):
+            battery = 0
+        show = DemoShow(
+            run=run,
+            started=time.monotonic(),
+            profile=index,
+            name=str(profile.get("name") or f"Profile {index + 1}"),
+            device=device,
+            battery=battery if 1 <= battery <= 100 else demo.STOCK_BATTERY,
+            badge=_as_bool(args.get("badge", True)),
+            notify=_as_bool(args.get("notify", False)),
+        )
+        # Asking again while one plays starts over: another take.
+        self._cancel_demo_task()
+        self._demo = show
+        self._demo_task = asyncio.create_task(self._run_demo(show))
+        log.info(
+            "Demo: %s at %.0f°F, %.0fs preheat and %.0fs session; nothing is sent to the Peak",
+            show.name,
+            target,
+            run.preheat_s,
+            run.session_s,
+        )
+        return {
+            "profile": index,
+            "name": show.name,
+            "temp_f": target,
+            "preheat": run.preheat_s,
+            "session": run.session_s,
+            "cooldown": run.cooldown_s,
+            "notify": show.notify,
+            "badge": show.badge,
+            "stock_peak": stock,
+        }
+
+    async def _run_demo(self, show: DemoShow) -> None:
+        """Send the demo out a few times a second, then hand back to the Peak."""
+        try:
+            while self._demo is show:
+                if self.status.get("operating_state_id") in CYCLE_STATES:
+                    # The Peak's own button started a real cycle: that one wins.
+                    log.info("Demo: the Peak started heating for real, so the demo stops")
+                    break
+                moment = demo.sample(show.run, time.monotonic() - show.started)
+                if moment is None:
+                    break
+                await self._broadcast_event("status", self.status)
+                if show.notify and not show.notified and moment["phase"] == "session":
+                    show.notified = True
+                    await self._notify_ready(self._demo_peak_name(show), show.run.target_f)
+                await asyncio.sleep(DEMO_TICK_S)
+        except Exception:
+            log.exception("Demo failed")
+        if self._demo is show:
+            self._demo = None
+            self._demo_task = None
+            log.info("Demo over")
+            await self._broadcast_event("status", self.status)
+
+    async def _stop_demo(self) -> dict[str, Any]:
+        show, self._demo = self._demo, None
+        self._cancel_demo_task()
+        if show is not None:
+            log.info("Demo stopped")
+            await self._broadcast_event("status", self.status)
+        return {"stopped": show is not None}
+
+    def _cancel_demo_task(self) -> None:
+        task, self._demo_task = self._demo_task, None
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+
+    def _demo_peak_name(self, show: DemoShow) -> str:
+        return str(show.device.get("device_name") or self._peak_name())
+
+    def _demo_status(self, show: DemoShow) -> dict[str, Any] | None:
+        """A copy of the real status with the demo's moment laid over it;
+        None once the demo has run its course."""
+        elapsed = time.monotonic() - show.started
+        moment = demo.sample(show.run, elapsed)
+        if moment is None:
+            return None
+        shown = copy.deepcopy(self.status)
+        shown.update(copy.deepcopy(show.device))
+        profile = _profile_at(shown.get("profiles"), show.profile)
+        if profile is not None:
+            # At temperature a real cycle runs for the profile's own time, so
+            # the tile and the countdown agree.
+            profile["time"] = int(round(show.run.session_s))
+        heater_c = round(PuffcoUtils.f_to_c(moment["heater_temp_f"]), 1)
+        shown.update(
+            {
+                "connected": True,
+                "resting": False,
+                "handed_off": False,
+                "powered_off": False,
+                "operating_state": moment["operating_state"],
+                "operating_state_id": moment["operating_state_id"],
+                "heater_temp_c": heater_c,
+                "heater_temp_f": PuffcoUtils.c_to_f(heater_c),
+                "state_elapsed_s": moment["state_elapsed_s"],
+                "state_total_s": moment["state_total_s"],
+                "current_profile": show.profile,
+                "battery": demo.battery_at(show.run, show.battery, elapsed),
+                "heat_trace": demo.heat_trace(show.run, elapsed),
+                "demo": {"active": True, "badge": show.badge, "phase": moment["phase"]},
+            }
+        )
+        return shown
+
+    def _status_out(self) -> dict[str, Any]:
+        """The status clients are shown: the Peak's own, or a demo playing over it."""
+        show = self._demo
+        shown = self._demo_status(show) if show is not None else None
+        return shown if shown is not None else self.status
+
     async def handle(self, cmd: str, args: dict) -> Any:
         args = args or {}
+        if cmd == "stop_heat" and self._demo is not None:
+            # Stop pressed on a demo's pretend cycle ends the demo. The stop
+            # still goes to a connected Peak in case its own button started a
+            # real cycle the next poll hasn't seen; with no Peak, that's all.
+            await self._stop_demo()
+            if not (self.device and self.device.is_connected):
+                return {"ok": True}
         if self._resting and cmd not in LOCAL_COMMANDS:
             await self._wake()
         if cmd == "ping":
@@ -1778,7 +2004,11 @@ class QuickPuffDaemon:
             self._expire_lantern()
             self._reconcile_connected()
             self.status["telemetry"] = history.get_stats()
-            return self.status
+            return self._status_out()
+        if cmd == "demo":
+            return await self._start_demo(args)
+        if cmd == "demo_stop":
+            return await self._stop_demo()
         if cmd == "refresh":
             dev = self._require_device()
             snap = await dev.snapshot(include_profiles=True)
@@ -1853,6 +2083,8 @@ class QuickPuffDaemon:
         if cmd == "start_heat":
             self._cancel_saver_sleep()
             await dev.start_heat_cycle()
+            # A real cycle is on its way: no demo may stand in front of it.
+            await self._stop_demo()
             return {"ok": True}
         if cmd == "stop_heat":
             await dev.stop_heat_cycle()
@@ -2076,7 +2308,7 @@ class QuickPuffDaemon:
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.clients.add(writer)
         try:
-            await self._broadcast({"event": "status", "data": self.status})
+            await self._broadcast_event("status", self.status)
             while True:
                 line = await reader.readline()
                 if not line:
@@ -2210,6 +2442,8 @@ class QuickPuffDaemon:
     async def close(self) -> None:
         self._want_connected = False
         self._resting = False
+        self._demo = None
+        self._cancel_demo_task()
         for task in (self._rest_task, self._wake_task, self._profile_refresh_task):
             if task:
                 task.cancel()
