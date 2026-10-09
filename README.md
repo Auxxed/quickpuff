@@ -61,7 +61,8 @@ widget needs, all inside your home directory with no root access:
 - a Python environment in `~/.local/share/quickpuff/venv` with the Bluetooth
   libraries from PyPI: [`bleak`](https://pypi.org/project/bleak/),
   [`cbor2`](https://pypi.org/project/cbor2/) and
-  [`dbus-fast`](https://pypi.org/project/dbus-fast/)
+  [`dbus-fast`](https://pypi.org/project/dbus-fast/), at the exact versions in
+  `requirements.txt`, each checked against its SHA-256 before it installs
 - the `quickpuff` command in `~/.local/bin`
 - the `quickpuff-daemon` systemd user service, which holds the one Bluetooth
   connection the widget and the command share
@@ -353,15 +354,48 @@ shows what you have):
 { "adapter": "hci1" }
 ```
 
+## What it touches
+
+- **Network:** nothing while it runs. Only `install.sh` downloads anything:
+  the pinned, hash-checked packages above, from PyPI.
+- **Bluetooth:** the daemon holds the one connection to your Peak. While it
+  connects, it's the system's pairing agent so the Peak can bond without a
+  prompt. It says yes only for the Peak it's connecting to, refuses pairing
+  and service requests from every other device, and steps down once the Peak
+  has bonded.
+- **Files:** settings in `~/.config/quickpuff/config.json`; dab history,
+  fault logs and saved lights in `~/.local/share/quickpuff`. They're written
+  to a fresh private temporary (0600, in a 0700 folder) and moved into place,
+  and read without following a symlink and with a size limit. A state file
+  that's a symlink, a pipe, someone else's or oversized is refused and left
+  as it is, never overwritten.
+- **The daemon's socket** is `quickpuff.sock` in `$XDG_RUNTIME_DIR`: 0600, in
+  your private runtime folder, and it hangs up on any process that isn't
+  running as you. With no `XDG_RUNTIME_DIR` the daemon and the command stop
+  with an error rather than fall back to `/tmp`.
+- **Notifications** go through `notify-send`. The Peak's name and profile
+  names have markup and control characters stripped before they're shown.
+- **The bar widget** runs the `quickpuff` CLI from the plugin folder with the
+  Python environment's own interpreter: no shell, no `PATH` lookup, a cap on
+  how much output it reads, and `--no-start`, so the widget never starts the
+  daemon itself (the systemd service does). It never reads your files; the
+  settings it needs come back from the CLI. It plays sounds with `pw-play`.
+- **Debug commands:** `quickpuff peek` and `poke` (raw reads and writes on
+  the Peak) work only when the daemon was started with
+  `quickpuff daemon --debug`.
+
 ## Development
 
 ```bash
 git clone https://github.com/Auxxed/quickpuff.git
 cd quickpuff
 ./install.sh                   # links the checkout in as a development plugin
-~/.local/share/quickpuff/venv/bin/pip install pytest
+~/.local/share/quickpuff/venv/bin/pip install --require-hashes --no-deps -r requirements-dev.txt
 ~/.local/share/quickpuff/venv/bin/python -m pytest
 ```
+
+`requirements.txt` and `requirements-dev.txt` are locks, generated with `uv`;
+the exact command to regenerate each is at the top of the file.
 
 `Panel.qml` holds the state, polling and actions, plus the header and tabs.
 Each tab is a file in `pages/`, and each reusable piece is a file in

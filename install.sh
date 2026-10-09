@@ -33,6 +33,18 @@ plain_path() {
 plain_path "$ROOT" "the plugin"
 plain_path "$VENV" "the Python environment"
 
+# Writes stdin to $1 with mode $2 through a fresh temporary beside it, then
+# moves that into place: a symlink planted at $1 is replaced, never written
+# through, and a failed write leaves the old file as it was.
+publish() {
+  local tmp
+  tmp=$(mktemp -p "$(dirname -- "$1")" ".$(basename -- "$1").XXXXXXXXXX")
+  if ! { cat >"$tmp" && chmod "$2" "$tmp" && mv -f -T -- "$tmp" "$1"; }; then
+    rm -f -- "$tmp"
+    die "couldn't write $1"
+  fi
+}
+
 say "QuickPuff — Peak Pro controls ($ROOT)"
 
 command -v python3 >/dev/null || die "python3 is required"
@@ -96,18 +108,19 @@ mkdir -p "$DATA_DIR" "$BIN_DIR" "$UNIT_DIR"
 "$VENV/bin/pip" install -q --require-hashes --no-deps -r "$ROOT/requirements.txt"
 
 say "quickpuff command ($BIN_DIR/quickpuff)"
-cat > "$BIN_DIR/quickpuff" <<EOF
+publish "$BIN_DIR/quickpuff" 755 <<EOF
 #!/usr/bin/bash
 export PYTHONPATH="$ROOT/src\${PYTHONPATH:+:\$PYTHONPATH}"
 exec "$VENV/bin/python" -m quickpuff "\$@"
 EOF
-chmod +x "$BIN_DIR/quickpuff"
 
 say "Background daemon (systemd user service)"
-sed \
+# Built first, so a failed sed stops the install before the old unit is touched.
+unit=$(sed \
   -e "s|%h/.local/share/quickpuff/venv|$VENV|g" \
   -e "s|%h/.local/share/quickpuff/src|$ROOT/src|g" \
-  "$ROOT/packaging/quickpuff-daemon.service" > "$UNIT_DIR/quickpuff-daemon.service"
+  "$ROOT/packaging/quickpuff-daemon.service")
+printf '%s\n' "$unit" | publish "$UNIT_DIR/quickpuff-daemon.service" 644
 systemctl --user daemon-reload
 systemctl --user enable quickpuff-daemon.service >/dev/null
 systemctl --user restart quickpuff-daemon.service
