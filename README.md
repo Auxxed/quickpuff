@@ -426,10 +426,11 @@ The panel's display type is [Rajdhani](https://fonts.google.com/specimen/Rajdhan
 by the Indian Type Foundry, the face the Puffco app uses for its numbers and
 headings, bundled in `fonts/` under the SIL Open Font License (`fonts/OFL.txt`).
 
-The sounds in `sounds/` are synthesised from scratch by `tools/make-sounds.py`
-(oscillators, filtered noise and a small reverb) and are MIT like the rest of
-the repository. `python3 tools/make-sounds.py` rebuilds them; it needs numpy and
-ffmpeg.
+The sounds in `sounds/` are made by `tools/make-sounds.py`: synthesised from
+scratch (oscillators, filtered noise and a small reverb), with the firework,
+liftoff and confetti cues built on public-domain (CC0) recordings from
+Freesound, listed in `tools/sources/SOURCES.md`. `python3 tools/make-sounds.py`
+rebuilds them; it needs numpy and ffmpeg.
 
 ## License
 

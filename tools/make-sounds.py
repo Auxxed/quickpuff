@@ -2,8 +2,9 @@
 """Synthesise QuickPuff's sound cues: sounds/<name>.ogg.
 
 Every cue is built here from oscillators, filtered noise and a small
-convolution reverb, so the sounds are this repository's own work, under its
-MIT license like everything else. Each cue is timed to the moment it plays
+convolution reverb, and most cues on top of public-domain (CC0) field
+recordings kept in tools/sources/ (see SOURCES.md
+there), so the sounds can ship under this repository's MIT license. Each cue is timed to the moment it plays
 with in ReadyOverlay.qml or SessionOverlay.qml: the neon buzz follows the
 sign's flicker, a smoke puff leaves with each ring, and a firework booms when
 an average shell bursts.
@@ -32,12 +33,14 @@ import numpy as np
 SR = 48_000
 ROOT = Path(__file__).resolve().parent.parent
 SOUNDS = ROOT / "sounds"
+SOURCES = ROOT / "tools" / "sources"
 FFMPEG = "/usr/bin/ffmpeg"
 CEILING_DB = -1.0  # true-peak ceiling for every cue
 TAU = 2 * np.pi
 
 
 # ------------------------------------------------------------------ basics
+
 
 def n_of(seconds: float) -> int:
     return int(round(seconds * SR))
@@ -79,6 +82,7 @@ def hit(t, at, attack, tau):
 
 
 # ------------------------------------------------------------- oscillators
+
 
 def phase(freq, n):
     """Running phase in radians of a fixed or per-sample frequency."""
@@ -125,6 +129,7 @@ def saw(freq, n, offset=0.0, top=12_000.0):
 
 # ------------------------------------------------------------------- noise
 
+
 def noise(rng, n):
     return rng.standard_normal(n)
 
@@ -157,7 +162,23 @@ def grain(rng, seconds, centre, q):
     return filtered(rng.standard_normal(m) * np.hanning(m), bandpass(centre, q))
 
 
+def recording(name):
+    """A CC0 source clip from tools/sources/, decoded to 48 kHz stereo floats."""
+    raw = subprocess.run([FFMPEG, "-nostdin", "-v", "error", "-i", str(SOURCES / f"{name}.ogg"),
+                          "-f", "f32le", "-ac", "2", "-ar", str(SR), "-"], stdout=subprocess.PIPE, check=True).stdout
+    return np.frombuffer(raw, "<f4").reshape(-1, 2).T.astype(float)
+
+
+def from_onset(clip, onset, lead=0.0):
+    """The clip from `lead` seconds before `onset` on, faded in over 3 ms."""
+    out = clip[:, max(0, n_of(onset - lead)):].copy()
+    k = n_of(0.003)
+    out[:, :k] *= np.linspace(0, 1, k)
+    return out
+
+
 # ----------------------------------------------------------------- filters
+
 
 def lp_gain(f, fc, order=2):
     return 1.0 / np.sqrt(1.0 + (f / fc) ** (2 * order))
@@ -214,6 +235,7 @@ def swept(x, response, frame=2048, hop=256):
 
 
 # ------------------------------------------------------- stereo and space
+
 
 def stereo(x):
     return np.vstack([x, x]) if x.ndim == 1 else x
@@ -405,104 +427,69 @@ def complete(rng):
 
 @cue(2.5, -21.9, fade=0.25)
 def ignite(rng):
-    """Heat-up starts: a relay click, then a warm electric hum easing up an octave
-    (A1 to A2) and swelling as the element comes up to temperature."""
+    """Heat-up starts: a relay clicking in (CC0 recording), then a space heater's
+    hum (CC0) swelling and brightening as the element comes up, over a quiet
+    synthesised tone easing up an octave (A1 to A2)."""
     t = clock(2.5)
     n = len(t)
-    click = (filtered(noise(rng, n) * hit(t, 0, 0.0002, 0.0018), bandpass(2600, 2.5)) * 0.9
-             + sine(2400, n) * hit(t, 0, 0.0003, 0.01) * 0.25
-             + sine(118, n) * hit(t, 0, 0.001, 0.022) * 0.45)
+    click = np.zeros((2, n))
+    place(click, from_onset(recording("relay-click"), 0.051, 0.002), 0)
+    hum = np.zeros((2, n))
+    place(hum, recording("heater-hum"), 0)
+    hum = swept(hum, lambda f, tt: lp_gain(f, 250 + 5000 * smooth((tt - 0.05) / 1.9), 2))
+    hum *= line(t, [(0, 0), (0.04, 0), (0.25, 0.4), (1.5, 1.0), (2.05, 1.0), (2.5, 0)])
     rise = smooth((t - 0.08) / 1.9)
-    f0 = hz("A1") * 2 ** rise
-    buzz = table([1 / k ** 1.15 for k in range(1, 25)])
-    hum = np.vstack([play(buzz, f0 * 2 ** (-2 / 1200), n, rng.uniform()), play(buzz, f0 * 2 ** (2 / 1200), n, rng.uniform())])
-    hum = swept(hum, lambda f, tt: lp_gain(f, 220 + 2200 * smooth((tt - 0.05) / 2.0), 2))
-    hum *= line(t, [(0, 0), (0.04, 0), (0.25, 0.45), (1.5, 1.0), (2.05, 1.0), (2.5, 0)]) * 0.5
-    whine = sine(hz("A5") * 2 ** rise, n) * line(t, [(0, 0), (0.4, 0), (1.8, 0.06), (2.1, 0.06), (2.5, 0)])
-    sizzle = np.zeros((2, n))
-    for when in events(rng, 2.3, lambda x: 60 * smooth((x - 0.5) / 1.4), 60):
-        g = grain(rng, rng.uniform(0.002, 0.008), rng.uniform(3000, 6500), 2.0) * rng.uniform(0.02, 0.06)
-        place(sizzle, pan(g, rng.uniform(-0.7, 0.7)), when)
-    return reverb(hum + stereo(whine + click) + sizzle, rng, seconds=0.7, wet=0.14)
+    tone = play(table([1 / k ** 1.15 for k in range(1, 25)]), hz("A1") * 2 ** rise, n, rng.uniform())
+    tone = filtered(tone, lowpass(900, 2)) * line(t, [(0, 0), (0.1, 0), (1.5, 1.0), (2.05, 1.0), (2.5, 0)])
+    mix = peaked(click, -4) + scaled(hum, -20, 1.0, 2.0) + stereo(scaled(tone, -30, 1.0, 2.0))
+    return reverb(mix, rng, seconds=0.7, wet=0.12)
 
 
 @cue(3.0, -15.2, fade=0.3)
 def liftoff(rng):
-    """Liftoff: an ignition thump on the beat, the engine's roar and crackle, and
-    a rushing whoosh that climbs away."""
+    """Liftoff: a real rocket motor lighting on the beat (CC0 recording), with a
+    sub thump under its first moment, receding as it climbs away."""
     t = clock(3.0)
     n = len(t)
+    motor = np.zeros((2, n))
+    place(motor, from_onset(recording("rocket-launch"), 0.337, 0.005), 0)
+    motor = swept(motor, lambda f, tt: lp_gain(f, np.interp(tt, [0, 1.0, 3.0], [16000, 9000, 1800]), 1))
+    motor *= line(t, [(0, 1), (1.2, 1), (3.0, 0)]) ** 1.5
     thump = sine(line(t, [(0, 80), (0.3, 36), (3, 36)]), n) * hit(t, 0, 0.004, 0.22)
-    crack = filtered(noise(rng, n) * hit(t, 0, 0.001, 0.02), lowpass(5000, 1))
-    roar = swept(np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)]),
-                 lambda f, tt: lp_gain(f, np.interp(tt, [0, 0.3, 1.1, 3.0], [450, 1400, 900, 250]), 2))
-    hiss = swept(np.vstack([tilted(rng, n, -2), tilted(rng, n, -2)]),
-                 lambda f, tt: bp_gain(f, np.interp(tt, [0, 0.4, 3.0], [1200, 2600, 1800]), 0.8))
-    jitter = filtered(noise(rng, n), bandpass(14, 0.7))
-    roar = (roar + 0.15 * hiss) * (1 + 0.35 * jitter / (np.max(np.abs(jitter)) + 1e-9))
-    roar *= line(t, [(0, 0.35), (0.05, 0.7), (0.3, 1.0), (1.1, 0.92), (2.7, 0.03), (3.0, 0)])
-    crackle = np.zeros(n)
-    for when in events(rng, 1.6, lambda x: 900 * np.exp(-x / 0.5), 900):
-        crackle[n_of(when)] += rng.choice([-1.0, 1.0]) * rng.uniform(0.3, 1.0)
-    crackle = filtered(crackle, lambda f: bp_gain(f, 2500, 0.9) * lp_gain(f, 6000))
-    crackle *= line(t, [(0, 0), (0.05, 1), (1.4, 0.2), (2.2, 0), (3, 0)])
-    centre = lambda tt: 260 * (4000 / 260) ** smooth((tt - 0.08) / 2.1)
-    whoosh = swept(np.vstack([noise(rng, n), noise(rng, n)]), lambda f, tt: bp_gain(f, centre(tt), 2.2))
-    whoosh *= line(t, [(0, 0), (0.15, 0.3), (0.7, 1.0), (1.5, 0.45), (2.8, 0), (3, 0)])
-    mix = (stereo(peaked(thump, -4) + peaked(crack, -12)) + scaled(roar, -13, 0.2, 1.1)
-           + scaled(whoosh, -20, 0.4, 1.2) + scaled(stereo(crackle), -29, 0.1, 1.0))
-    return reverb(soft(mix, -3), rng, seconds=2.2, wet=0.2, predelay=0.02)
+    mix = peaked(motor, -2) + stereo(peaked(thump, -9))
+    return reverb(soft(mix, -2), rng, seconds=1.8, wet=0.12, predelay=0.02)
 
 
 @cue(2.0, -15.5, fade=0.3)
 def pop(rng):
-    """Confetti: a cannon's pop, a puff of air, then paper fluttering down."""
+    """Confetti: a real party popper and confetti cannon (CC0 recordings), then
+    paper fluttering down."""
     t = clock(2.0)
     n = len(t)
-    crack = filtered(noise(rng, n) * hit(t, 0, 0.0005, 0.008), bandpass(2500, 0.7))
-    body = sine(line(t, [(0, 950), (0.03, 480), (2, 480)]), n) * hit(t, 0, 0.0006, 0.018)
-    puff = filtered(tilted(rng, n, -6) * hit(t, 0, 0.002, 0.05), lowpass(320))
-    air = swept(noise(rng, n), lambda f, tt: bp_gain(f, np.interp(tt, [0, 0.35], [1100, 3200]), 1.4))
-    air *= hit(t, 0.005, 0.02, 0.14)
-    # The spray of paper as it leaves, then pieces fluttering down.
-    spray, flutter = np.zeros((2, n)), np.zeros((2, n))
-    for when in events(rng, 0.4, lambda x: 1400 * np.exp(-x / 0.1), 1400):
-        g = grain(rng, rng.uniform(0.004, 0.015), rng.uniform(3000, 10_000), rng.uniform(1.2, 3.0))
-        place(spray, pan(g * rng.lognormal(0, 0.5), rng.uniform(-0.7, 0.7)), when)
+    burst = np.zeros((2, n))
+    place(burst, peaked(from_onset(recording("party-popper"), 0.076, 0.002), -1), 0)
+    place(burst, peaked(from_onset(recording("confetti-cannon"), 0.011, 0.002), -5), 0.004)
+    flutter = np.zeros((2, n))
     falling = lambda x: 380 * np.exp(-(x - 0.12) / 0.55) if x > 0.12 else 0.0
     for when in events(rng, 1.9, falling, 380):
         g = grain(rng, rng.uniform(0.008, 0.035), rng.uniform(2500, 9000), rng.uniform(1.5, 4.0))
         place(flutter, pan(g * rng.lognormal(0, 0.5), rng.uniform(-0.85, 0.85)), when)
-    mix = (stereo(peaked(crack, -3) + peaked(body, -12) + peaked(puff, -8)) + scaled(stereo(air), -17, 0, 0.2)
-           + scaled(spray, -15, 0, 0.2) + scaled(flutter, -24, 0.2, 1.2))
-    return reverb(soft(filtered(mix, highpass(70)), -4), rng, seconds=0.9, wet=0.16, predelay=0.01)
+    mix = soft(burst, -9) + scaled(flutter, -34, 0.2, 1.2)
+    return reverb(mix, rng, seconds=0.9, wet=0.14, predelay=0.01)
 
 
 @cue(5.6, -19.4, fade=1.2)
 def bubbles(rng):
-    """Lava lamp: thick, slow, mellow bubbles over a warm simmer, for the
-    length of the show."""
+    """Lava lamp: thick liquid gurgling over hot bubbling mud (CC0 recordings),
+    warm and soft, for the length of the show."""
     t = clock(5.6)
     n = len(t)
-    bus = np.zeros((2, n))
-    for when in [0.06] + events(rng, 4.9, lambda x: 9.0 if x > 0.12 else 0.0, 9.0):
-        big = rng.uniform() < 0.12
-        f0 = rng.uniform(95, 150) if big else float(np.exp(rng.uniform(np.log(170), np.log(520))))
-        tau = rng.uniform(0.09, 0.16) if big else rng.uniform(0.025, 0.07)
-        m = n_of(tau * 5)
-        x = np.arange(m) / SR
-        rising = f0 * (1 + rng.uniform(0.35, 0.9) * x / (tau * 5))
-        b = np.sin(phase(rising, m)) * np.clip(x / 0.003, 0, 1) * np.exp(-x / tau)
-        if big:
-            b += 0.5 * np.sin(phase(f0 * 0.5, m)) * np.clip(x / 0.006, 0, 1) * np.exp(-x / (tau * 0.8))
-        amp = (0.75 if big else rng.uniform(0.35, 0.8)) * (300 / f0) ** 0.3
-        place(bus, pan(b * amp, rng.uniform(-0.6, 0.6)), when)
-    drift = filtered(noise(rng, n), lowpass(1.5, 2))
-    simmer = filtered(np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)]), lowpass(450))
-    simmer *= 0.6 + 0.4 * drift / (np.max(np.abs(drift)) + 1e-9)
-    bus = scaled(bus, -20, 0.2, 4.0) + scaled(simmer, -36)
-    bus = filtered(bus, lowpass(2600, 2)) * line(t, [(0, 0), (0.15, 1), (4.3, 1), (5.6, 0)])
-    return reverb(soft(bus, -6), rng, seconds=0.8, wet=0.2, predelay=0.012)
+    goo, mud = np.zeros((2, n)), np.zeros((2, n))
+    place(goo, recording("viscous-bubbling"), 0)
+    place(mud, recording("hot-mud"), 0)
+    bus = filtered(scaled(goo, -20) + scaled(mud, -29), lowpass(4500, 1))
+    bus *= line(t, [(0, 0), (0.15, 1), (4.3, 1), (5.6, 0)])
+    return reverb(bus, rng, seconds=0.8, wet=0.15, predelay=0.012)
 
 
 @cue(6.5, -19.0, fade=0.4)
@@ -535,51 +522,36 @@ def shimmer(rng):
     return reverb(pad + chimes + air, rng, seconds=3.2, wet=0.42, predelay=0.03)
 
 
-@cue(2.6, -17.2, fade=0.3)
+@cue(3.0, -17.2, fade=0.4)
 def firework(rng):
-    """One shell: the mortar's thump and a rising whistle, the boom when an
-    average shell bursts (0.92 s after launch), then crackling sparks."""
-    t = clock(2.6)
+    """One shell (CC0 recordings): its whistle as it climbs and the burst 0.92 s
+    after launch, when an average shell bursts on screen, with a second shell's
+    burst layered in for the crackling tail."""
+    t = clock(3.0)
     n = len(t)
     burst = 0.92
-    mortar = sine(line(t, [(0, 95), (0.08, 52), (3, 52)]), n) * hit(t, 0, 0.002, 0.06) * 0.45
-    mortar += filtered(tilted(rng, n, -3) * hit(t, 0, 0.001, 0.025), lowpass(500)) * 0.3
-    pitch = lambda tt: 950 * (2300 / 950) ** smooth(tt / burst)
-    whistle = sine(pitch(t) * (1 + 0.012 * np.sin(TAU * 13 * t)), n)
-    whistle += swept(noise(rng, n), lambda f, tt: bp_gain(f, pitch(tt), 9)) * 0.25
-    whistle *= line(t, [(0, 0), (0.05, 0), (0.18, 0.7), (0.8, 1.0), (burst - 0.02, 0.6), (burst, 0), (3, 0)]) * 0.35
-    sub = sine(line(t, [(0, 70), (burst, 70), (burst + 0.4, 32), (3, 32)]), n) * hit(t, burst, 0.003, 0.32)
-    blast = swept(np.vstack([tilted(rng, n, -4), tilted(rng, n, -4)]),
-                  lambda f, tt: lp_gain(f, np.interp(tt, [burst, burst + 0.45], [3200, 320]), 2))
-    boom = stereo(sub) + blast * hit(t, burst, 0.002, 0.22) * 0.9
-    echo = np.zeros((2, n))
-    place(echo, filtered(boom, lowpass(900)) * 0.25, 0.31)
-    sparks = np.zeros((2, n))
-    crackling = lambda x: 320 * np.exp(-(x - burst - 0.08) / 0.4) if x > burst + 0.08 else 0.0
-    for when in events(rng, 2.6, crackling, 320):
-        g = grain(rng, rng.uniform(0.0008, 0.003), rng.uniform(2500, 7000), 1.2) * rng.lognormal(0, 0.6) * 0.5
-        place(sparks, pan(g, rng.uniform(-0.9, 0.9)), when)
-    fizz = filtered(np.vstack([noise(rng, n), noise(rng, n)]), highpass(5000)) * hit(t, burst + 0.15, 0.2, 0.5) * 0.02
-    mix = stereo(mortar + whistle) + boom + echo + sparks + fizz
-    return reverb(soft(mix, -2), rng, seconds=2.0, wet=0.28, predelay=0.03)
+    shell = np.zeros((2, n))
+    place(shell, from_onset(recording("firework-whistle-burst"), 1.163, burst), 0)
+    tail = np.zeros((2, n))
+    place(tail, from_onset(recording("firework-burst-crackle"), 1.533, 0.004), burst - 0.004)
+    mix = peaked(shell, -1) + peaked(tail, -6)
+    return reverb(soft(mix, -2), rng, seconds=2.2, wet=0.16, predelay=0.03)
 
 
 @cue(4.0, -19.8, fade=0.4)
 def smoke(rng):
-    """Smoke rings: a soft breathy puff as each of the seven rings leaves, 0.48 s
-    apart (one every 7.5 % of the show's 6.4 s)."""
+    """Smoke rings: a soft puff of breath (CC0 recordings of real puffs) as each
+    of the seven rings leaves, 0.48 s apart (one every 7.5 % of the 6.4 s show)."""
     t = clock(4.0)
     bus = np.zeros((2, len(t)))
-    m = n_of(0.75)
-    x = np.arange(m) / SR
-    formant = lambda f, tt: bp_gain(f, np.interp(tt, [0, 0.5], [1500, 650]), 1.3) * lp_gain(f, 3500, 2)
-    for i in range(7):
-        breath = swept(tilted(rng, m, -3), formant)
-        breath *= np.clip(x / 0.03, 0, 1) ** 0.7 * np.exp(-np.maximum(x - 0.04, 0) / 0.16)
-        hiss = filtered(noise(rng, m), bandpass(4500, 1.0)) * np.clip(x / 0.01, 0, 1) * np.exp(-x / 0.06) * 0.15
-        whump = sine(np.interp(x, [0, 0.1], [90, 60]), m) * np.clip(x / 0.01, 0, 1) * np.exp(-x / 0.06) * 0.25
-        place(bus, pan((breath + hiss + whump) * rng.uniform(0.8, 1.0), (-1) ** i * rng.uniform(0.15, 0.4)), i * 0.48)
-    return reverb(bus, rng, seconds=1.2, wet=0.24, predelay=0.012)
+    clip = recording("breath-puffs")
+    puffs = [0.45, 2.30, 4.48, 5.44, 7.57, 8.41, 10.73]
+    for i, onset in enumerate(puffs):
+        puff = from_onset(clip, onset, 0.02)[:, :n_of(0.6)].copy()
+        puff[:, -n_of(0.15):] *= np.linspace(1, 0, n_of(0.15))
+        puff = filtered(puff, lowpass(5000, 1))
+        place(bus, peaked(puff, -6 - 2 * rng.uniform()) * np.array([[1.0 - 0.3 * (i % 2)], [0.7 + 0.3 * (i % 2)]]), i * 0.48)
+    return reverb(bus, rng, seconds=1.2, wet=0.22, predelay=0.012)
 
 
 def neon_power(t):
@@ -591,33 +563,26 @@ def neon_power(t):
                      [0.0, 1.0, 0.15, 1.0, 0.4, fading], default=steady)
 
 
-@cue(5.0, -16.5, fade=0.1)
+@cue(5.0, -18.5, fade=0.1)
 def neon(rng):
-    """Neon sign: a relay click, the tube striking on and off with the sign's own
-    flicker, then a steady 110 Hz hum that fades out with it."""
+    """Neon sign: a relay click, then a real neon lamp striking and humming (CC0
+    recording), gated by the sign's own flicker and fading out with it."""
     t = clock(5.0)
     n = len(t)
+    lamp = np.zeros((2, n))
+    place(lamp, from_onset(recording("neon-lamp"), 0.325, 0.09), 0)
     power = filtered(neon_power(t), lowpass(250, 2))
-    buzz = table([1 / k ** 0.75 for k in range(1, 60)])
-    tube = np.vstack([play(buzz, 110 * 2 ** (-1.5 / 1200), n, rng.uniform()), play(buzz, 110 * 2 ** (1.5 / 1200), n, rng.uniform())])
-    tube /= np.max(np.abs(tube))
-    striking = line(t, [(0, 1), (0.45, 1), (0.8, 0), (5, 0)])
-    sputter = (filtered(noise(rng, n), lowpass(90)) > -0.3) * 0.6 + 0.4
-    harsh = filtered(tube, lowpass(5500, 1)) * sputter
-    tone = harsh * striking + filtered(tube, lowpass(1200, 2)) * (1 - striking) * 0.7
-    hum = stereo(sine(110, n) * 0.5 + sine(220, n) * 0.2)
-    sizzle = filtered(np.vstack([noise(rng, n), noise(rng, n)]), highpass(4500)) * np.abs(np.sin(TAU * 110 * t)) ** 8 * 0.08
-    bus = (tone * 0.6 + hum + sizzle) * power
-    for at in (0.0, 0.022):
-        relay = filtered(noise(rng, n) * hit(t, at, 0.0002, 0.0015), bandpass(3200, 3)) + sine(3200, n) * hit(t, at, 0.0002, 0.008) * 0.3
-        bus += stereo(relay * (0.8 if at == 0 else 0.45))
-    for when in [0.09, 0.27, 0.405, 0.45] + events(rng, 0.45, lambda x: 120 if x > 0.09 else 0, 120):
-        g = grain(rng, rng.uniform(0.002, 0.01), rng.uniform(1800, 6000), 1.5) * rng.uniform(0.15, 0.4)
-        place(bus, pan(g, rng.uniform(-0.4, 0.4)), when)
-    return reverb(bus, rng, seconds=0.9, wet=0.12, predelay=0.01)
+    gate = np.where(t < 0.45, 0.3 + 0.7 * power, power)
+    click = np.zeros((2, n))
+    place(click, from_onset(recording("relay-click"), 0.051, 0.002), 0)
+    settle = smooth((t - 0.5) / 0.4)
+    strike, hum = lamp * (1 - settle), lamp * settle
+    mix = (soft(peaked(strike, -8), -11) + scaled(hum, -21, 1.0, 4.0)) * gate + peaked(click, -14)
+    return reverb(soft(mix, -10), rng, seconds=0.9, wet=0.1, predelay=0.01)
 
 
 # -------------------------------------------------------------------- output
+
 
 def render(name):
     fn, seconds, lufs, fade = CUES[name]

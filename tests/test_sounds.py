@@ -35,3 +35,14 @@ def test_every_sound_is_synthesised_in_the_repo():
 def test_sounds_stay_small():
     for path in SOUNDS.glob("*.ogg"):
         assert path.stat().st_size < 256 * 1024, path.name
+
+
+def test_every_source_recording_is_listed_and_used():
+    sources = ROOT / "tools" / "sources"
+    clips = {p.stem for p in sources.glob("*.ogg")}
+    listing = (sources / "SOURCES.md").read_text()
+    assert clips
+    for clip in clips:
+        assert f"`{clip}.ogg`" in listing, clip
+        assert f'recording("{clip}")' in GENERATOR, clip
+    assert "Creative Commons 0" in listing
