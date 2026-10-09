@@ -13,6 +13,9 @@ import qs.Commons
 // Animations are a registry: add a component below and an entry in
 // `animations`, then list it in READY_ANIMATIONS (constants.py) and the
 // panel's `readyAnimations`.
+//
+// Shows play sound cues with `cue(name)` (sounds/<name>.ogg). The `ready`
+// chime opens every show; the rest are fired by each animation.
 PanelWindow {
   id: overlay
 
@@ -25,6 +28,9 @@ PanelWindow {
   property string fontFamily: Style.font.family
   // The active profile's LED colour, fetched as the show starts.
   property color tint: Color.accent
+  // Sound cues, and how loud they play (0..1).
+  property bool soundsOn: true
+  property real soundVolume: 0.7
   // Set once the host has filled in the properties above, so the show starts
   // with the right animation and position.
   property bool armed: false
@@ -44,6 +50,25 @@ PanelWindow {
   FontLoader { id: displayFont; source: Qt.resolvedUrl("fonts/Rajdhani-SemiBold.ttf") }
   readonly property string displayFamily: displayFont.status === FontLoader.Ready ? displayFont.name : fontFamily
   readonly property real u: Style.spaceReal(1)
+  // Screen-relative scale for the big shows: 1 up to a 1400 px wide 16:9
+  // stage, more past that (about 1.1 at 1536 x 864, 1.46 at 2048 x 1152).
+  readonly property real stage: Math.max(1, Math.min(scene.width, scene.height * 16 / 9) / 1400)
+
+  // Plays sounds/<name>.ogg through pw-play, fire-and-forget. Nothing when
+  // sounds are off, and a missing file is skipped quietly. The script is a
+  // constant: the path and volume only ever land in its arguments.
+  function cue(name) {
+    if (!overlay.soundsOn || !/^[a-z]+$/.test(name)) return
+    var volume = Math.max(0, Math.min(1, Number(overlay.soundVolume) || 0))
+    if (volume <= 0) return
+    try {
+      var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
+      if (url.indexOf("file://") !== 0) return
+      Quickshell.execDetached(["/bin/sh", "-c",
+        '[ -f "$1" ] || exit 0; exec /usr/bin/timeout -k 1 10 /usr/bin/pw-play --volume "$2" -- "$1" >/dev/null 2>&1',
+        "quickpuff-cue", decodeURIComponent(url.slice(7)), volume.toFixed(2)])
+    } catch (e) {}
+  }
 
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
@@ -60,9 +85,12 @@ PanelWindow {
   mask: Region {}
 
   Loader {
+    id: scene
     anchors.fill: parent
     active: overlay.armed
     sourceComponent: overlay.animations[overlay.animation] || null
+    // The signature chime, as every show starts.
+    onLoaded: overlay.cue("ready")
     onStatusChanged: if (status === Loader.Null || status === Loader.Error) overlay.finished()
   }
 
@@ -100,8 +128,10 @@ PanelWindow {
   component RocketLaunch: Item {
     id: show
 
-    readonly property real s: overlay.u * 1.25
-    readonly property real padX: Math.max(90 * s, Math.min(width - 90 * s, overlay.originX))
+    // About 1.3x the old size on a 1536 x 864 screen, growing with bigger ones.
+    readonly property real s: overlay.u * 1.5 * overlay.stage
+    // Kept clear of the screen edges, the countdown on the right included.
+    readonly property real padX: Math.max(90 * s, Math.min(width - 115 * s, overlay.originX))
     readonly property real padY: overlay.barAtTop ? overlay.barEdge + 250 * s : overlay.barEdge - 40 * s
 
     // Timeline state, driven by `script` below.
@@ -160,23 +190,23 @@ PanelWindow {
       }
       PauseAnimation { duration: 160 }
       // Countdown.
-      ScriptAction { script: { show.count = "3"; show.smoking = true } }
+      ScriptAction { script: { show.count = "3"; show.smoking = true; overlay.cue("count") } }
       ParallelAnimation {
         NumberAnimation { target: show; property: "flame"; to: 0.35; duration: 560 }
         NumberAnimation { target: show; property: "shake"; to: 0.8; duration: 560 }
       }
-      ScriptAction { script: show.count = "2" }
+      ScriptAction { script: { show.count = "2"; overlay.cue("count") } }
       ParallelAnimation {
         NumberAnimation { target: show; property: "flame"; to: 0.65; duration: 560 }
         NumberAnimation { target: show; property: "shake"; to: 1.6; duration: 560 }
       }
-      ScriptAction { script: show.count = "1" }
+      ScriptAction { script: { show.count = "1"; overlay.cue("count") } }
       ParallelAnimation {
         NumberAnimation { target: show; property: "flame"; to: 1; duration: 560 }
         NumberAnimation { target: show; property: "shake"; to: 2.6; duration: 560 }
       }
       // Liftoff.
-      ScriptAction { script: { show.count = ""; readyText.pop() } }
+      ScriptAction { script: { show.count = ""; readyText.pop(); overlay.cue("liftoff") } }
       ParallelAnimation {
         NumberAnimation { target: show; property: "liftY"; to: -(show.padY + 420 * show.s); duration: 1450; easing.type: Easing.InCubic }
         NumberAnimation { target: show; property: "flameStretch"; to: 2.4; duration: 800; easing.type: Easing.OutCubic }
@@ -538,6 +568,7 @@ PanelWindow {
       y: show.padY - 60 * show.s * 1.25
       count: 12
       reach: 34 * show.s
+      dot: 3.2 * show.s
       hues: ["#ffffff", "#cfe8ff", overlay.tint]
     }
     Sparks {
@@ -546,6 +577,7 @@ PanelWindow {
       y: show.padY - 74 * show.s * 1.25
       count: 9
       reach: 24 * show.s
+      dot: 3.2 * show.s
       hues: ["#ffffff", "#f6d32d", overlay.tint]
     }
 
@@ -604,46 +636,89 @@ PanelWindow {
   }
 
   // ============================================================== Confetti
-  // Puffco confetti burst from the widget: logo-shaped chips, streamers and
-  // a few tiny Peaks in shades of the profile's colour, gold and white. Each
-  // piece flips like paper, slows in the air and sways as it settles.
+  // Puffco confetti: a burst from the widget, then two cannons firing up from
+  // the bottom corners toward the middle, so the whole screen fills. Logo-
+  // shaped chips, streamers and a few tiny Peaks in shades of the profile's
+  // colour, gold and white. Each piece flips like paper, slows in the air and
+  // sways as it settles.
   component ConfettiRain: Item {
     id: rain
 
     property real t: 0
-    readonly property real s: overlay.u
-    readonly property real dur: 4.2
+    readonly property real dur: 5.2
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage * 1.3
     readonly property real dir: overlay.barAtTop ? 1 : -1
+    // Pieces from the widget, then from each cannon (under 200 in all), and
+    // when the cannons go off (s).
+    readonly property int burstCount: 76
+    readonly property int cannonCount: 58
+    readonly property real cannonAt: 0.3
+    readonly property bool cannonsOut: now >= cannonAt
     readonly property var hues: [overlay.tint, Qt.lighter(overlay.tint, 1.5), Qt.darker(overlay.tint, 1.3), "#ffd76a", "#ffffff", Qt.lighter(overlay.tint, 1.2)]
 
-    NumberAnimation on t { from: 0; to: 1; duration: 4200; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("pop")
+    onCannonsOutChanged: if (cannonsOut) overlay.cue("pop")
+
+    NumberAnimation on t { from: 0; to: 1; duration: 5200; running: true; onFinished: overlay.finished() }
+
+    // A soft flash in each corner as the cannons fire.
+    Repeater {
+      model: 2
+
+      SoftGlow {
+        required property int index
+        readonly property real f: Math.max(0, Math.min(1, (rain.now - rain.cannonAt) / 0.5))
+        visible: f > 0 && f < 1
+        hue: Qt.lighter(overlay.tint, 1.6)
+        x: (index ? rain.width : 0) - 50
+        y: rain.height - 50
+        scale: rain.height * (0.3 + 0.4 * f) / 100
+        opacity: 0.6 * (1 - f)
+      }
+    }
 
     Repeater {
-      model: 84
+      model: rain.burstCount + 2 * rain.cannonCount
 
       Item {
         id: bit
         required property int index
+        // Fired by the widget (0), the left cannon (1) or the right one (2).
+        readonly property int firedBy: index < rain.burstCount ? 0 : (index < rain.burstCount + rain.cannonCount ? 1 : 2)
         // Every 12th piece is a tiny Peak, every 3rd a streamer, the rest
         // logo chips. Deterministic spread so each burst looks full.
         readonly property int kind: index % 12 === 0 ? 2 : (index % 3 === 0 ? 1 : 0)
-        readonly property real angle: (((index * 61) % 100) / 100 - 0.5) * 2.6
-        readonly property real speed: (380 + (index * 47) % 520) * rain.s
-        readonly property real vx: Math.sin(angle) * speed
-        readonly property real vy: Math.cos(angle) * speed * rain.dir
+        readonly property real spread: ((index * 61) % 100) / 100 - 0.5
+        readonly property real power: ((index * 47) % 100) / 100
         readonly property real drag: 2.2 + (index % 5) * 0.25
-        readonly property real fall: (90 + (index * 29) % 80) * rain.s
+        // Where it starts, and where a cannon aims: just short of the middle,
+        // a quarter of the way down. Drag stops each piece at speed / drag,
+        // so the cannon pieces land from halfway there to a little past it.
+        readonly property real ox: firedBy === 0 ? overlay.originX : (firedBy === 1 ? 0 : rain.width)
+        readonly property real oy: firedBy === 0 ? overlay.barEdge : rain.height
+        readonly property real aimX: rain.width * (firedBy === 1 ? 0.46 : 0.54) - ox
+        readonly property real aimY: rain.height * 0.25 - oy
+        readonly property real angle: firedBy === 0 ? spread * 2.6 : Math.atan2(aimY, aimX) + spread * 0.6
+        readonly property real speed: firedBy === 0
+          ? rain.height * (0.5 + 0.75 * power)
+          : Math.sqrt(aimX * aimX + aimY * aimY) * drag * (0.5 + 0.8 * power)
+        readonly property real vx: firedBy === 0 ? Math.sin(angle) * speed : Math.cos(angle) * speed
+        readonly property real vy: firedBy === 0 ? Math.cos(angle) * speed * rain.dir : Math.sin(angle) * speed
+        readonly property real fall: rain.height * (0.1 + ((index * 29) % 80) / 900)
         readonly property real sway: (14 + (index * 17) % 26) * rain.s
         readonly property real phase: index * 1.7
         readonly property real flipRate: 5 + (index * 13) % 9
-        readonly property real tau: rain.t * rain.dur
+        // Seconds since this piece was fired.
+        readonly property real tau: Math.max(0, rain.now - (firedBy === 0 ? 0 : rain.cannonAt))
         readonly property real slow: (1 - Math.exp(-drag * tau)) / drag
         readonly property color hue: rain.hues[index % rain.hues.length]
 
-        x: overlay.originX + vx * slow + Math.sin(tau * 3 + phase) * sway * Math.min(1, tau)
-        y: overlay.barEdge + vy * slow + fall * tau
+        visible: firedBy === 0 || rain.cannonsOut
+        x: ox + vx * slow + Math.sin(tau * 3 + phase) * sway * Math.min(1, tau)
+        y: oy + vy * slow + fall * tau
         rotation: (index % 2 ? 1 : -1) * (120 + (index * 37) % 240) * tau
-        opacity: rain.t < 0.75 ? 1 : (1 - rain.t) / 0.25
+        opacity: rain.t < 0.78 ? 1 : (1 - rain.t) / 0.22
         // Paper flip: the piece turns edge-on and back.
         transform: Scale { xScale: Math.cos(bit.tau * bit.flipRate + bit.phase) }
 
@@ -674,34 +749,38 @@ PanelWindow {
           }
         }
 
-        // A tiny Peak Pro, tumbling.
-        Shape {
-          visible: bit.kind === 2
-          width: 80
-          height: 160
-          scale: rain.s * 0.24
-          transformOrigin: Item.TopLeft
-          ShapePath {
-            strokeColor: Util.alpha("white", 0.6)
-            strokeWidth: 3
-            fillColor: Util.alpha(bit.hue, 0.35)
-            PathSvg { path: "M12.5,1.5 Q17,0.2 21.5,0.8 L46,93 L9.5,108 Z" }
-          }
-          ShapePath {
-            strokeColor: "transparent"
-            fillColor: "#2a2a2d"
-            PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C67,107 61,110 56,113.5 C60,126 63,140 64.5,152 Q65,158 60,158 L9.5,158 Q6.5,158 6.5,155 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
-          }
-          ShapePath {
-            strokeColor: "transparent"
-            fillColor: "#55555a"
-            PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C52,116 24,136 6.5,151 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
-          }
-          ShapePath {
-            strokeColor: bit.hue
-            strokeWidth: 4
-            fillColor: "transparent"
-            PathSvg { path: "M8.5,157 L61,157" }
+        // A tiny Peak Pro, tumbling (only built for the pieces that are one).
+        Loader {
+          active: bit.kind === 2
+          sourceComponent: Component {
+            Shape {
+              width: 80
+              height: 160
+              scale: rain.s * 0.24
+              transformOrigin: Item.TopLeft
+              ShapePath {
+                strokeColor: Util.alpha("white", 0.6)
+                strokeWidth: 3
+                fillColor: Util.alpha(bit.hue, 0.35)
+                PathSvg { path: "M12.5,1.5 Q17,0.2 21.5,0.8 L46,93 L9.5,108 Z" }
+              }
+              ShapePath {
+                strokeColor: "transparent"
+                fillColor: "#2a2a2d"
+                PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C67,107 61,110 56,113.5 C60,126 63,140 64.5,152 Q65,158 60,158 L9.5,158 Q6.5,158 6.5,155 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
+              }
+              ShapePath {
+                strokeColor: "transparent"
+                fillColor: "#55555a"
+                PathSvg { path: "M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C52,116 24,136 6.5,151 L6.5,111.5 Q6.5,109.8 8.5,109 Z" }
+              }
+              ShapePath {
+                strokeColor: bit.hue
+                strokeWidth: 4
+                fillColor: "transparent"
+                PathSvg { path: "M8.5,157 L61,157" }
+              }
+            }
           }
         }
       }
@@ -718,6 +797,7 @@ PanelWindow {
     readonly property real s: overlay.u
     readonly property var hues: [overlay.tint, Qt.lighter(overlay.tint, 1.45), Qt.darker(overlay.tint, 1.35)]
 
+    Component.onCompleted: overlay.cue("bubbles")
     NumberAnimation on t { from: 0; to: 1; duration: 6000; running: true; onFinished: overlay.finished() }
 
     Item {
@@ -771,6 +851,7 @@ PanelWindow {
       { "hue": String(overlay.tint), "base": 0.31, "amp": 0.04, "k": 2.8, "speed": 1.3, "height": 0.16 }
     ]
 
+    Component.onCompleted: overlay.cue("shimmer")
     NumberAnimation on t { from: 0; to: 1; duration: 6500; running: true; onFinished: overlay.finished() }
 
     Item {
@@ -812,226 +893,487 @@ PanelWindow {
   }
 
   // ============================================================ Fireworks
-  // Shells whistle up from the bottom of the screen and burst in the
-  // profile's colour, gold and white, sparks falling as they fade.
+  // Ten shells whistle up across the whole width of the screen and burst in
+  // the profile's colour, gold and white: big peonies with a white heart,
+  // and two gold willows whose sparks droop and linger. Every spark drags a
+  // streak along its flight; each burst flashes and lights up the sky, with
+  // a bloom over it all.
   component Fireworks: Item {
     id: fw
 
     property real t: 0
-    readonly property real s: overlay.u
-    readonly property int shells: 6
-    readonly property int sparks: 36
-    readonly property var hues: [overlay.tint, "#ffd76a", "#ffffff", Qt.lighter(overlay.tint, 1.5), Color.accent, "#ff6ad5"]
+    readonly property real dur: 6.2
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property var hues: [overlay.tint, "#ffd76a", "#ffffff", Qt.lighter(overlay.tint, 1.5), Color.accent, "#ff6ad5", "#7fe3ff"]
+    // The show, in launch order: where each shell bursts (fractions of the
+    // screen), when it leaves the ground (s), how far its sparks fly (a
+    // fraction of the screen height), its colour (into `hues`), and whether
+    // it is a gold willow. Everything is out by about 5.9 s.
+    readonly property var plan: [
+      { "x": 0.50, "y": 0.30, "at": 0.05, "size": 0.26, "hue": 0, "willow": false },
+      { "x": 0.18, "y": 0.36, "at": 0.45, "size": 0.21, "hue": 5, "willow": false },
+      { "x": 0.80, "y": 0.26, "at": 0.85, "size": 0.24, "hue": 1, "willow": true },
+      { "x": 0.34, "y": 0.22, "at": 1.25, "size": 0.19, "hue": 6, "willow": false },
+      { "x": 0.64, "y": 0.38, "at": 1.55, "size": 0.23, "hue": 3, "willow": false },
+      { "x": 0.10, "y": 0.28, "at": 1.90, "size": 0.18, "hue": 2, "willow": false },
+      { "x": 0.42, "y": 0.24, "at": 2.25, "size": 0.27, "hue": 1, "willow": true },
+      { "x": 0.90, "y": 0.34, "at": 2.45, "size": 0.22, "hue": 4, "willow": false },
+      { "x": 0.26, "y": 0.42, "at": 2.85, "size": 0.20, "hue": 5, "willow": false },
+      { "x": 0.70, "y": 0.20, "at": 3.15, "size": 0.28, "hue": 0, "willow": false }
+    ]
 
-    NumberAnimation on t { from: 0; to: 1; duration: 5200; running: true; onFinished: overlay.finished() }
+    // Seconds a shell takes to climb (higher bursts take longer), and its
+    // colour.
+    function climbTime(spec) { return 0.55 + 0.55 * (1 - spec.y) }
+    function hueOf(spec) { return spec.willow ? "#ffc861" : fw.hues[spec.hue] }
 
-    // Bloom behind the sparks.
-    MultiEffect {
-      anchors.fill: night
-      source: night
-      blurEnabled: true
-      blurMax: 40
-      blur: 0.8
-      brightness: 0.25
+    NumberAnimation on t { from: 0; to: 1; duration: 6200; running: true; onFinished: overlay.finished() }
+
+    // Each burst lights up the sky round it. Drawn straight rather than
+    // through the bloom, which would band the wide, faint edge.
+    Repeater {
+      model: fw.plan.length
+
+      SoftGlow {
+        required property int index
+        readonly property var spec: fw.plan[index]
+        readonly property real f: Math.max(0, Math.min(1, (fw.now - spec.at - fw.climbTime(spec)) / 0.9))
+        visible: f > 0 && f < 1
+        hue: fw.hueOf(spec)
+        x: fw.width * spec.x - 50
+        y: fw.height * spec.y - 50
+        scale: fw.height * spec.size * 4 / 100
+        opacity: 0.2 * (1 - f) * (1 - f)
+      }
     }
 
+    // Drawn only through the effects below. Everything in here hides with
+    // opacity, never `visible`: a child that starts hidden inside a hidden
+    // layer source never shows up in the layer, even once it is visible.
     Item {
       id: night
       anchors.fill: parent
+      visible: false
       layer.enabled: true
 
-    Repeater {
-      model: fw.shells
-      Item {
-        id: shell
-        required property int index
-        readonly property real start: index * 0.12
-        readonly property real rise: Math.max(0, Math.min(1, (fw.t - start) / 0.14))
-        readonly property real burst: Math.max(0, Math.min(1, (fw.t - start - 0.14) / 0.4))
-        readonly property real bx: fw.width * (0.15 + ((index * 41) % 70) / 100)
-        readonly property real by: fw.height * (0.22 + ((index * 29) % 30) / 100)
-        readonly property color hue: fw.hues[index % fw.hues.length]
+      Repeater {
+        model: fw.plan.length
 
-        // The rising shell and its trail.
-        Rectangle {
-          visible: shell.rise > 0 && shell.rise < 1
-          width: 4 * fw.s
-          height: 22 * fw.s
-          radius: width / 2
-          x: shell.bx - width / 2
-          y: fw.height - (fw.height - shell.by) * (1 - Math.pow(1 - shell.rise, 2))
-          gradient: Gradient {
-            GradientStop { position: 0.0; color: "#ffffff" }
-            GradientStop { position: 1.0; color: Util.alpha(shell.hue, 0) }
-          }
-        }
+        Item {
+          id: shell
+          required property int index
+          readonly property var spec: fw.plan[index]
+          readonly property bool willow: spec.willow
+          readonly property int count: willow ? 32 : 40
+          // Seconds to climb, and for the sparks to burn out.
+          readonly property real climb: fw.climbTime(spec)
+          readonly property real life: willow ? 2.7 : 1.8
+          readonly property real bx: fw.width * spec.x
+          readonly property real by: fw.height * spec.y
+          // Launched a little to one side, so the climb leans.
+          readonly property real lx: bx + (index % 2 ? 1 : -1) * fw.width * 0.035
+          readonly property real radius: fw.height * spec.size
+          readonly property color hue: fw.hueOf(spec)
+          readonly property bool launched: fw.now >= spec.at
+          // 0..1 through the climb, then seconds since the burst. Both hold
+          // still outside their stretch, so idle sparks cost nothing.
+          readonly property real rise: Math.max(0, Math.min(1, (fw.now - spec.at) / climb))
+          readonly property real age: Math.max(0, Math.min(life, fw.now - spec.at - climb))
+          readonly property real burst: age / life
+          // Flight, shared by every spark of the shell: air drag slows the
+          // spread (the share of its reach covered, and how fast, per second)
+          // and gravity pulls toward a terminal fall speed.
+          readonly property real drag: willow ? 2.4 : 3.6
+          readonly property real spread: 1 - Math.exp(-drag * age)
+          readonly property real speed: drag * Math.exp(-drag * age)
+          readonly property real fallMax: fw.height * (willow ? 0.17 : 0.09)
+          readonly property real drop: fallMax * (age - (1 - Math.exp(-1.5 * age)) / 1.5)
+          readonly property real dropRate: fallMax * (1 - Math.exp(-1.5 * age))
+          // Each spark's streak: seconds of its flight, and the longest.
+          readonly property real trail: willow ? 0.28 : 0.1
+          readonly property real maxTrail: fw.height * (willow ? 0.14 : 0.1)
+          // Willows linger; late in the burst a third of the sparks glitter.
+          readonly property real fade: willow
+            ? 1 - Math.pow(Math.max(0, burst - 0.35) / 0.65, 1.6)
+            : 1 - Math.pow(Math.max(0, burst - 0.5) / 0.5, 1.3)
+          readonly property real glitter: Math.max(0, Math.min(1, (burst - 0.4) / 0.2))
 
-        // The flash at the burst.
-        Rectangle {
-          visible: shell.burst > 0 && shell.burst < 0.3
-          width: 120 * fw.s * shell.burst / 0.3
-          height: width
-          radius: width / 2
-          x: shell.bx - width / 2
-          y: shell.by - height / 2
-          color: Util.alpha(shell.hue, 0.35 * (1 - shell.burst / 0.3))
-        }
+          onLaunchedChanged: if (launched) overlay.cue("firework")
 
-        Repeater {
-          model: fw.sparks
+          // The climbing shell: a hot head and its trail, leaning with it.
           Rectangle {
-            required property int index
-            readonly property real angle: index / fw.sparks * Math.PI * 2 + shell.index
-            readonly property real reach: (230 + (index * 37) % 110) * fw.s
-            readonly property real e: 1 - Math.pow(1 - shell.burst, 3)
-            visible: shell.burst > 0 && shell.burst < 1
-            // A short streak pointing along its flight.
-            width: (index % 3 ? 7 : 10) * fw.s * (1 + 2.2 * (1 - shell.burst))
-            height: (index % 3 ? 4 : 6) * fw.s
-            radius: height / 2
-            rotation: angle * 180 / Math.PI
-            x: shell.bx + Math.cos(angle) * reach * e - width / 2
-            y: shell.by + Math.sin(angle) * reach * e + 120 * fw.s * shell.burst * shell.burst - height / 2
-            color: index % 5 === 0 ? "#ffffff" : shell.hue
-            opacity: 1 - shell.burst
+            readonly property real e: 1 - Math.pow(1 - shell.rise, 2)
+            opacity: shell.rise > 0 && shell.rise < 1 ? 1 : 0
+            width: 4 * fw.s
+            height: (40 + 70 * (1 - shell.rise)) * fw.s
+            radius: width / 2
+            transformOrigin: Item.Top
+            rotation: Math.atan2(shell.bx - shell.lx, fw.height - shell.by) * 180 / Math.PI
+            x: shell.lx + (shell.bx - shell.lx) * e - width / 2
+            y: fw.height - (fw.height - shell.by) * e
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: "#ffffff" }
+              GradientStop { position: 0.12; color: Qt.lighter(shell.hue, 1.4) }
+              GradientStop { position: 1.0; color: Util.alpha(shell.hue, 0) }
+            }
+          }
+
+          // The bang: a white-hot core.
+          SoftGlow {
+            readonly property real f: Math.min(1, shell.age / 0.3)
+            hue: "#ffffff"
+            x: shell.bx - 50
+            y: shell.by - 50
+            scale: shell.radius * (0.4 + 0.6 * f) / 100
+            opacity: shell.age > 0 ? 1 - f : 0
+          }
+
+          // The sparks.
+          Item {
+            opacity: shell.age > 0 && shell.age < shell.life ? 1 : 0
+
+            Repeater {
+              model: shell.count
+
+              Rectangle {
+                id: spark
+                required property int index
+                readonly property real angle: index / shell.count * Math.PI * 2 + shell.index * 0.7 + ((index * 53) % 10) / 40
+                // A ball of sparks seen from the side: most fly out near the
+                // rim, the rest toward or away from us and look shorter.
+                readonly property real depth: Math.sin((((index * 7) % shell.count) + 0.5) / shell.count * Math.PI)
+                // Every 5th spark of a peony is its heart: a tight inner ring.
+                readonly property bool heart: !shell.willow && index % 5 === 0
+                readonly property real reach: shell.radius * (heart ? 0.4 : depth * (0.88 + ((index * 37) % 25) / 100))
+                readonly property real dx: Math.cos(angle) * reach
+                readonly property real dy: Math.sin(angle) * reach
+                readonly property real vx: dx * shell.speed
+                readonly property real vy: dy * shell.speed + shell.dropRate
+                readonly property color hue: shell.willow
+                  ? (index % 3 ? "#ffc861" : "#ff9f43")
+                  : (heart ? (shell.spec.hue === 2 ? "#ffd76a" : "#ffffff") : (index % 6 === 0 ? Qt.lighter(shell.hue, 1.35) : shell.hue))
+
+                // A streak behind the spark, its head at the spark and turned
+                // along its flight: long while fast, a dot once it hangs.
+                height: (heart ? 2.8 : 3.6) * fw.s
+                width: Math.min(shell.maxTrail, Math.max(height, Math.sqrt(vx * vx + vy * vy) * shell.trail))
+                radius: height / 2
+                transformOrigin: Item.Right
+                rotation: Math.atan2(vy, vx) * 180 / Math.PI
+                x: shell.bx + dx * shell.spread - width
+                y: shell.by + dy * shell.spread + shell.drop - height / 2
+                opacity: shell.fade * (index % 3 ? 1 : 1 - shell.glitter * (Math.sin(shell.age * 41 + index * 1.7) > 0 ? 0.85 : 0))
+                gradient: Gradient {
+                  orientation: Gradient.Horizontal
+                  GradientStop { position: 0.0; color: Util.alpha(spark.hue, 0) }
+                  GradientStop { position: 0.65; color: spark.hue }
+                  GradientStop { position: 1.0; color: shell.willow ? "#fff4d6" : "#ffffff" }
+                }
+              }
+            }
           }
         }
       }
     }
+
+    // The bloom, then the sparks themselves, crisp, on top of it.
+    MultiEffect {
+      anchors.fill: night
+      source: night
+      blurEnabled: true
+      blurMax: 48
+      blur: 0.9
+      brightness: 0.3
+      opacity: 0.9
+    }
+    MultiEffect {
+      anchors.fill: night
+      source: night
+      blurEnabled: true
+      blurMax: 4
+      blur: 0.25
     }
   }
 
   // ============================================================ Smoke rings
-  // Soft rings puff out from the widget one after another, widening and
-  // drifting off as they thin out.
+  // Big soft rings puff out from the widget one after another, widening,
+  // rocking and drifting apart as they thin out.
   component SmokeRings: Item {
     id: smoke
 
     property real t: 0
-    readonly property real s: overlay.u
+    readonly property real s: overlay.u * overlay.stage
     readonly property real dir: overlay.barAtTop ? 1 : -1
+    readonly property color hue: Qt.tint("#f2f2f6", Util.alpha(overlay.tint, 0.3))
 
-    NumberAnimation on t { from: 0; to: 1; duration: 5600; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("smoke")
+    NumberAnimation on t { from: 0; to: 1; duration: 6400; running: true; onFinished: overlay.finished() }
 
     Repeater {
-      model: 5
-      Item {
+      model: 7
+
+      // A circle filled with a soft donut of smoke, in place of a blur (a
+      // radial gradient: a faint haze inside, densest round the ring's line,
+      // gone at the edge), stretched into a rocking ellipse. Drawn at
+      // 100 x 100 and sized by its transform, so it never re-tessellates.
+      Shape {
         id: ring
         required property int index
-        readonly property real p: Math.max(0, Math.min(1, (smoke.t - index * 0.13) / 0.55))
-        readonly property real e: 1 - Math.pow(1 - p, 2)
+        readonly property real p: Math.max(0, Math.min(1, (smoke.t - index * 0.075) / 0.5))
+        readonly property real e: 1 - Math.pow(1 - p, 1.6)
+        // How wide it is, how flat (breathing a little as it rolls), and
+        // which way this one drifts, so the rings fan out.
+        readonly property real across: (120 + 520 * e) * smoke.s
+        readonly property real flat: 0.36 + 0.04 * Math.sin(p * Math.PI * 3 + index)
+        readonly property real drift: ((index * 5) % 7 - 3) * 34 * smoke.s
         visible: p > 0 && p < 1
-        width: (70 + 300 * e) * smoke.s
-        height: width * 0.36
-        x: Math.max(0, Math.min(smoke.width - width, overlay.originX - width / 2 + Math.sin(p * Math.PI * 2 + index) * 50 * smoke.s))
-        y: overlay.barEdge + smoke.dir * (50 + 520 * e) * smoke.s - height / 2
-        opacity: 1 - p * p
+        width: 100
+        height: 100
+        x: Math.max(across / 2, Math.min(smoke.width - across / 2, overlay.originX + drift * e + Math.sin(p * Math.PI * 2 + index) * 60 * smoke.s)) - 50
+        y: overlay.barEdge + smoke.dir * (60 * smoke.s + smoke.height * 0.6 * e) - 50
+        opacity: Math.min(1, p / 0.08) * Math.pow(1 - p, 1.3)
+        transform: [
+          Scale { origin.x: 50; origin.y: 50; xScale: ring.across / 100; yScale: ring.across * ring.flat / 100 },
+          Rotation { origin.x: 50; origin.y: 50; angle: 7 * Math.sin(ring.p * Math.PI * 2 + ring.index * 1.3) }
+        ]
 
-        // A few soft layers in place of a blur: a dense core band with
-        // fainter, wider halos either side, so it reads as smoke.
-        Repeater {
-          model: 4
-          Rectangle {
-            required property int index
-            readonly property real spread: index * 5 * smoke.s
-            x: -spread
-            y: -spread * 0.6
-            width: ring.width + spread * 2
-            height: ring.height + spread * 1.2
-            radius: height / 2
-            color: "transparent"
-            border.width: Math.max(2, ring.height * (0.22 - index * 0.03))
-            border.color: Util.alpha(Qt.tint("#f2f2f6", Util.alpha(overlay.tint, 0.3)), [0.55, 0.3, 0.16, 0.08][index])
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: 50; centerY: 50; centerRadius: 50
+            focalX: 50; focalY: 50
+            GradientStop { position: 0.0; color: Util.alpha(smoke.hue, 0.05) }
+            GradientStop { position: 0.42; color: Util.alpha(smoke.hue, 0.05) }
+            GradientStop { position: 0.6; color: Util.alpha(smoke.hue, 0.2) }
+            GradientStop { position: 0.72; color: Util.alpha(smoke.hue, 0.44) }
+            GradientStop { position: 0.84; color: Util.alpha(smoke.hue, 0.44) }
+            GradientStop { position: 0.94; color: Util.alpha(smoke.hue, 0.14) }
+            GradientStop { position: 1.0; color: Util.alpha(smoke.hue, 0) }
           }
+          PathSvg { path: "M0,50 A50,50 0 1,0 100,50 A50,50 0 1,0 0,50 Z" }
         }
       }
     }
   }
 
   // ============================================================ Neon sign
-  // A neon Peak and READY buzz on in the middle of the screen, flicker,
-  // glow for a moment, then switch off.
+  // A neon Peak and READY buzz on in the middle of a dimmed screen, flicker,
+  // hum for a moment over their reflection on the floor, then switch off.
   component NeonSign: Item {
     id: neon
 
     property real t: 0
-    readonly property real s: overlay.u * 1.6
-    readonly property color glow: Qt.lighter(overlay.tint, 1.25)
-    // On, off, on, stutter, steady... then a fade.
+    readonly property real dur: 5.0
+    readonly property real s: overlay.u * 1.45 * overlay.stage
+    // Coloured glass round a white-hot core.
+    readonly property color glass: Qt.lighter(overlay.tint, 1.3)
+    readonly property color core: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.25))
+    // On, off, on, stutter, steady... then a fade. Timed in milliseconds, so
+    // the flicker-on keeps its rhythm (and stays with its sound).
     readonly property real power: {
-      var k = t * 50
-      if (k < 1) return 0
-      if (k < 2) return 1
-      if (k < 3) return 0.15
-      if (k < 4.5) return 1
-      if (k < 5) return 0.4
-      if (t > 0.8) return Math.max(0, (1 - t) / 0.2)
-      return 0.92 + 0.08 * Math.sin(t * 90)
+      var ms = t * dur * 1000
+      if (ms < 90) return 0
+      if (ms < 180) return 1
+      if (ms < 270) return 0.15
+      if (ms < 405) return 1
+      if (ms < 450) return 0.4
+      if (t > 0.82) return Math.max(0, (1 - t) / 0.18)
+      return 0.92 + 0.08 * Math.sin(t * dur * 20)
+    }
+    // The room going dark behind it as the sign catches, and back as it
+    // switches off.
+    readonly property real dark: Math.max(0, Math.min(1, t * dur / 0.45, (1 - t) / 0.18))
+    // The panel's Peak drawing, in tube.
+    readonly property string peakPath: "M12.5,1.5 Q17,0.2 21.5,0.8 L46,93 L9.5,108 Z M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C67,107 61,110 56,113.5 C60,126 63,140 64.5,152 Q65,158 60,158 L9.5,158 Q6.5,158 6.5,155 L6.5,111.5 Q6.5,109.8 8.5,109 Z M72.3,104.4 C52,116 24,136 6.8,150.6 M51.5,80.5 H69 Q71,80.5 71,82.5 V89 Q71,91 69,91 H51.5 Q49.5,91 49.5,89 V82.5 Q49.5,80.5 51.5,80.5 Z"
+
+    Component.onCompleted: overlay.cue("neon")
+    NumberAnimation on t { from: 0; to: 1; duration: 5000; running: true; onFinished: overlay.finished() }
+
+    TextMetrics {
+      id: word
+      font.family: overlay.displayFamily
+      font.pixelSize: 110 * neon.s
+      font.weight: Font.DemiBold
+      font.letterSpacing: 6 * neon.s
+      text: "READY"
     }
 
-    NumberAnimation on t { from: 0; to: 1; duration: 4500; running: true; onFinished: overlay.finished() }
+    // Dim the desktop while the sign is lit, so it pops on any wallpaper.
+    Rectangle {
+      anchors.fill: parent
+      color: "black"
+      opacity: 0.32 * neon.dark
+    }
 
     Item {
       id: sign
-      readonly property real k: height / 166
-      width: 80 * k + 30 * neon.s + readyWord.implicitWidth + 20 * neon.s
-      height: 230 * neon.s
+      // Room round the tubes for the glow and the reflection's blur.
+      readonly property real pad: 28 * neon.s
+      // The Peak drawing's scale, the tube and its core, and the floor line
+      // the Peak stands on.
+      readonly property real k: 230 * neon.s / 166
+      readonly property real tube: 2.6 * k
+      readonly property real wire: 0.9 * k
+      readonly property real floor: pad + 161 * k
+      width: 2 * pad + 80 * k + 30 * neon.s + word.advanceWidth + 10 * neon.s
+      height: 2 * pad + 230 * neon.s
       anchors.centerIn: parent
+      anchors.verticalCenterOffset: -neon.height * 0.06
       visible: false
       layer.enabled: true
 
       // The Peak, in tube outline (the same paths as the panel's drawing).
       Shape {
-        x: 3 * sign.k
-        y: 3 * sign.k
+        x: sign.pad + 3 * sign.k
+        y: sign.pad + 3 * sign.k
         width: 80
         height: 160
         transform: Scale { xScale: sign.k; yScale: sign.k }
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-          strokeColor: neon.glow
-          strokeWidth: 1.8
+          strokeColor: neon.glass
+          strokeWidth: 2.6
           fillColor: "transparent"
           joinStyle: ShapePath.RoundJoin
           capStyle: ShapePath.RoundCap
-          PathSvg { path: "M12.5,1.5 Q17,0.2 21.5,0.8 L46,93 L9.5,108 Z M8.5,109 L46,93 L70,93 Q72.5,93 72.5,95.5 L72.5,104 C67,107 61,110 56,113.5 C60,126 63,140 64.5,152 Q65,158 60,158 L9.5,158 Q6.5,158 6.5,155 L6.5,111.5 Q6.5,109.8 8.5,109 Z M72.3,104.4 C52,116 24,136 6.8,150.6 M51.5,80.5 H69 Q71,80.5 71,82.5 V89 Q71,91 69,91 H51.5 Q49.5,91 49.5,89 V82.5 Q49.5,80.5 51.5,80.5 Z" }
+          PathSvg { path: neon.peakPath }
+        }
+        ShapePath {
+          strokeColor: neon.core
+          strokeWidth: 0.9
+          fillColor: "transparent"
+          joinStyle: ShapePath.RoundJoin
+          capStyle: ShapePath.RoundCap
+          PathSvg { path: neon.peakPath }
         }
       }
 
-      Text {
-        id: readyWord
-        x: 80 * sign.k + 30 * neon.s
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: 30 * neon.s
-        textFormat: Text.PlainText
-        text: "READY"
-        color: "transparent"
-        style: Text.Outline
-        styleColor: neon.glow
-        font.family: overlay.displayFamily
-        font.pixelSize: 110 * neon.s
-        font.weight: Font.DemiBold
-        font.letterSpacing: 6 * neon.s
+      // READY, its letters outlined in the same tube, their middle 60% of
+      // the way down the sign (PathText puts the top of the letters at y).
+      Shape {
+        x: sign.pad + 80 * sign.k + 30 * neon.s
+        y: sign.pad + 138 * neon.s - word.tightBoundingRect.height / 2
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: neon.glass
+          strokeWidth: sign.tube
+          fillColor: "transparent"
+          joinStyle: ShapePath.RoundJoin
+          capStyle: ShapePath.RoundCap
+          PathText { text: word.text; font: word.font }
+        }
+        ShapePath {
+          strokeColor: neon.core
+          strokeWidth: sign.wire
+          fillColor: "transparent"
+          joinStyle: ShapePath.RoundJoin
+          capStyle: ShapePath.RoundCap
+          PathText { text: word.text; font: word.font }
+        }
       }
     }
 
-    // The glow, then the tubes on top of it.
+    // Its light pooling on the floor...
+    SoftGlow {
+      hue: neon.glass
+      x: sign.x + sign.width / 2 - 50
+      y: sign.y + sign.floor - 50
+      transform: Scale { origin.x: 50; origin.y: 50; xScale: sign.width * 1.2 / 100; yScale: sign.height * 0.3 / 100 }
+      opacity: 0.16 * neon.power
+    }
+
+    // ...and its reflection: flipped about the floor, squashed, blurred and
+    // fading out away from the sign. The fade is drawn unflipped: clear at
+    // the top, solid at the floor, nothing below it.
+    Item {
+      id: floorFade
+      width: sign.width
+      height: sign.height
+      visible: false
+      layer.enabled: true
+
+      Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: "transparent" }
+          GradientStop { position: sign.floor / sign.height * 0.55; color: Util.alpha("white", 0.2) }
+          GradientStop { position: sign.floor / sign.height; color: "white" }
+          GradientStop { position: Math.min(1, sign.floor / sign.height + 0.01); color: "transparent" }
+        }
+      }
+    }
+    MultiEffect {
+      anchors.fill: sign
+      source: sign
+      transform: Scale { origin.y: sign.floor; yScale: -0.5 }
+      autoPaddingEnabled: false
+      blurEnabled: true
+      blurMax: 24
+      blur: 0.6
+      maskEnabled: true
+      maskSource: floorFade
+      opacity: 0.3 * neon.power
+    }
+
+    // The glow, wide to tight, and the tubes, crisp, on top of it.
     MultiEffect {
       anchors.fill: sign
       source: sign
       blurEnabled: true
       blurMax: 64
       blur: 1
-      brightness: 0.3
-      opacity: neon.power * 0.9
+      brightness: 0.5
+      opacity: neon.power
     }
     MultiEffect {
       anchors.fill: sign
       source: sign
       blurEnabled: true
-      blurMax: 8
-      blur: 0.3
+      blurMax: 32
+      blur: 0.8
+      brightness: 0.35
       opacity: neon.power
+    }
+    MultiEffect {
+      anchors.fill: sign
+      source: sign
+      blurEnabled: true
+      blurMax: 12
+      blur: 0.6
+      brightness: 0.2
+      opacity: neon.power
+    }
+    MultiEffect {
+      anchors.fill: sign
+      source: sign
+      blurEnabled: true
+      blurMax: 4
+      blur: 0.2
+      opacity: neon.power
+    }
+  }
+
+  // A soft round glow: `hue` in the middle, fading out to the edge. Drawn at
+  // 100 x 100 and sized with `scale`, so it never has to re-tessellate.
+  component SoftGlow: Shape {
+    id: glow
+
+    property color hue: "white"
+
+    width: 100
+    height: 100
+
+    ShapePath {
+      strokeColor: "transparent"
+      fillGradient: RadialGradient {
+        centerX: 50; centerY: 50; centerRadius: 50
+        focalX: 50; focalY: 50
+        GradientStop { position: 0.0; color: glow.hue }
+        GradientStop { position: 0.3; color: Util.alpha(glow.hue, 0.5) }
+        GradientStop { position: 1.0; color: Util.alpha(glow.hue, 0) }
+      }
+      PathSvg { path: "M0,50 A50,50 0 1,0 100,50 A50,50 0 1,0 0,50 Z" }
     }
   }
 
@@ -1041,6 +1383,7 @@ PanelWindow {
 
     property int count: 10
     property real reach: 30
+    property real dot: 4 * overlay.u
     property var hues: ["#ffffff"]
     property real t: 0
 
@@ -1064,7 +1407,7 @@ PanelWindow {
       Rectangle {
         required property int index
         readonly property real angle: index / sparks.count * Math.PI * 2
-        width: 4 * overlay.u
+        width: sparks.dot
         height: width
         radius: width / 2
         x: Math.cos(angle) * sparks.reach * sparks.t - width / 2
