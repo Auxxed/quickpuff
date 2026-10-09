@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import "components"
 
 // A celebration when the Peak reaches temperature, played over the desktop
 // from the bar widget. Full-screen, transparent and click-through (the empty
@@ -54,20 +55,17 @@ PanelWindow {
   // stage, more past that (about 1.1 at 1536 x 864, 1.46 at 2048 x 1152).
   readonly property real stage: Math.max(1, Math.min(scene.width, scene.height * 16 / 9) / 1400)
 
-  // Plays sounds/<name>.ogg through pw-play, fire-and-forget. Nothing when
-  // sounds are off, and a missing file is skipped quietly. The script is a
-  // constant: the path and volume only ever land in its arguments.
+  // Plays sounds/<name>.ogg (one of the bundled cues) through pw-play,
+  // fire-and-forget, stopped after ten seconds at most. Nothing when sounds
+  // are off.
   function cue(name) {
     if (!overlay.soundsOn || !/^[a-z]+$/.test(name)) return
     var volume = Math.max(0, Math.min(1, Number(overlay.soundVolume) || 0))
     if (volume <= 0) return
-    try {
-      var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
-      if (url.indexOf("file://") !== 0) return
-      Quickshell.execDetached(["/bin/sh", "-c",
-        '[ -f "$1" ] || exit 0; exec /usr/bin/timeout -k 1 10 /usr/bin/pw-play --volume "$2" -- "$1" >/dev/null 2>&1',
-        "quickpuff-cue", decodeURIComponent(url.slice(7)), volume.toFixed(2)])
-    } catch (e) {}
+    var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
+    if (url.indexOf("file://") !== 0) return
+    Quickshell.execDetached(["/usr/bin/timeout", "-k", "1", "10", "/usr/bin/pw-play",
+      "--volume", volume.toFixed(2), "--", decodeURIComponent(url.slice(7))])
   }
 
   color: "transparent"
@@ -88,28 +86,31 @@ PanelWindow {
     id: scene
     anchors.fill: parent
     active: overlay.armed
-    sourceComponent: overlay.animations[overlay.animation] || null
+    // Only a name in the registry; anything else plays nothing.
+    sourceComponent: Object.prototype.hasOwnProperty.call(overlay.animations, overlay.animation) ? overlay.animations[overlay.animation] : null
     // The signature chime, as every show starts.
     onLoaded: overlay.cue("ready")
     onStatusChanged: if (status === Loader.Null || status === Loader.Error) overlay.finished()
   }
 
-  Process {
-    running: true
-    command: ["bash", "-lc", "quickpuff --json status"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var d = JSON.parse(text)
-          var list = d.profiles || []
-          for (var i = 0; i < list.length; i++) {
-            if (Number(list[i].index) !== Number(d.current_profile)) continue
-            var hex = String(list[i].color || "")
-            if (/^#[0-9a-fA-F]{6}$/.test(hex)) overlay.tint = hex
-          }
-        } catch (e) {}
-      }
+  QuickpuffCli { id: cli }
+
+  BoundedProcess {
+    id: statusProc
+    maxBytes: 262144
+    timeoutMs: 8000
+    Component.onCompleted: launch(cli.argv(["--json", "status"]))
+    onDone: function(ok, code, out) {
+      if (!ok) return
+      try {
+        var d = JSON.parse(out)
+        var list = Array.isArray(d.profiles) && d.profiles.length <= 8 ? d.profiles : []
+        for (var i = 0; i < list.length; i++) {
+          if (Number(list[i].index) !== Number(d.current_profile)) continue
+          var hex = String(list[i].color || "")
+          if (/^#[0-9a-fA-F]{6}$/.test(hex)) overlay.tint = hex
+        }
+      } catch (e) {}
     }
   }
 

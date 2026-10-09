@@ -31,7 +31,7 @@ TextField {
   horizontalPadding: Style.spacing.xs
   verticalPadding: 0
   inputMethodHints: digitsOnly ? Qt.ImhDigitsOnly : Qt.ImhNone
-  maximumLength: maxChars > 0 ? maxChars : 32767
+  maximumLength: maxChars > 0 ? maxChars : 64
   placeholderText: digitsOnly ? "" : "Name"
 
   Component.onCompleted: {

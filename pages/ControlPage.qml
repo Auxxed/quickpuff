@@ -32,7 +32,7 @@ Column {
       solid: !panel.heating
       emphasized: !panel.heating
       pulse: panel.preheating
-      onActivated: panel.run("quickpuff heat start")
+      onActivated: panel.runArgv(["quickpuff", "heat", "start"])
     }
 
     ActionButton {
@@ -42,7 +42,7 @@ Column {
       glyph: "\uf0e7"
       tall: true
       tint: Qt.tint(Color.accent, Util.alpha(panel.urgent, 0.5))
-      onActivated: panel.run("quickpuff heat boost")
+      onActivated: panel.runArgv(["quickpuff", "heat", "boost"])
     }
 
     ActionButton {
@@ -53,7 +53,7 @@ Column {
       tall: true
       tint: panel.urgent
       emphasized: panel.heating || panel.cooling
-      onActivated: panel.run("quickpuff heat stop")
+      onActivated: panel.runArgv(["quickpuff", "heat", "stop"])
     }
   }
 

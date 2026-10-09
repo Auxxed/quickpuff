@@ -219,7 +219,7 @@ Column {
       width: parent.width
       label: "Battery level"
       glyph: "\uf240"
-      onActivated: panel.run("quickpuff battery")
+      onActivated: panel.runArgv(["quickpuff", "battery"])
     }
   }
 

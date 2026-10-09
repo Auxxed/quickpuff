@@ -63,9 +63,10 @@ Column {
       panel: usagePages.panel
       width: parent.width
       visible: panel.sessionList !== null && panel.sessionTotal > panel.sessionList.length
+        && panel.sessionList.length < panel.maxSessions
       label: panel.sessionsLoading ? "Loading\u2026" : "Show more"
       onActivated: {
-        panel.sessionLimit += 30
+        panel.sessionLimit = Math.min(panel.maxSessions, panel.sessionLimit + 30)
         panel.loadSessions()
       }
     }

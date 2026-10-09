@@ -11,8 +11,8 @@ reverse-engineered Lorax Bluetooth protocol, so a Puffco firmware update can
 break it. It works with the **Peak Pro only**; Proxy and Pivot are rejected.
 
 <p align="center">
-  <img src="screenshots/demo.gif" width="376" alt="Starting a heat cycle in the QuickPuff panel: heating up, ready, and the session countdown"><br>
-  <sub><a href="https://github.com/Auxxed/quickpuff/releases/download/v0.5.1/quickpuff-demo.mp4">Watch the full 3-minute demo (MP4, 5 MB)</a></sub>
+  <img src="screenshots/demo.webp" width="376" alt="Starting a heat cycle in the QuickPuff panel: heating up, ready, and the session countdown"><br>
+  <sub><a href="https://github.com/Auxxed/quickpuff/releases/download/v0.7.0/quickpuff-0.7.0-trailer.mp4">Watch the 48-second trailer</a> (Showtime, sounds and the ready shows) · <a href="https://github.com/Auxxed/quickpuff/releases/download/v0.5.1/quickpuff-demo.mp4">the full 3-minute demo</a> (MP4, 5 MB)</sub>
 </p>
 
 <table>
@@ -93,10 +93,31 @@ bar.
 ~/.config/omarchy/plugins/auxxed.quickpuff/uninstall.sh
 ```
 
-This stops the daemon, removes the `quickpuff` command and the Python environment,
-and removes the plugin. Your dab history (`~/.local/share/quickpuff/dabs.json`) and
-settings (`~/.config/quickpuff`) are kept; delete those folders too for a clean
-removal.
+Use this rather than `omarchy plugin remove auxxed.quickpuff` on its own, which
+takes away only the plugin folder and leaves the daemon running. `uninstall.sh`:
+
+- stops and disables the `quickpuff-daemon` user service and deletes its unit,
+  `~/.config/systemd/user/quickpuff-daemon.service`
+- deletes the `quickpuff` command (`~/.local/bin/quickpuff`) and the Python
+  environment (`~/.local/share/quickpuff/venv`)
+- removes the plugin with `omarchy plugin remove auxxed.quickpuff`
+
+It deletes each of those only after checking it's the one `install.sh` made,
+and says so when it leaves something alone. It keeps:
+
+- your dab history, fault logs and saved lights in `~/.local/share/quickpuff`
+  (`dabs.json`, `lights.json`, `cycles.json` and `devices/`)
+- your settings in `~/.config/quickpuff`
+- the Bluetooth pairing with your Peak, which BlueZ holds
+  (`bluetoothctl remove <address>` forgets it)
+
+Delete those two folders too for a clean removal. The daemon's socket and log
+are in `$XDG_RUNTIME_DIR`, which is cleared when you log out.
+
+Already removed the plugin with `omarchy plugin remove`? Run
+`systemctl --user disable --now quickpuff-daemon.service`, then delete
+`~/.config/systemd/user/quickpuff-daemon.service`, `~/.local/bin/quickpuff`
+and `~/.local/share/quickpuff/venv`.
 
 ## Using it
 
@@ -343,7 +364,8 @@ Each tab is a file in `pages/`, and each reusable piece is a file in
 (`panel: root`) and reads state and calls actions through it; a bare
 `root: root` would bind to itself. Ready animations live in
 `ReadyOverlay.qml`: add a component there, then list it in `READY_ANIMATIONS`
-in `src/quickpuff/constants.py` and in the panel's `readyAnimations`.
+in `src/quickpuff/constants.py` and in the `readyAnimations` of both the panel
+and `BarWidget.qml` (which plays only names on its list).
 
 Keep virtual environments outside the checkout: `omarchy plugin` refuses
 symlinks inside a plugin folder, and a venv is full of them.

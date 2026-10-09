@@ -5,6 +5,7 @@ import qs.Ui
 import qs.Commons
 import "components"
 import "pages"
+import "components/plain.js" as Plain
 
 Panel {
   id: root
@@ -52,24 +53,20 @@ Panel {
       return
     }
     refreshPending = false
-    statusProc.running = true
+    statusProc.launch(cli.argv(["--json", "status"]))
   }
 
-  // Fire a control command detached through a login shell — the same path
-  // bar.run() takes internally — then re-poll shortly after, since the daemon
+  QuickpuffCli { id: cli }
+
+  // Fire a control command, then re-poll shortly after, since the daemon
   // usually reflects a heat/profile change well before the poll interval
-  // would catch it. Going straight to Util avoids depending on `bar`, which
-  // is null for a beat right after the panel is created.
-  function run(cmd) {
-    Util.execDetached(cmd)
-    kickTimer.restart()
-  }
-
-  // Same, for commands carrying user-entered text: argv never passes through
-  // a shell that could re-tokenize it, so a profile named `$(reboot)` is a
-  // profile name and nothing else.
+  // would catch it. argv[0] is "quickpuff" and the rest reach the CLI as
+  // argv, never through a shell, so a profile named `$(reboot)` is a profile
+  // name and nothing else. Typed text always follows `--` or an `=`, so it
+  // can't be read as an option either.
   function runArgv(argv) {
-    Util.execArgv(argv)
+    if (argv.length === 0 || argv[0] !== "quickpuff") return
+    cli.fire(argv.slice(1))
     kickTimer.restart()
   }
 
@@ -261,7 +258,7 @@ Panel {
   function togglePreserve() {
     var next = !preserveOn
     pendingPreserve = next
-    run("quickpuff preserve " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "preserve", next ? "on" : "off"])
   }
 
   // The Peak refuses to heat near 5%; warn a little before that.
@@ -465,20 +462,23 @@ Panel {
   function stepDailyLimit(delta) {
     var next = Math.max(0, Math.min(50, dailyLimit + delta))
     pendingDailyLimit = next
-    run("quickpuff limit " + next)
+    runArgv(["quickpuff", "limit", String(next)])
   }
 
   function toggleRecap() {
     var next = !recapOn
     pendingRecap = next
-    run("quickpuff recap " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "recap", next ? "on" : "off"])
   }
+
+  // History pages in 30 at a time, up to this many.
+  readonly property int maxSessions: 600
 
   function loadSessions() {
     if (sessionsProc.running) return
     sessionsLoading = true
-    sessionsProc.command = ["bash", "-lc", "quickpuff --json sessions --limit \"$1\"", "quickpuff-sessions", String(sessionLimit)]
-    sessionsProc.running = true
+    sessionsProc.limit = Math.max(1, Math.min(maxSessions, sessionLimit))
+    sessionsProc.launch(cli.argv(["--json", "sessions", "--limit", String(sessionsProc.limit)]))
   }
 
   function editNote(key) {
@@ -502,7 +502,7 @@ Panel {
     copy[key] = text
     pendingNotes = copy
     closeNote(key)
-    runArgv(text === "" ? ["quickpuff", "note", key] : ["quickpuff", "note", key, text])
+    runArgv(text === "" ? ["quickpuff", "note", "--", key] : ["quickpuff", "note", "--", key, text])
     noteReload.restart()
   }
 
@@ -554,7 +554,7 @@ Panel {
   ]
 
   function applyLightColor(hex) {
-    if (currentProfile < 0) return
+    if (currentProfile < 0 || !/^#[0-9a-fA-F]{6}$/.test(hex)) return
     pendingLantern = true
     // A steady colour replaces any cycle on this profile.
     cycleApplyTimer.stop()
@@ -672,7 +672,7 @@ Panel {
     pendingLightId = String(id)
     pendingCycleOn = undefined
     pendingLantern = true
-    runArgv(["quickpuff", "light", "apply", String(id), "--index", String(currentProfile)])
+    runArgv(["quickpuff", "light", "apply", "--index", String(currentProfile), "--", String(id)])
     clearPendingTimer.restart()
   }
 
@@ -685,7 +685,7 @@ Panel {
     namingLight = false
     refocusPanel()
     if (name === "" || currentProfile < 0) return
-    runArgv(["quickpuff", "light", "save", name, "--index", String(currentProfile)])
+    runArgv(["quickpuff", "light", "save", "--index", String(currentProfile), "--", name])
   }
 
   function renameSavedLight(id, raw) {
@@ -693,7 +693,7 @@ Panel {
     renamingLight = ""
     refocusPanel()
     if (name === "") return
-    runArgv(["quickpuff", "light", "rename", String(id), name])
+    runArgv(["quickpuff", "light", "rename", "--", String(id), name])
   }
 
   function deleteSavedLight(id) {
@@ -703,7 +703,7 @@ Panel {
       return
     }
     confirmDeleteLight = ""
-    runArgv(["quickpuff", "light", "delete", String(id)])
+    runArgv(["quickpuff", "light", "delete", "--", String(id)])
   }
 
   function refocusPanel() {
@@ -836,7 +836,7 @@ Panel {
     for (var key in pendingVapors) updated[key] = pendingVapors[key]
     updated[currentProfile] = name
     pendingVapors = updated
-    runArgv(["quickpuff", "profile", String(currentProfile), "--vapor", name])
+    runArgv(["quickpuff", "profile", String(currentProfile), "--vapor=" + name])
     clearPendingTimer.restart()
   }
 
@@ -934,7 +934,7 @@ Panel {
     cancelEdit()
     if (name === "") return
     pendingDeviceName = name
-    runArgv(["quickpuff", "name", name])
+    runArgv(["quickpuff", "name", "--", name])
     clearPendingTimer.restart()
   }
 
@@ -978,8 +978,10 @@ Panel {
     return isFinite(n) ? Math.round(n) : 80
   }
 
+  // Runs install.sh in a terminal you can watch. The script is a constant;
+  // its path only ever lands in $1.
   function finishSetup() {
-    Util.execArgv(["xdg-terminal-exec", "bash", "-c",
+    Quickshell.execDetached(["/usr/bin/xdg-terminal-exec", "/usr/bin/bash", "-c",
       "\"$1\"; echo; read -rp 'Press Enter to close'", "quickpuff-setup", root.installScript])
   }
 
@@ -987,7 +989,7 @@ Panel {
     if (faultProc.running) return
     faultsLoading = true
     faultError = false
-    faultProc.running = true
+    faultProc.launch(cli.argv(["--json", "faults"]))
   }
 
   function closeFaults() {
@@ -1011,21 +1013,20 @@ Panel {
   // the last Peak. Runs as a process so a failure can say why.
   function connectDevice(mac) {
     if (connectProc.running) return
+    // A Bluetooth address or nothing; anything else isn't from the scan.
+    if (mac && !/^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/.test(String(mac))) return
     connecting = true
     connectError = ""
     connectFailed = false
     connectGiveUp.restart()
-    connectProc.command = mac
-      ? ["bash", "-lc", "quickpuff connect --mac \"$1\"", "quickpuff-connect", String(mac)]
-      : ["bash", "-lc", "quickpuff connect"]
-    connectProc.running = true
+    connectProc.launch(cli.argv(mac ? ["connect", "--mac=" + String(mac)] : ["connect"]))
   }
 
   function findPeaks() {
     if (scanProc.running) return
     scanning = true
     connectFailed = false
-    scanProc.running = true
+    scanProc.launch(cli.argv(["--json", "scan", "--timeout", "8"]))
   }
 
   // Frees the Peak's single Bluetooth link for the phone app or another
@@ -1033,38 +1034,38 @@ Panel {
   function disconnectDevice() {
     connecting = false
     connectGiveUp.stop()
-    run("quickpuff disconnect")
+    runArgv(["quickpuff", "disconnect"])
   }
 
   function toggleStealth() {
     var next = !stealthOn
     pendingStealth = next
-    run("quickpuff stealth " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "stealth", next ? "on" : "off"])
   }
 
   function toggleLantern() {
     var next = !lanternOn
     pendingLantern = next
-    run("quickpuff lantern " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "lantern", next ? "on" : "off"])
   }
 
   function toggleQtip() {
     var next = !qtipOn
     pendingQtip = next
-    run("quickpuff qtip " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "qtip", next ? "on" : "off"])
   }
 
   function toggleSurprise() {
     var next = !surpriseOn
     pendingSurprise = next
-    run("quickpuff surprise " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "surprise", next ? "on" : "off"])
   }
 
   function toggleSaver() {
     var next = !saverOn
     pendingSaver = next
     if (next) pendingLantern = false
-    run("quickpuff saver " + (next ? "on" : "off"))
+    runArgv(["quickpuff", "saver", next ? "on" : "off"])
   }
 
   function clampCleanEvery(value) {
@@ -1084,7 +1085,7 @@ Panel {
 
   function markCleaned() {
     pendingCleanEvery = -1
-    run("quickpuff clean done")
+    runArgv(["quickpuff", "clean", "done"])
   }
 
   function setBrightness(value) {
@@ -1454,7 +1455,7 @@ Panel {
     for (var key in pendingNames) updated[key] = pendingNames[key]
     updated[index] = name
     pendingNames = updated
-    runArgv(["quickpuff", "profile", String(index), "--name", name])
+    runArgv(["quickpuff", "profile", String(index), "--name=" + name])
     clearPendingTimer.restart()
   }
 
@@ -1478,63 +1479,77 @@ Panel {
     setPendingTime(index, clampTime(typed))
   }
 
-  Process {
+  // `quickpuff --json status` waits on the daemon RPC; past 8s the run is
+  // stopped so a stalled BLE call can't wedge the panel, and it's retried.
+  // A status is about 8 KiB; 256 KiB is far past anything the daemon sends.
+  BoundedProcess {
     id: statusProc
-    command: ["bash", "-lc", "quickpuff --json status"]
-    onRunningChanged: {
-      if (running) {
-        stallTimer.restart()
+    maxBytes: 262144
+    timeoutMs: 8000
+    onDone: function(ok, code, out, err) {
+      if (code === -1) {
+        root.refreshPending = true
         return
       }
-      stallTimer.stop()
-      if (root.refreshPending) root.refresh()
-    }
-    onExited: function(exitCode) {
-      if (exitCode !== 127) return
-      root.needsSetup = true
-      root.statusData = ({})
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (!/daemon is not running/i.test(text)) return
+      if (code === 127 || /daemon is not running/i.test(err)) {
         root.needsSetup = true
         root.statusData = ({})
+        return
       }
+      if (ok) root.applyStatus(out)
     }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (!text) return
-        try {
-          root.statusData = JSON.parse(text)
-          root.timerSampledAt = Date.now()
-          root.nowMs = root.timerSampledAt
-          root.needsSetup = false
-          if (root.statusData.connected === true) {
-            root.connecting = false
-            connectGiveUp.stop()
-            root.connectError = ""
-            root.connectFailed = false
-            root.nearbyPeaks = null
-          }
-        } catch (e) {
-          // leave last-known state on a parse failure
-        }
-      }
+    onRunningChanged: if (!running && root.refreshPending) root.refresh()
+  }
+
+  // Every list the pages draw, and the most the daemon ever sends of it.
+  function statusFits(d) {
+    if (!d || typeof d !== "object" || Array.isArray(d)) return false
+    var tel = d.telemetry && typeof d.telemetry === "object" ? d.telemetry : ({})
+    var trace = d.heat_trace && typeof d.heat_trace === "object" ? d.heat_trace : ({})
+    var lists = [[d.profiles, 8], [d.saved_lights, 40], [trace.points, 360], [tel.daily, 400],
+                 [tel.weekdays, 7], [tel.hours, 24], [tel.colors, 64], [tel.profiles, 16]]
+    for (var i = 0; i < lists.length; i++) {
+      var v = lists[i][0]
+      if (v !== undefined && v !== null && (!Array.isArray(v) || v.length > lists[i][1])) return false
+    }
+    return true
+  }
+
+  // A status that doesn't fit is dropped whole (not trimmed into shape), and
+  // the last good one stays up.
+  function applyStatus(out) {
+    if (!out) return
+    var data
+    try {
+      data = JSON.parse(out)
+    } catch (e) {
+      return
+    }
+    if (!statusFits(data)) return
+    root.statusData = data
+    root.timerSampledAt = Date.now()
+    root.nowMs = root.timerSampledAt
+    root.needsSetup = false
+    root.applyUi(data.ui)
+    if (data.connected === true) {
+      root.connecting = false
+      connectGiveUp.stop()
+      root.connectError = ""
+      root.connectFailed = false
+      root.nearbyPeaks = null
     }
   }
 
-  // `quickpuff --json status` waits on the daemon RPC; give up past that so a
-  // stalled BLE call can't wedge the panel (a running Process can't be
-  // re-run) and let the next poll retry.
-  Timer {
-    id: stallTimer
-    interval: 8000
-    onTriggered: {
-      statusProc.running = false
-      root.refreshPending = true
-    }
+  // The panel's own settings, as the CLI reads them from config.json (the
+  // shell doesn't read that file itself). Each is checked against what it
+  // can be; anything else leaves the current value.
+  function applyUi(ui) {
+    if (!ui || typeof ui !== "object") return
+    if (ui.units === "F" || ui.units === "C") root.units = ui.units
+    for (var i = 0; i < readyAnimations.length; i++)
+      if (readyAnimations[i].value === ui.ready_animation) root.configReadyAnimation = ui.ready_animation
+    if (["off", "corner", "stage"].indexOf(ui.showtime) >= 0) root.configShowtime = ui.showtime
+    if (typeof ui.sounds === "boolean") root.configSounds = ui.sounds
   }
 
   Timer {
@@ -1556,51 +1571,51 @@ Panel {
     onTriggered: root.commitBrightness()
   }
 
-  Process {
+  // Connecting can take a scan and a pairing; it gets as long as the
+  // Connecting… state does. Only stderr's last line is used, as the reason.
+  BoundedProcess {
     id: connectProc
-    command: ["bash", "-lc", "quickpuff connect"]
-    onExited: function(exitCode) {
+    maxBytes: 16384
+    timeoutMs: 100000
+    onDone: function(ok, code, out, err) {
       root.connecting = false
       connectGiveUp.stop()
       kickTimer.restart()
-      if (exitCode !== 0) root.connectFailed = true
-    }
-    stderr: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var lines = String(text || "").trim().split("\n")
-        var last = lines[lines.length - 1]
-        if (last === "") return
-        // Two or more Peaks in range: list them instead of guessing.
-        if (/Multiple Peak/i.test(last)) {
-          root.connectError = "More than one Peak is nearby. Pick yours below."
-          root.findPeaks()
-          return
-        }
-        root.connectError = last
+      if (!ok) root.connectFailed = true
+      var lines = String(err || "").trim().split("\n")
+      var last = Plain.plain(lines[lines.length - 1], 200).trim()
+      if (last === "") return
+      // Two or more Peaks in range: list them instead of guessing.
+      if (/Multiple Peak/i.test(last)) {
+        root.connectError = "More than one Peak is nearby. Pick yours below."
+        Qt.callLater(root.findPeaks)
+        return
       }
+      root.connectError = last
     }
   }
 
-  Process {
+  // About 230 bytes a dab; 1 MiB covers maxSessions many times over. More
+  // dabs than were asked for means the answer isn't the daemon's.
+  BoundedProcess {
     id: sessionsProc
-    command: ["bash", "-lc", "quickpuff --json sessions --limit 30"]
-    onExited: function(exitCode) {
+    property int limit: 30
+    maxBytes: 1048576
+    timeoutMs: 15000
+    onDone: function(ok, code, out) {
       root.sessionsLoading = false
-      if (exitCode !== 0 && root.sessionList === null) root.sessionList = []
-    }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var result = JSON.parse(text)
-          root.sessionList = result.sessions || []
-          root.sessionTotal = Number(result.total) || 0
-          root.pendingNotes = ({})
-        } catch (e) {
-          if (root.sessionList === null) root.sessionList = []
-        }
+      var result = null
+      if (ok) {
+        try { result = JSON.parse(out) } catch (e) {}
       }
+      var list = result && typeof result === "object" ? Plain.list(result.sessions, sessionsProc.limit) : null
+      if (list === null) {
+        if (root.sessionList === null) root.sessionList = []
+        return
+      }
+      root.sessionList = list
+      root.sessionTotal = Number(result.total) || 0
+      root.pendingNotes = ({})
     }
   }
 
@@ -1611,22 +1626,19 @@ Panel {
     onTriggered: root.loadSessions()
   }
 
-  Process {
+  // An 8 s scan; a room with more than 32 Peaks in it is not a real room.
+  BoundedProcess {
     id: scanProc
-    command: ["bash", "-lc", "quickpuff --json scan --timeout 8"]
-    onExited: function(exitCode) {
+    maxBytes: 65536
+    timeoutMs: 20000
+    onDone: function(ok, code, out) {
       root.scanning = false
-      if (exitCode !== 0 && root.nearbyPeaks === null) root.nearbyPeaks = []
-    }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          root.nearbyPeaks = JSON.parse(text).devices || []
-        } catch (e) {
-          root.nearbyPeaks = []
-        }
+      var result = null
+      if (ok) {
+        try { result = JSON.parse(out) } catch (e) {}
       }
+      var list = result && typeof result === "object" ? Plain.list(result.devices, 32) : null
+      root.nearbyPeaks = list === null ? [] : list
     }
   }
 
@@ -1674,24 +1686,27 @@ Panel {
     onTriggered: root.refresh()
   }
 
-  Process {
+  // The Peak's fault log: a few hundred entries at most.
+  BoundedProcess {
     id: faultProc
-    command: ["bash", "-lc", "quickpuff --json faults"]
-    onExited: function(exitCode) {
+    maxBytes: 262144
+    timeoutMs: 20000
+    onDone: function(ok, code, out) {
       root.faultsLoading = false
-      if (exitCode !== 0) root.faultError = true
-    }
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        if (!text) return
-        try {
-          root.faultLog = JSON.parse(text).faults || []
-          root.faultShown = 8
-        } catch (e) {
-          root.faultError = true
-        }
+      if (!ok) {
+        root.faultError = true
+        return
       }
+      if (!out) return
+      var result = null
+      try { result = JSON.parse(out) } catch (e) {}
+      var list = result && typeof result === "object" ? Plain.list(result.faults, 512) : null
+      if (list === null) {
+        root.faultError = true
+        return
+      }
+      root.faultLog = list
+      root.faultShown = 8
     }
   }
 
@@ -1702,23 +1717,15 @@ Panel {
     onTriggered: root.nowMs = Date.now()
   }
 
+  // Watches config.json only, never reads it: a change re-polls the status,
+  // whose `ui` block carries the settings (see applyUi).
   FileView {
-    path: Quickshell.env("HOME") + "/.config/quickpuff/config.json"
+    path: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/quickpuff/config.json"
+    preload: false
+    blockAllReads: true
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      try {
-        var cfg = JSON.parse(text() || "{}")
-        root.units = String(cfg.units || "F").toUpperCase() === "C" ? "C" : "F"
-        root.configReadyAnimation = String(cfg.ready_animation || "rocket")
-        root.configShowtime = String(cfg.showtime || "corner")
-        root.configSounds = cfg.sounds !== false
-      } catch (e) {
-        root.units = "F"
-      }
-    }
-    onLoadFailed: root.units = "F"
+    onFileChanged: root.refresh()
   }
 
   // Layer-shell panel rather than PopupCard: the tiles have text fields, and
@@ -2103,14 +2110,14 @@ Panel {
         anchors.fill: parent
         z: 10
         opened: root.confirmPowerOff
-        message: "Power off " + root.deviceName + "?"
+        message: "Power off " + Plain.plain(root.deviceName, 32) + "?"
         confirmText: "Power off"
         foreground: root.foreground
         fontFamily: root.fontFamily
         onCanceled: root.confirmPowerOff = false
         onConfirmed: {
           root.confirmPowerOff = false
-          root.run("quickpuff off")
+          root.runArgv(["quickpuff", "off"])
         }
       }
     }

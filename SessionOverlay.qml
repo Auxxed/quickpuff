@@ -73,16 +73,15 @@ PanelWindow {
   property real nowMs: Date.now()
   property int prevState: -1
 
-  Socket {
+  DaemonFeed {
     id: feed
-    path: (Quickshell.env("QUICKPUFF_SOCKET") || (Quickshell.env("XDG_RUNTIME_DIR") + "/quickpuff.sock"))
-    connected: show.armed
-    parser: SplitParser {
-      onRead: function(line) {
-        var msg
-        try { msg = JSON.parse(line) } catch (e) { return }
-        if (msg && msg.event === "status" && msg.data) show.ingest(msg.data)
-      }
+    connected: show.armed && socketPath !== ""
+    onStatus: function(d) {
+      // The lists drawn here, no longer than the daemon ever sends them.
+      var trace = d.heat_trace && typeof d.heat_trace === "object" ? d.heat_trace.points : undefined
+      if (trace !== undefined && trace !== null && (!Array.isArray(trace) || trace.length > 360)) return
+      if (d.profiles !== undefined && d.profiles !== null && (!Array.isArray(d.profiles) || d.profiles.length > 8)) return
+      show.ingest(d)
     }
   }
 
@@ -252,10 +251,16 @@ PanelWindow {
     onTriggered: { show.phase = "done"; outAnim.start() }
   }
 
+  // Plays sounds/<name>.ogg (one of the bundled cues) through pw-play,
+  // fire-and-forget, stopped after ten seconds at most.
   function cue(name) {
-    if (!soundsOn) return
-    var path = String(Qt.resolvedUrl("sounds/" + name + ".ogg")).replace(/^file:\/\//, "")
-    Quickshell.execDetached(["pw-play", "--volume", String(Math.max(0, Math.min(1, soundVolume))), path])
+    if (!soundsOn || !/^[a-z]+$/.test(name)) return
+    var volume = Math.max(0, Math.min(1, Number(soundVolume) || 0))
+    if (volume <= 0) return
+    var url = String(Qt.resolvedUrl("sounds/" + name + ".ogg"))
+    if (url.indexOf("file://") !== 0) return
+    Quickshell.execDetached(["/usr/bin/timeout", "-k", "1", "10", "/usr/bin/pw-play",
+      "--volume", volume.toFixed(2), "--", decodeURIComponent(url.slice(7))])
   }
 
   // ------------------------------------------------------------ launch
@@ -683,6 +688,7 @@ PanelWindow {
           Text {
             id: demoText
             anchors.centerIn: parent
+            textFormat: Text.PlainText
             text: "DEMO"
             color: Util.alpha("#ffffff", 0.6)
             font.family: show.display
