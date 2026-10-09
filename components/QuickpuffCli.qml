@@ -5,7 +5,8 @@ import Quickshell
 // made, running this checkout's src. No login shell and no PATH lookup, and
 // Python starts isolated (-I), so PYTHONPATH and the like can't put other
 // code first. The boot line is a constant; the src path and every argument
-// travel in argv.
+// travel in argv. --no-start: the shell never starts the daemon itself; the
+// systemd unit install.sh set up runs it.
 QtObject {
   readonly property string python: {
     var data = Quickshell.env("XDG_DATA_HOME") || ""
@@ -16,7 +17,7 @@ QtObject {
   readonly property string boot: "import sys; sys.path.insert(0, sys.argv.pop(1)); from quickpuff.cli import main; main()"
 
   function argv(args) {
-    return [python, "-I", "-c", boot, src].concat(args.map(String))
+    return [python, "-I", "-c", boot, src, "--no-start"].concat(args.map(String))
   }
 
   // Fire-and-forget, for the controls: nothing is read back, and a call that
