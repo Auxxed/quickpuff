@@ -23,7 +23,11 @@ async def rpc(
     sock = path or socket_path()
     if not sock.exists():
         raise DaemonNotRunning(f"QuickPuff daemon is not running ({sock})")
-    reader, writer = await asyncio.open_unix_connection(str(sock))
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(sock))
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        # Gone since the check, or a socket left behind by a daemon that was killed.
+        raise DaemonNotRunning(f"QuickPuff daemon is not running ({sock})") from exc
     try:
         writer.write((json.dumps({"id": 1, "cmd": cmd, "args": args or {}}) + "\n").encode())
         await writer.drain()
@@ -37,6 +41,10 @@ async def rpc(
             if not msg.get("ok"):
                 raise RuntimeError(msg.get("error") or "command failed")
             return msg.get("result")
+    except ConnectionError as exc:
+        # Turned away (another user's daemon, or too many clients), or it
+        # went away mid-reply.
+        raise RuntimeError("Daemon closed the connection") from exc
     finally:
         writer.close()
         try:

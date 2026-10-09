@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import re
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .constants import READY_ANIMATIONS, SHOWTIME_MODES
-from .paths import DEFAULTS, load_config
+from .paths import DEFAULTS, MONITOR_NAME, clamp_volume, load_config, save_config, ui_settings
+from .paths import switched_on as _switched_on
 from .rpc import DaemonNotRunning, rpc
 from .service import ensure_daemon
 
@@ -20,14 +21,35 @@ def _ensure() -> None:
     try:
         ensure_daemon()
     except RuntimeError as exc:
+        # RuntimeDirMissing included: it says what to do about it.
         raise SystemExit(str(exc)) from exc
+    except OSError as exc:
+        raise SystemExit(f"Couldn't start the QuickPuff daemon: {exc}") from exc
+
+
+def _save_settings(cfg: dict[str, Any]) -> None:
+    """save_config, with a refusal (config.json is a link, someone else's,
+    oversized...) said plainly instead of as a traceback."""
+    try:
+        save_config(cfg)
+    except OSError as exc:
+        raise SystemExit(f"Settings not saved: {exc}") from exc
+
+
+# Off with --no-start: talk to a daemon that is already running and never
+# start one. The bar widget and panel pass it on every call, so polling them
+# can't bring back a daemon someone stopped or disabled on purpose.
+_start_daemon = True
 
 
 async def call(cmd: str, args: dict | None = None, timeout: float = 30.0) -> Any:
-    _ensure()
+    if _start_daemon:
+        _ensure()
     try:
         return await rpc(cmd, args, timeout=timeout)
     except DaemonNotRunning as exc:
+        if not _start_daemon:
+            raise SystemExit(f"{exc}. Start it with: systemctl --user start quickpuff-daemon") from exc
         raise SystemExit(str(exc)) from exc
     except RuntimeError as exc:
         # A command the daemon refused (not connected, bad value): say why, no traceback.
@@ -102,7 +124,9 @@ def _profile_temp(data: dict, units: str) -> str:
 
 def print_status(data: dict, as_json: bool, units: str | None = None) -> None:
     if as_json:
-        print(json.dumps(data, indent=2, default=str))
+        # The shell's settings from this process's own read of config.json,
+        # over any the daemon sent: one still running older code sends none.
+        print(json.dumps({**data, "ui": ui_settings()}, indent=2, default=str))
         return
     units = units or load_config().get("units") or "F"
     if not data.get("connected"):
@@ -243,7 +267,10 @@ def _seconds_left(data: dict) -> int | None:
 
 
 def print_waybar(data: dict) -> None:
-    units = load_config().get("units") or "F"
+    # Read here rather than taken from the daemon, for the same reason as in
+    # print_status; waybar ignores the extra key.
+    ui = ui_settings()
+    units = ui["units"]
     connected = bool(data.get("connected"))
     state = data.get("operating_state") or "Disconnected"
     state_id = int(data.get("operating_state_id") or -1)
@@ -305,6 +332,7 @@ def print_waybar(data: dict) -> None:
                 "class": css,
                 "alt": state,
                 "percentage": battery,
+                "ui": ui,
             }
         )
     )
@@ -322,25 +350,6 @@ def demo_summary(result: dict) -> str:
     if result.get("stock_peak"):
         line += "\nNo Peak connected, so it plays on a stock Peak Pro."
     return line
-
-
-def _switched_on(value: Any) -> bool:
-    # A hand-edited config can say "false", which bool() calls true.
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "on", "yes"}
-    return bool(value)
-
-
-def clamp_volume(value: Any) -> int:
-    try:
-        number = int(round(float(value)))
-    except (TypeError, ValueError):
-        return int(DEFAULTS["sound_volume"])
-    return max(0, min(100, number))
-
-
-# Output names as Hyprland reports them: DP-2, HDMI-A-1, eDP-1.
-MONITOR_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def overlay_screen_value(raw: str) -> str:
@@ -404,10 +413,19 @@ async def async_main(argv: list[str] | None = None) -> int:
         description="QuickPuff — Peak Pro companion for Linux",
     )
     parser.add_argument("--json", action="store_true", help="Print raw JSON")
+    parser.add_argument(
+        "--no-start",
+        action="store_true",
+        help="Never start the daemon: if it isn't running, say so and fail (waybar still prints its disconnected JSON)",
+    )
     parser.add_argument("--version", action="version", version=f"quickpuff {__version__}")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("daemon", help="Run the BLE daemon in the foreground")
+    daemon = sub.add_parser("daemon", help="Run the BLE daemon in the foreground")
+    daemon.add_argument("--socket", type=Path, help="Socket path (default: $XDG_RUNTIME_DIR/quickpuff.sock)")
+    daemon.add_argument(
+        "--debug", action="store_true", help="Log in detail, and take the raw peek and poke commands (off otherwise)"
+    )
     sub.add_parser("ping")
     scan = sub.add_parser("scan")
     scan.add_argument("--timeout", type=float, default=6)
@@ -471,10 +489,11 @@ async def async_main(argv: list[str] | None = None) -> int:
     light.add_argument("name", nargs="?", help="rename: the new name")
     light.add_argument("--index", type=int, help="Profile 0-3 (default: the selected one)")
 
-    peek = sub.add_parser("peek", help="Read a Lorax path (debug)")
+    debug_only = "only with a daemon started with --debug (quickpuff daemon --debug)"
+    peek = sub.add_parser("peek", help=f"Read a Lorax path; {debug_only}")
     peek.add_argument("path")
     peek.add_argument("--size", type=int, default=12)
-    poke = sub.add_parser("poke", help="Write hex bytes to a Lorax path (debug)")
+    poke = sub.add_parser("poke", help=f"Write hex bytes to a Lorax path; {debug_only}")
     poke.add_argument("path")
     poke.add_argument("hex")
 
@@ -550,6 +569,8 @@ async def async_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     raw = args.json
     cmd = args.cmd
+    global _start_daemon
+    _start_daemon = not args.no_start
 
     if cmd is None:
         parser.print_help()
@@ -565,10 +586,14 @@ async def async_main(argv: list[str] | None = None) -> int:
             print(format_report(checks))
         return 1 if any(check.ok is False for check in checks) else 0
     if cmd == "daemon":
-        from .daemon import main as daemon_main
+        # Reached only when an option came before it (`quickpuff --json
+        # daemon`); main() hands a leading `daemon` straight over.
+        from .daemon import amain as daemon_amain
 
-        daemon_main()
-        return 0
+        daemon_argv = ["--debug"] if args.debug else []
+        if args.socket:
+            daemon_argv += ["--socket", str(args.socket)]
+        return await daemon_amain(daemon_argv)
 
     if cmd == "ping":
         print_status_raw = await call("ping")
@@ -604,7 +629,8 @@ async def async_main(argv: list[str] | None = None) -> int:
     elif cmd == "waybar":
         try:
             data = await call("status", timeout=5)
-        except Exception:
+        except (Exception, SystemExit):
+            # call() says "not running" by exiting; the bar still wants its JSON.
             data = {"connected": False}
         print_waybar(data)
     elif cmd == "stats":
@@ -787,28 +813,22 @@ async def async_main(argv: list[str] | None = None) -> int:
             return 0
         print_status(await call("set_device_name", {"name": args.value}), raw)
     elif cmd == "ready-anim":
-        from .paths import save_config
-
         cfg = load_config()
         if args.value is None:
             print(cfg.get("ready_animation", "rocket"))
             return 0
         cfg["ready_animation"] = args.value
-        save_config(cfg)
+        _save_settings(cfg)
         print(f"Ready animation: {args.value}")
     elif cmd == "showtime":
-        from .paths import save_config
-
         cfg = load_config()
         if args.value is None:
             print(cfg.get("showtime") or DEFAULTS["showtime"])
             return 0
         cfg["showtime"] = args.value
-        save_config(cfg)
+        _save_settings(cfg)
         print(f"Showtime: {args.value}")
     elif cmd == "sounds":
-        from .paths import save_config
-
         cfg = load_config()
         if args.value is None and args.volume is None:
             print(f"{'on' if _switched_on(cfg.get('sounds')) else 'off'}, volume {clamp_volume(cfg.get('sound_volume'))}")
@@ -817,17 +837,15 @@ async def async_main(argv: list[str] | None = None) -> int:
             cfg["sounds"] = args.value == "on"
         if args.volume is not None:
             cfg["sound_volume"] = clamp_volume(args.volume)
-        save_config(cfg)
+        _save_settings(cfg)
         print(f"Sounds {'on' if _switched_on(cfg.get('sounds')) else 'off'}, volume {clamp_volume(cfg.get('sound_volume'))}")
     elif cmd == "overlay-screen":
-        from .paths import save_config
-
         cfg = load_config()
         if args.value is None:
             print(cfg.get("overlay_screen") or DEFAULTS["overlay_screen"])
             return 0
         cfg["overlay_screen"] = overlay_screen_value(args.value)
-        save_config(cfg)
+        _save_settings(cfg)
         where = "the focused monitor" if cfg["overlay_screen"] == "focused" else cfg["overlay_screen"]
         print(f"Overlays play on {where}")
     elif cmd == "demo":
@@ -842,11 +860,9 @@ async def async_main(argv: list[str] | None = None) -> int:
         result = await call("demo", payload)
         print(json.dumps(result, indent=2) if raw else demo_summary(result))
     elif cmd == "units":
-        from .paths import save_config
-
         cfg = load_config()
         cfg["units"] = args.value.upper()
-        save_config(cfg)
+        _save_settings(cfg)
         print(f"Units set to °{cfg['units']}")
     elif cmd == "battery":
         await call("show_battery")
@@ -864,7 +880,10 @@ def main(argv: list[str] | None = None) -> None:
     if argv and argv[0] == "daemon":
         from .daemon import main as daemon_main
 
-        daemon_main()
+        # Its own options only: handed the whole command line, the daemon's
+        # parser stopped at the word "daemon", so `quickpuff daemon --debug`
+        # never started.
+        daemon_main(argv[1:])
         return
     raise SystemExit(asyncio.run(async_main(argv)))
 

@@ -11,6 +11,9 @@ import math
 import os
 import random
 import signal
+import socket
+import stat
+import struct
 import subprocess
 import time
 import traceback
@@ -22,7 +25,15 @@ from typing import Any
 from . import __version__, audit, bluez, demo, faults, history
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
-from .paths import load_config, save_config, socket_path
+from .paths import (
+    RefusedFile,
+    RuntimeDirMissing,
+    load_config,
+    open_private_dir,
+    save_config,
+    socket_path,
+    ui_settings,
+)
 from .heat_trace import HeatTrace
 from .lights import normalize_color
 from .moods import MAX_COLORS as MAX_CYCLE_COLORS
@@ -140,6 +151,28 @@ CONCEDE_AFTER_STRIKES = 4
 
 # Edits to a heat profile re-read just the profiles once taps stop for this long.
 PROFILE_REFRESH_SETTLE_S = 0.8
+# The socket: the bar widget, an open panel and a few CLI commands are a
+# handful of clients, so more than this at once is refused rather than
+# queued. One request is a short JSON line; asyncio's reader stops a longer
+# one at this many bytes, and the client that sent it is let go.
+MAX_CLIENTS = 32
+MAX_REQUEST_BYTES = 64 * 1024
+# Raw Lorax reads and writes for poking at firmware. They can write anything
+# anywhere on the Peak, so only a daemon started with --debug takes them.
+DEBUG_COMMANDS = frozenset({"peek", "poke"})
+# A scan holds the command queue while it runs.
+MIN_SCAN_S, MAX_SCAN_S = 1.0, 60.0
+# Desktop notifications. The summary and body are rendered as markup by the
+# notification server and carry the Peak's own name and its profile names,
+# so they are made plain and kept short (see notify_text).
+NOTIFY_SEND = "/usr/bin/notify-send"
+NOTIFY_TITLE_MAX = 80
+NOTIFY_BODY_MAX = 240
+NOTIFY_URGENCIES = frozenset({"low", "normal", "critical"})
+# Bidi controls (ALM, LRM, RLM, the embeddings, overrides and isolates): they
+# can make a notification read differently from what it says.
+BIDI_CONTROLS = frozenset({0x061C, 0x200E, 0x200F, *range(0x202A, 0x202F), *range(0x2066, 0x206A)})
+
 # Answered from what the daemon already knows, so they never queue behind a
 # slow Bluetooth command. A demo never touches the Peak either, and should
 # start the moment it's asked for.
@@ -171,6 +204,37 @@ LOCAL_COMMANDS = frozenset(
         "delete_saved_light",
     }
 )
+
+
+def notify_text(text: Any, limit: int) -> str:
+    """Text fit for a notification summary or body: <, > and & dropped,
+    control characters (C0 and C1) turned to spaces and runs of whitespace
+    closed up, bidi controls dropped, and the whole capped at `limit`
+    characters."""
+    kept = []
+    for ch in str(text):
+        code = ord(ch)
+        if ch in "<>&" or code in BIDI_CONTROLS:
+            continue
+        kept.append(" " if code < 0x20 or 0x7F <= code <= 0x9F else ch)
+    plain = " ".join("".join(kept).split())
+    if len(plain) > limit:
+        plain = plain[: limit - 1].rstrip() + "…"
+    return plain
+
+
+def peer_uid(writer: Any) -> int | None:
+    """The uid of the process at the other end of a Unix socket connection,
+    as the kernel reports it (SO_PEERCRED); None when it can't be had."""
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return None
+    try:
+        creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("iII", creds)
+    except (OSError, struct.error):
+        return None
+    return uid
 
 
 def poll_delay(state_id: Any, watching: bool, watched_interval: float) -> float:
@@ -326,6 +390,10 @@ def clean_remaining(total: Any, last: Any, every: int) -> int:
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
+    # NaN compares false with everything, so min/max would turn it into the
+    # top of the range: a NaN temperature became the hottest one allowed.
+    if not math.isfinite(value):
+        raise ValueError(f"{value!r} isn't a number QuickPuff can use")
     return max(lo, min(hi, value))
 
 
@@ -381,6 +449,11 @@ class QuickPuffDaemon:
         self.device: PuffcoBLE | None = None
         self.status: dict[str, Any] = self._empty_status()
         self.clients: set[asyncio.StreamWriter] = set()
+        # Connections being served, for MAX_CLIENTS.
+        self._connections = 0
+        # (st_dev, st_ino) of the socket this daemon bound, so close() only
+        # ever removes that one.
+        self._socket_id: tuple[int, int] | None = None
         self._cmd_lock = asyncio.Lock()
         self._sync_lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
@@ -781,7 +854,7 @@ class QuickPuffDaemon:
         # Re-read: the snapshot above may have just saved a cleaning baseline,
         # which the config loaded before it would overwrite.
         latest = load_config()
-        save_config(
+        self._save_quietly(
             {
                 **latest,
                 "device_mac": snap.get("device_mac") or mac or "",
@@ -901,7 +974,7 @@ class QuickPuffDaemon:
             # Stay away after a restart too, until Connect is pressed again.
             cfg = load_config()
             cfg["auto_connect"] = False
-            save_config(cfg)
+            self._save_quietly(cfg)
             # A reconnect already mid-attempt would otherwise grab the Peak back.
             if self._reconnect_task and not self._reconnect_task.done():
                 self._reconnect_task.cancel()
@@ -1259,6 +1332,7 @@ class QuickPuffDaemon:
         await self._yield_peak()
 
     async def _set_handoff(self, enable: bool) -> dict:
+        # Saved first: a settings file that won't take it changes nothing.
         cfg = load_config()
         cfg["handoff"] = bool(enable)
         save_config(cfg)
@@ -1432,7 +1506,10 @@ class QuickPuffDaemon:
         self.clean_notified = _as_bool(entry.get("notified"))
         self._clean_serial = serial
 
-    def _save_clean(self) -> None:
+    def _save_clean(self, *, quiet: bool = True) -> None:
+        """Save the cleaning countdown. Quietly by default, as it moves with
+        every dab; a change someone asked for passes quiet=False, so a
+        settings file that won't take it is an error they see."""
         cfg = load_config()
         cfg["clean_every"] = self.clean_every
         if self._clean_serial:
@@ -1445,7 +1522,23 @@ class QuickPuffDaemon:
         else:
             cfg["clean_at_total"] = self.clean_at_total
             cfg["clean_notified"] = self.clean_notified
-        save_config(cfg)
+        if quiet:
+            self._save_quietly(cfg)
+        else:
+            save_config(cfg)
+
+    def _save_quietly(self, cfg: dict[str, Any]) -> bool:
+        """Save settings the daemon keeps for itself as things happen (the
+        Peak it last used, the cleaning countdown, which reminders went
+        out). A config.json that was refused is left alone and logged, and
+        the daemon carries on with what it has in memory rather than fail
+        the connect or poll that got here. False when nothing was saved."""
+        try:
+            save_config(cfg)
+        except RefusedFile as exc:
+            log.warning("Settings not saved: %s", exc)
+            return False
+        return True
 
     def _baseline_clean(self, total: Any) -> None:
         if self.clean_at_total is not None:
@@ -1475,11 +1568,19 @@ class QuickPuffDaemon:
         return fields
 
     def _desktop_notify(self, title: str, body: str, urgency: str = "normal") -> None:
+        # The Peak's name and its profile names end up in these, and the
+        # notification server reads both as markup: plain and short only.
+        title = notify_text(title, NOTIFY_TITLE_MAX)
+        body = notify_text(body, NOTIFY_BODY_MAX)
+        if urgency not in NOTIFY_URGENCIES:
+            urgency = "normal"
         log.info("Notification: %s — %s", title, body)
         try:
             subprocess.Popen(
-                ["notify-send", "-a", "QuickPuff", "-u", urgency, title, body],
+                # `--` so a title that starts with "-" is text, not an option.
+                [NOTIFY_SEND, "-a", "QuickPuff", "-u", urgency, "--", title, body],
                 start_new_session=True,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -1606,7 +1707,7 @@ class QuickPuffDaemon:
                 cfg = load_config()
                 cfg["surprise_last"] = {**(cfg.get("surprise_last") or {}), str(index): new_id}
                 cfg["surprise_key"] = look["key"]
-                save_config(cfg)
+                self._save_quietly(cfg)
                 self.status["saved_lights"] = saved_lights.listing()
                 log.info("Surprise: %s gets %s next", self._profile_name(index), look["key"])
             await self._broadcast_event("status", self.status)
@@ -1615,19 +1716,20 @@ class QuickPuffDaemon:
             log.warning("Surprise: couldn't change the light: %s", exc)
 
     async def _set_surprise(self, enable: bool) -> dict[str, Any]:
-        self.surprise_light = bool(enable)
+        # Saved first: a settings file that won't take it changes nothing.
         cfg = load_config()
-        cfg["surprise_light"] = self.surprise_light
+        cfg["surprise_light"] = bool(enable)
         save_config(cfg)
+        self.surprise_light = bool(enable)
         self.status["surprise_light"] = self.surprise_light
         await self._broadcast_event("status", self.status)
         return {"surprise_light": self.surprise_light}
 
     async def _set_qtip_reminder(self, enable: bool) -> dict[str, Any]:
-        self.qtip_reminder = bool(enable)
         cfg = load_config()
-        cfg["qtip_reminder"] = self.qtip_reminder
+        cfg["qtip_reminder"] = bool(enable)
         save_config(cfg)
+        self.qtip_reminder = bool(enable)
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
         self.status["daily_limit"] = self.daily_limit
@@ -1648,7 +1750,9 @@ class QuickPuffDaemon:
         if count < self.daily_limit or cfg.get("daily_limit_notified") == date:
             return False
         cfg["daily_limit_notified"] = date
-        save_config(cfg)
+        if not self._save_quietly(cfg):
+            # Without a note that today's went out, every sync would send it again.
+            return False
         title = f"{count} dab{'s' if count != 1 else ''} today"
         body = (
             f"That's your daily limit of {self.daily_limit}."
@@ -1660,19 +1764,20 @@ class QuickPuffDaemon:
         return True
 
     async def _set_daily_limit(self, value: Any) -> dict[str, Any]:
-        self.daily_limit = clamp_daily_limit(value)
+        limit = clamp_daily_limit(value)
         cfg = load_config()
-        cfg["daily_limit"] = self.daily_limit
+        cfg["daily_limit"] = limit
         save_config(cfg)
+        self.daily_limit = limit
         self.status["daily_limit"] = self.daily_limit
         await self._broadcast_event("status", self.status)
         return {"daily_limit": self.daily_limit}
 
     async def _set_weekly_recap(self, enable: bool) -> dict[str, Any]:
-        self.weekly_recap = bool(enable)
         cfg = load_config()
-        cfg["weekly_recap"] = self.weekly_recap
+        cfg["weekly_recap"] = bool(enable)
         save_config(cfg)
+        self.weekly_recap = bool(enable)
         self.status["weekly_recap"] = self.weekly_recap
         await self._broadcast_event("status", self.status)
         return {"weekly_recap": self.weekly_recap}
@@ -1699,7 +1804,9 @@ class QuickPuffDaemon:
         if sent == key:
             return False
         cfg["weekly_recap_sent"] = key
-        save_config(cfg)
+        if not self._save_quietly(cfg):
+            # Unrecorded, it would go out again every ten minutes.
+            return False
         if not sent:
             # First run: wait for the next Sunday instead of a surprise recap now.
             return False
@@ -1765,8 +1872,12 @@ class QuickPuffDaemon:
         await self._refresh_clean(total, notify=True)
 
     async def _set_clean_every(self, dabs: Any) -> dict[str, Any]:
-        self.clean_every = snap_clean_every(dabs)
-        self._save_clean()
+        previous, self.clean_every = self.clean_every, snap_clean_every(dabs)
+        try:
+            self._save_clean(quiet=False)
+        except RefusedFile:
+            self.clean_every = previous
+            raise
         return await self._refresh_clean(self.status.get("total_dabs"))
 
     async def _mark_cleaned(self) -> dict[str, Any]:
@@ -1778,20 +1889,26 @@ class QuickPuffDaemon:
         # lifetime dab count as used on the next connect.
         if not (self.device and self.device.is_connected) or total <= 0:
             raise RuntimeError("Connect the Peak first so the countdown starts from its real dab count.")
+        previous = (self.clean_at_total, self.clean_notified)
         self.clean_at_total = total
         self.clean_notified = False
-        self._save_clean()
+        try:
+            self._save_clean(quiet=False)
+        except RefusedFile:
+            self.clean_at_total, self.clean_notified = previous
+            raise
         return await self._refresh_clean(total)
 
     async def _set_battery_saver(self, enable: bool) -> dict[str, Any]:
+        # Saved first: a settings file that won't take it changes nothing.
+        cfg = load_config()
+        cfg["battery_saver"] = bool(enable)
+        save_config(cfg)
         self.battery_saver = bool(enable)
         if not self.battery_saver:
             self._cancel_saver_sleep()
             if self._resting:
                 self._wake_soon()
-        cfg = load_config()
-        cfg["battery_saver"] = self.battery_saver
-        save_config(cfg)
         self.status["battery_saver"] = self.battery_saver
         if self.battery_saver and self.device and self.device.is_connected and self.lantern:
             try:
@@ -1972,6 +2089,11 @@ class QuickPuffDaemon:
 
     async def handle(self, cmd: str, args: dict) -> Any:
         args = args or {}
+        if cmd in DEBUG_COMMANDS and not self.debug:
+            # Before anything else, so a refused one doesn't wake the Peak either.
+            raise PermissionError(
+                f"{cmd} is a debug command: it only works when the daemon was started with --debug"
+            )
         if cmd == "stop_heat" and self._demo is not None:
             # Stop pressed on a demo's pretend cycle ends the demo. The stop
             # still goes to a connected Peak in case its own button started a
@@ -1984,7 +2106,7 @@ class QuickPuffDaemon:
         if cmd == "ping":
             return {"version": __version__, "pid": os.getpid()}
         if cmd == "scan":
-            timeout = float(args.get("timeout", 6))
+            timeout = _clamp(float(args.get("timeout", 6)), MIN_SCAN_S, MAX_SCAN_S)
             scanner = PuffcoBLE(
                 device_name=args.get("device_name") or self._connect_name,
                 device_mac=args.get("device_mac") or self._connect_mac,
@@ -2019,7 +2141,9 @@ class QuickPuffDaemon:
             self._expire_lantern()
             self._reconcile_connected()
             self.status["telemetry"] = history.get_stats()
-            return self._status_out()
+            # The shell's own settings, read fresh (and bounded, and checked)
+            # on every ask, so it never has to open config.json itself.
+            return {**self._status_out(), "ui": ui_settings(load_config())}
         if cmd == "demo":
             return await self._start_demo(args)
         if cmd == "demo_stop":
@@ -2083,7 +2207,9 @@ class QuickPuffDaemon:
             await self._require_device().write_short(path, 0, 0, raw)
             return {"path": path, "ok": True, "n": len(raw)}
         if cmd == "stats":
-            stats = history.get_stats(days=int(args.get("days", 14)))
+            # One row per day is built, so the span is bounded by what history keeps.
+            days = max(1, min(history.RETENTION_DAYS, int(args.get("days", 14))))
+            stats = history.get_stats(days=days)
             stats["total_dabs"] = self.status.get("total_dabs", 0)
             stats["dabs_remaining"] = self.status.get("dabs_remaining", 0)
             stats["dabs_per_day"] = self.status.get("dabs_per_day", 0)
@@ -2320,18 +2446,55 @@ class QuickPuffDaemon:
 
         raise ValueError(f"Unknown command: {cmd}")
 
+    async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Every connection to the socket starts here. Only this user's own
+        processes get in, as the kernel vouches for them (the socket is 0600
+        in a 0700 directory as well), and only MAX_CLIENTS at once."""
+        uid = peer_uid(writer)
+        if uid != os.geteuid():
+            log.warning("Refused a connection from uid %s", uid)
+            await self._drop(writer)
+            return
+        if self._connections >= MAX_CLIENTS:
+            log.warning("Refused a connection: %d clients connected already", self._connections)
+            await self._drop(writer)
+            return
+        self._connections += 1
+        try:
+            await self._client(reader, writer)
+        finally:
+            self._connections -= 1
+
+    @staticmethod
+    async def _drop(writer: asyncio.StreamWriter) -> None:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.clients.add(writer)
         try:
             await self._broadcast_event("status", self.status)
             while True:
-                line = await reader.readline()
+                try:
+                    line = await reader.readline()
+                except ValueError:
+                    # A line past MAX_REQUEST_BYTES with no newline: nothing
+                    # QuickPuff sends, so let the client go rather than guess.
+                    log.warning("Dropped a client that sent over %d bytes without a newline", MAX_REQUEST_BYTES)
+                    break
                 if not line:
                     break
                 try:
                     msg = json.loads(line.decode("utf-8"))
-                except json.JSONDecodeError as exc:
+                except (ValueError, RecursionError) as exc:
                     await self._send(writer, {"ok": False, "error": f"bad json: {exc}"})
+                    continue
+                if not isinstance(msg, dict) or not isinstance(msg.get("args") or {}, dict):
+                    req_id = msg.get("id") if isinstance(msg, dict) else None
+                    await self._send(writer, {"id": req_id, "ok": False, "error": 'bad request: send {"cmd": ..., "args": {...}}'})
                     continue
                 req_id = msg.get("id")
                 cmd = msg.get("cmd")
@@ -2353,9 +2516,11 @@ class QuickPuffDaemon:
                         async with self._cmd_lock:
                             result = await self.handle(str(cmd), args)
                 except Exception as exc:
-                    if isinstance(exc, ConnectionError):
-                        # The Peak is asleep, off or out of range: expected,
-                        # and the message already says what to do about it.
+                    if isinstance(exc, (ConnectionError, PermissionError, RefusedFile)):
+                        # The Peak is asleep, off or out of range, a debug
+                        # command without --debug, or a settings file that
+                        # was refused: expected, and the message already
+                        # says what to do about it.
                         log.warning("command %s failed: %s", cmd, exc)
                     else:
                         log.exception("command %s failed", cmd)
@@ -2391,25 +2556,29 @@ class QuickPuffDaemon:
         await writer.drain()
 
     async def start(self) -> None:
-        if self.socket_path.exists():
-            try:
-                self.socket_path.unlink()
-            except OSError:
-                pass
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.socket_path.parent, 0o700)
-        self._loop = asyncio.get_running_loop()
-        # Belt-and-suspenders against another local user connecting in the
-        # instant between bind() and the chmod below: bind() creates the
-        # socket file with umask-derived permissions, so tighten the umask
-        # first (the parent dir being 0700 already blocks other users, but
-        # this also covers XDG_RUNTIME_DIR overrides with looser modes).
-        old_umask = os.umask(0o077)
+        # The socket's directory is checked on a held descriptor (this user's
+        # own, kept 0700), and everything below works relative to it.
+        dir_fd = open_private_dir(self.socket_path.parent)
         try:
-            self._server = await asyncio.start_unix_server(self._client, path=str(self.socket_path))
+            self._clear_stale_socket(dir_fd)
+            self._loop = asyncio.get_running_loop()
+            # Belt-and-suspenders against another local user connecting in the
+            # instant between bind() and the chmod below: bind() creates the
+            # socket file with umask-derived permissions, so tighten the umask
+            # first (the parent dir being 0700 already blocks other users, but
+            # this also covers XDG_RUNTIME_DIR overrides with looser modes).
+            old_umask = os.umask(0o077)
+            try:
+                self._server = await asyncio.start_unix_server(
+                    self._accept, path=str(self.socket_path), limit=MAX_REQUEST_BYTES
+                )
+            finally:
+                os.umask(old_umask)
+            os.chmod(self.socket_path.name, 0o600, dir_fd=dir_fd)
+            bound = os.stat(self.socket_path.name, dir_fd=dir_fd, follow_symlinks=False)
+            self._socket_id = (bound.st_dev, bound.st_ino)
         finally:
-            os.umask(old_umask)
-        os.chmod(self.socket_path, 0o600)
+            os.close(dir_fd)
         log.info("Listening on %s", self.socket_path)
         # Before resuming: the first reconnect should already know whether
         # anyone is sitting here.
@@ -2422,6 +2591,49 @@ class QuickPuffDaemon:
             log.debug("BlueZ disconnect reasons unavailable: %s", exc)
         self._resume_last_device()
         self._recap_task = asyncio.create_task(self._recap_loop())
+
+    def _clear_stale_socket(self, dir_fd: int) -> None:
+        """A daemon that was killed leaves its socket behind: remove that, and
+        only that. Anything else at the path (a file, a link, another
+        account's socket, or a daemon still answering on it) isn't this
+        daemon's to delete, so it won't start over it."""
+        name = self.socket_path.name
+        try:
+            info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.geteuid():
+            raise RefusedFile(f"{self.socket_path} is in the way and isn't a QuickPuff socket; leaving it alone")
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.settimeout(0.5)
+        try:
+            probe.connect(str(self.socket_path))
+        except OSError:
+            pass  # nothing listening: a dead daemon's socket
+        else:
+            # Taking the socket from a live daemon leaves two of them fighting
+            # over the Peak's one link.
+            raise RefusedFile(
+                f"another QuickPuff daemon is already listening on {self.socket_path}; "
+                "stop it first: systemctl --user stop quickpuff-daemon"
+            )
+        finally:
+            probe.close()
+        os.unlink(name, dir_fd=dir_fd)
+
+    def _remove_socket(self) -> None:
+        """Remove the socket this daemon bound, if that is still what's there:
+        asyncio may have removed it already, and anything else at the path
+        now isn't this daemon's to delete."""
+        if self._socket_id is None:
+            return
+        try:
+            info = os.stat(self.socket_path, follow_symlinks=False)
+            if (info.st_dev, info.st_ino) == self._socket_id:
+                os.unlink(self.socket_path)
+        except OSError:
+            pass
+        self._socket_id = None
 
     def _on_link_ended(self, address: str, reason: str, message: str) -> None:
         """Log why BlueZ says the Peak's link ended, beside what it was doing."""
@@ -2479,26 +2691,33 @@ class QuickPuffDaemon:
         if self._server:
             self._server.close()
             await self._server.wait_closed()
-        if self.socket_path.exists():
-            try:
-                self.socket_path.unlink()
-            except OSError:
-                pass
+        self._remove_socket()
 
 
 async def amain(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="QuickPuff Peak Pro BLE daemon")
-    parser.add_argument("--socket", type=Path, default=socket_path())
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--socket", type=Path, default=None, help="Socket path (default: $XDG_RUNTIME_DIR/quickpuff.sock)")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Log in detail, and take the raw peek and poke commands (off otherwise)",
+    )
     args = parser.parse_args(argv)
+    try:
+        sock = args.socket or socket_path()
+    except RuntimeDirMissing as exc:
+        raise SystemExit(f"quickpuff daemon: {exc}") from exc
 
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    daemon = QuickPuffDaemon(args.socket, debug=args.debug)
-    await daemon.start()
+    daemon = QuickPuffDaemon(sock, debug=args.debug)
+    try:
+        await daemon.start()
+    except RefusedFile as exc:
+        raise SystemExit(f"quickpuff daemon: {exc}") from exc
 
     stop = asyncio.Event()
 
@@ -2517,8 +2736,8 @@ async def amain(argv: list[str] | None = None) -> int:
     return 0
 
 
-def main() -> None:
-    raise SystemExit(asyncio.run(amain()))
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(asyncio.run(amain(argv)))
 
 
 if __name__ == "__main__":

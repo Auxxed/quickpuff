@@ -6,7 +6,6 @@ CLI call failed until the socket was deleted by hand.
 """
 
 import socket
-from types import SimpleNamespace
 
 from quickpuff import service
 
@@ -49,46 +48,48 @@ class TestDaemonRunning:
 
 class TestSystemdOwnsDaemon:
     def test_active_unit_is_owned(self, monkeypatch):
-        def fake_run(*_args, **_kwargs):
-            return SimpleNamespace(
-                returncode=0,
-                stdout="ActiveState=active\nUnitFileState=enabled\n",
-            )
-
-        monkeypatch.setattr(service.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            service, "run_bounded", lambda *_a, **_k: (0, "ActiveState=active\nUnitFileState=enabled")
+        )
         assert service.systemd_owns_daemon() is True
 
     def test_restart_window_is_owned(self, monkeypatch):
-        def fake_run(*_args, **_kwargs):
-            return SimpleNamespace(
-                returncode=0,
-                stdout="ActiveState=deactivating\nUnitFileState=enabled\n",
-            )
-
-        monkeypatch.setattr(service.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            service, "run_bounded", lambda *_a, **_k: (0, "ActiveState=deactivating\nUnitFileState=enabled")
+        )
         assert service.systemd_owns_daemon() is True
 
     def test_disabled_and_inactive_is_not_owned(self, monkeypatch):
-        def fake_run(*_args, **_kwargs):
-            return SimpleNamespace(
-                returncode=0,
-                stdout="ActiveState=inactive\nUnitFileState=disabled\n",
-            )
-
-        monkeypatch.setattr(service.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            service, "run_bounded", lambda *_a, **_k: (0, "ActiveState=inactive\nUnitFileState=disabled")
+        )
         assert service.systemd_owns_daemon() is False
 
     def test_missing_systemctl_is_not_owned(self, monkeypatch):
-        def fake_run(*_args, **_kwargs):
-            raise FileNotFoundError("systemctl")
-
-        monkeypatch.setattr(service.subprocess, "run", fake_run)
+        # run_bounded's answer for a command that can't run, or overran.
+        monkeypatch.setattr(service, "run_bounded", lambda *_a, **_k: (127, ""))
         assert service.systemd_owns_daemon() is False
+
+    def test_systemctl_is_asked_by_its_full_path_with_a_deadline(self, monkeypatch):
+        seen = {}
+
+        def fake(argv, **kwargs):
+            seen.update(argv=argv, **kwargs)
+            return 0, ""
+
+        monkeypatch.setattr(service, "run_bounded", fake)
+        service.systemd_owns_daemon()
+        assert seen["argv"][0] == "/usr/bin/systemctl"
+        assert seen["timeout"] <= 2
 
     def test_ensure_waits_instead_of_spawning_when_systemd_owns(self, monkeypatch, tmp_path):
         spawned = []
         monkeypatch.setattr(service, "daemon_running", lambda: False)
-        monkeypatch.setattr(service, "systemd_owns_daemon", lambda: True)
+        monkeypatch.setattr(
+            service,
+            "unit_state",
+            lambda: {"LoadState": "loaded", "ActiveState": "activating", "UnitFileState": "enabled"},
+        )
         monkeypatch.setattr(service, "log_path", lambda: tmp_path / "daemon.log")
         monkeypatch.setattr(service.time, "time", lambda: 0)
         monkeypatch.setattr(

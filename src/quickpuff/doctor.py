@@ -7,15 +7,22 @@ Bluetooth; `gather` does the real probing.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from . import __version__
-from .paths import load_config
+from .paths import RuntimeDirMissing, load_config
+from .proc import run_bounded
 
 PLUGIN_ID = "auxxed.quickpuff"
+# Fixed paths rather than whatever PATH finds first.
+SYSTEMCTL = "/usr/bin/systemctl"
+OMARCHY = "/usr/bin/omarchy"
+OMARCHY_SHELL = "/usr/bin/omarchy-shell"
+NOTIFY_SEND = "/usr/bin/notify-send"
+# `omarchy plugin list --json` is a few KiB per plugin.
+MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 @dataclass
@@ -27,11 +34,11 @@ class Check:
 
 
 def _run(argv: list[str], timeout: float = 5.0) -> tuple[int, str]:
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        return 127, ""
-    return done.returncode, (done.stdout or "").strip()
+    return run_bounded(argv, timeout=timeout, max_bytes=MAX_OUTPUT_BYTES)
+
+
+def _installed(path: str) -> bool:
+    return os.access(path, os.X_OK)
 
 
 def check_bluetooth_service(state: str) -> Check:
@@ -167,9 +174,9 @@ def check_handoff(
 def read_idle_state() -> dict[str, Any] | None:
     """What the Omarchy shell says about idle and Stay Awake, or None when
     that isn't this desktop."""
-    if not shutil.which("omarchy-shell"):
+    if not _installed(OMARCHY_SHELL):
         return None
-    code, out = _run(["omarchy-shell", "idle", "status"], timeout=5)
+    code, out = _run([OMARCHY_SHELL, "idle", "status"], timeout=5)
     if code != 0 or not out:
         return None
     try:
@@ -185,8 +192,17 @@ def check_notifications(found: bool) -> Check:
     return Check(
         "Notifications",
         False,
-        "notify-send is missing",
+        f"{NOTIFY_SEND} is missing",
         "Install libnotify for the ready, battery, cleaning and Q-tip alerts.",
+    )
+
+
+def check_runtime_dir() -> Check:
+    return Check(
+        "Session",
+        False,
+        "XDG_RUNTIME_DIR isn't set, so there is nowhere private for the daemon's socket",
+        "Run QuickPuff from your desktop session, where systemd-logind sets it.",
     )
 
 
@@ -197,14 +213,18 @@ async def gather() -> list[Check]:
 
     daemon_version = None
     status = None
-    if daemon_running():
+    try:
+        running, no_runtime_dir = daemon_running(), False
+    except RuntimeDirMissing:
+        running, no_runtime_dir = False, True
+    if running:
         try:
             daemon_version = (await rpc("ping", None, timeout=5)).get("version")
             status = await rpc("status", None, timeout=10)
         except Exception:
             pass
 
-    _code, state = _run(["systemctl", "is-active", "bluetooth"])
+    _code, state = _run([SYSTEMCTL, "is-active", "bluetooth"])
     adapters: list[dict] | None
     error = ""
     try:
@@ -220,16 +240,18 @@ async def gather() -> list[Check]:
         except Exception:
             paired = None
 
-    omarchy_found = shutil.which("omarchy") is not None
+    omarchy_found = _installed(OMARCHY)
     plugins = None
     if omarchy_found:
-        code, out = _run(["omarchy", "plugin", "list", "--json"], timeout=10)
+        code, out = _run([OMARCHY, "plugin", "list", "--json"], timeout=10)
         try:
             plugins = json.loads(out) if code == 0 and out else None
-        except ValueError:
+        except (ValueError, RecursionError):
+            plugins = None
+        if not isinstance(plugins, list):
             plugins = None
 
-    return [
+    checks = [
         check_bluetooth_service(state),
         check_adapters(adapters, error),
         check_daemon(daemon_version),
@@ -237,8 +259,11 @@ async def gather() -> list[Check]:
         check_saved_peak(cfg, paired),
         check_connection(status),
         check_handoff(cfg, status, read_idle_state()),
-        check_notifications(shutil.which("notify-send") is not None),
+        check_notifications(_installed(NOTIFY_SEND)),
     ]
+    if no_runtime_dir:
+        checks.insert(0, check_runtime_dir())
+    return checks
 
 
 def format_report(checks: list[Check]) -> str:

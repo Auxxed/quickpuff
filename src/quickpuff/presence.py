@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
+import signal
 from collections.abc import Callable
 
 from dbus_fast import BusType
@@ -41,7 +41,8 @@ LOCK_POLL_S = 15.0
 # The helper answers in milliseconds; this only guards against a wedged
 # compositor, and is a constant so tests can shorten it.
 LOCK_PROBE_TIMEOUT_S = 5.0
-LOCK_HELPER = "omarchy-hyprland-session-locked"
+# A fixed path rather than whatever PATH finds first.
+LOCK_HELPER = "/usr/bin/omarchy-hyprland-session-locked"
 
 
 class SeatPresence:
@@ -57,7 +58,7 @@ class SeatPresence:
         self._bus = None
         self._props = None
         self._lock_task: asyncio.Task | None = None
-        self._helper = shutil.which(LOCK_HELPER)
+        self._helper = LOCK_HELPER if os.access(LOCK_HELPER, os.X_OK) else None
         self.available = False
         # Until something says otherwise, assume the user is right here.
         self.active = True
@@ -125,14 +126,24 @@ class SeatPresence:
         try:
             proc = await asyncio.create_subprocess_exec(
                 self._helper,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                # Its own process group, so a kill reaches the hyprctl and jq
+                # it runs as well as the script.
+                start_new_session=True,
             )
             code = await asyncio.wait_for(proc.wait(), timeout=LOCK_PROBE_TIMEOUT_S)
         except Exception as exc:
             # wait_for gives up on waiting, not on the process: without this a
             # wedged helper would be left behind every poll, forever.
             if proc and proc.returncode is None:
+                pid = getattr(proc, "pid", None)
+                if pid:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
                 try:
                     proc.kill()
                     await proc.wait()
