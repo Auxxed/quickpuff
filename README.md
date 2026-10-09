@@ -11,20 +11,25 @@ reverse-engineered Lorax Bluetooth protocol, so a Puffco firmware update can
 break it. It works with the **Peak Pro only**; Proxy and Pivot are rejected.
 
 <p align="center">
-  <img src="screenshots/demo.webp" width="376" alt="Starting a heat cycle in the QuickPuff panel: heating up, ready, and the session countdown"><br>
-  <sub><a href="https://github.com/Auxxed/quickpuff/releases/download/v0.7.0/quickpuff-0.7.0-trailer.mp4">Watch the 48-second trailer</a> (Showtime, sounds and the ready shows) · <a href="https://github.com/Auxxed/quickpuff/releases/download/v0.5.1/quickpuff-demo.mp4">the full 3-minute demo</a> (MP4, 5 MB)</sub>
+  <img src="screenshots/demo.webp" width="376" alt="A heat cycle in the QuickPuff panel: preheating with the live heat curve, ready, the session countdown, and the summary of the last session"><br>
+  <sub><a href="https://github.com/Auxxed/quickpuff/releases/download/v0.7.0/quickpuff-0.7.0-trailer.mp4">Watch the 48-second trailer</a>: Showtime, the sounds and every ready show</sub>
 </p>
 
 <table>
   <tr>
-    <td align="center"><img src="preview.png" width="270" alt="Control tab: heat, profiles, vapor and boost"><br><sub>Control</sub></td>
-    <td align="center"><img src="screenshots/lights.png" width="270" alt="Lights tab: LED, brightness, stealth and profile colour"><br><sub>Lights</sub></td>
-    <td align="center"><img src="screenshots/care.png" width="270" alt="Care tab: battery, cleaning and goals"><br><sub>Care</sub></td>
+    <td align="center"><img src="preview.png" width="270" alt="Control tab: your Peak drawn in its colourway, heat, boost and stop, and the heat profiles"><br><sub>Control</sub></td>
+    <td align="center"><img src="screenshots/control-showtime.png" width="270" alt="Control tab, further down: vapor, boost, the ready animation, Showtime and sounds"><br><sub>Control · Ready show and Showtime</sub></td>
+    <td align="center"><img src="screenshots/lights.png" width="270" alt="Lights tab: lantern, brightness, stealth and the profile's colour"><br><sub>Lights</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/usage-stats.png" width="270" alt="Usage stats: counts, daily chart and habits"><br><sub>Usage · Stats</sub></td>
-    <td align="center"><img src="screenshots/usage-history.png" width="270" alt="Usage history: every dab with notes"><br><sub>Usage · History</sub></td>
-    <td align="center"><img src="screenshots/device.png" width="270" alt="Device tab: name, battery health, firmware and fault log"><br><sub>Device</sub></td>
+    <td align="center"><img src="screenshots/lights-cycles.png" width="270" alt="Lights tab, further down: colour cycles, palettes and saved lights"><br><sub>Lights · Cycles and saved lights</sub></td>
+    <td align="center"><img src="screenshots/usage-stats.png" width="270" alt="Usage stats: counts, the daily chart and habits"><br><sub>Usage · Stats</sub></td>
+    <td align="center"><img src="screenshots/usage-history.png" width="270" alt="Usage history: every dab, with a note you can add"><br><sub>Usage · History</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/care.png" width="270" alt="Care tab: battery, cleaning and goals"><br><sub>Care</sub></td>
+    <td align="center"><img src="screenshots/device.png" width="270" alt="Device tab: name, model, battery health and firmware"><br><sub>Device</sub></td>
+    <td></td>
   </tr>
 </table>
 
