@@ -130,8 +130,9 @@ BarWidget {
         // convention for separating two fields. The Omarchy bar already gaps
         // its widgets, so that reads as two widgets here — collapse it.
         var cls = String(data.class || "")
-        // Reached temperature: celebrate, on the overlay monitor.
-        if (root.outputClass === "preheat" && cls === "ready" && root.isOverlayScreen()) root.playReady("")
+        // Reached temperature: celebrate, on the overlay monitor. While
+        // Showtime is up it calls the moment itself, off the live feed.
+        if (root.outputClass === "preheat" && cls === "ready" && root.isOverlayScreen() && !showtimeLoader.active) root.playReady("")
         // A heat cycle began: raise the curtain (once per cycle).
         if (cls === "preheat" || cls === "ready") {
           if (!root.showtimeThisCycle && root.showtimeMode !== "off" && root.isOverlayScreen()) root.openShowtime()
@@ -337,8 +338,10 @@ BarWidget {
     show.mode = root.showtimeMode
     show.soundsOn = root.soundsOn
     show.soundVolume = root.soundVolume
+    // On the stage the rocket is the stage's own Peak lifting off.
+    show.launch = root.showtimeMode === "stage" && root.readyAnimation === "rocket"
     // Hold the stage long enough for the ready animation to play on it.
-    show.chimeOnReady = root.readyAnimation === "off"
+    show.chimeOnReady = root.readyAnimation === "off" || show.launch
     show.holdAfterReady = root.readyAnimation === "off" ? 2.2 : root.readyAnimation === "rocket" ? 7.4 : 6.2
     show.armed = true
   }
@@ -352,6 +355,10 @@ BarWidget {
   Connections {
     target: showtimeLoader.item
     function onFinished() { showtimeLoader.active = false }
+    function onReadyMoment() {
+      var show = showtimeLoader.item
+      if (show && !show.launch) root.playReady("")
+    }
   }
 
   LazyLoader {

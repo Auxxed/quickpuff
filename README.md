@@ -170,7 +170,9 @@ session countdown, then a summary (length, peak temperature, battery used).
 **Stage** turns it into a show: the screen dims and your Peak takes the middle
 of it, its light ring brightening as a big temperature counts up and the heat
 curve draws; Ready lands with a flash and a shockwave from the ring, the ready
-animation plays on the stage, and then it settles into the card. Pick it under
+animation plays on the stage, and then it settles into the card. With Rocket
+picked, the stage's own Peak is the rocket: it grows fins, the big numbers
+count down 3, 2, 1 (a beep on each), and it lifts off the stage. Pick it under
 Control → Showtime or with `quickpuff showtime off|corner|stage`.
 
 **Sounds** give the moments a voice: a soft ignition when the heater starts, a

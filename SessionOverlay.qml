@@ -29,11 +29,17 @@ PanelWindow {
   property real soundVolume: 0.7
   // Play the ready chime here, when no ready animation will.
   property bool chimeOnReady: false
+  // Rocket on the stage: the stage's own Peak grows fins, counts down in the
+  // big numerals and lifts off, instead of a second rocket somewhere else.
+  property bool launch: false
   // How long the stage holds after Ready, so the ready animation plays on it.
   property real holdAfterReady: 6.5
   property bool armed: false
 
   signal finished()
+  // Ready, the instant the daemon says so: the bar starts the ready
+  // animation off this, so it lands on the flash.
+  signal readyMoment()
 
   color: "transparent"
   exclusionMode: ExclusionMode.Ignore
@@ -185,7 +191,10 @@ PanelWindow {
     shock.start()
     readyPop.start()
     if (chimeOnReady) cue("ready")
-    if (mode === "stage") {
+    readyMoment()
+    if (mode === "stage" && launch) {
+      launchSeq.start()
+    } else if (mode === "stage") {
       stageHold.restart()
       // Leave the floor to the ready animation, if one is coming.
       if (holdAfterReady > 3) readoutDip.restart()
@@ -249,6 +258,65 @@ PanelWindow {
     Quickshell.execDetached(["pw-play", "--volume", String(Math.max(0, Math.min(1, soundVolume))), path])
   }
 
+  // ------------------------------------------------------------ launch
+  // Ready → fins out → 3, 2, 1 in the big numerals (a beep each) while the
+  // Peak rumbles and the flame builds → liftoff (with its roar) → the stage
+  // steps back into the card. One timeline, so sound and picture agree.
+  property string countText: ""
+  property real finT: 0
+  property real flame: 0
+  property real flameStretch: 1
+  property real shake: 0
+  property real shakeX: 0
+  property real flicker: 1
+  property real liftY: 0
+  property bool smoking: false
+  property bool flying: false
+
+  Timer {
+    interval: 32
+    repeat: true
+    running: show.shake > 0 || show.flame > 0
+    onTriggered: {
+      show.shakeX = (Math.random() * 2 - 1) * show.shake * show.u
+      show.flicker = 0.82 + Math.random() * 0.36
+    }
+  }
+
+  SequentialAnimation {
+    id: launchSeq
+    PauseAnimation { duration: 350 }
+    NumberAnimation { target: show; property: "finT"; to: 1; duration: 480; easing.type: Easing.OutBack; easing.overshoot: 1.6 }
+    PauseAnimation { duration: 120 }
+    ScriptAction { script: { show.countText = "3"; show.cue("count"); readyPop.restart(); show.smoking = true } }
+    ParallelAnimation {
+      NumberAnimation { target: show; property: "shake"; to: 1.2; duration: 600 }
+      NumberAnimation { target: show; property: "flame"; to: 0.3; duration: 600 }
+    }
+    ScriptAction { script: { show.countText = "2"; show.cue("count"); readyPop.restart() } }
+    ParallelAnimation {
+      NumberAnimation { target: show; property: "shake"; to: 2.4; duration: 600 }
+      NumberAnimation { target: show; property: "flame"; to: 0.65; duration: 600 }
+    }
+    ScriptAction { script: { show.countText = "1"; show.cue("count"); readyPop.restart() } }
+    ParallelAnimation {
+      NumberAnimation { target: show; property: "shake"; to: 4; duration: 600 }
+      NumberAnimation { target: show; property: "flame"; to: 1; duration: 600 }
+    }
+    ScriptAction { script: { show.countText = "READY"; show.cue("liftoff"); show.flying = true; readyPop.restart() } }
+    ParallelAnimation {
+      NumberAnimation { target: show; property: "liftY"; to: -show.height * 1.25; duration: 1500; easing.type: Easing.InCubic }
+      NumberAnimation { target: show; property: "flameStretch"; to: 2.6; duration: 700; easing.type: Easing.OutCubic }
+      NumberAnimation { target: show; property: "shake"; to: 0; duration: 600 }
+      SequentialAnimation {
+        PauseAnimation { duration: 900 }
+        ScriptAction { script: show.smoking = false }
+      }
+    }
+    PauseAnimation { duration: 700 }
+    ScriptAction { script: { show.flame = 0; stageOut.start(); cardIn.start() } }
+  }
+
   // ------------------------------------------------------------ stage
   property real stageT: 0     // 0 hidden, 1 on stage
   // The readout steps back while the ready animation has the stage.
@@ -300,8 +368,8 @@ PanelWindow {
     Shape {
       id: pool
       readonly property real r: show.height * 0.75
-      x: peak.x + peak.width * 0.44 - r
-      y: peak.y + peak.height * 0.98 - r
+      x: stage.restX + peak.width * 0.44 - r
+      y: stage.restY + peak.height * 0.98 - r
       width: r * 2
       height: r * 2
       opacity: show.stageT * (0.25 + 0.75 * show.glow)
@@ -324,14 +392,97 @@ PanelWindow {
       }
     }
 
+    // Where the Peak stands; the floor, its glow and the smoke stay here
+    // when it lifts off.
+    readonly property real restX: show.width * 0.3 - peak.width / 2
+    readonly property real restY: show.height * 0.5 - peak.height * 0.52 + (1 - show.stageT) * show.height * 0.06
+
+    // Fins and flames, in the Peak's own 80 x 160 drawing, moving with it.
+    Item {
+      id: rig
+      x: peak.x
+      y: peak.y
+      width: 80
+      height: 160
+      transform: Scale { xScale: peak.width / 80; yScale: peak.width / 80 }
+      visible: show.finT > 0 || show.flame > 0
+
+      Repeater {
+        model: [
+          { "w": 40, "h": 74, "top": "#ff9a3c", "bottom": "#ff2a00" },
+          { "w": 28, "h": 54, "top": "#ffe27a", "bottom": "#ff7a1a" },
+          { "w": 14, "h": 32, "top": "#ffffff", "bottom": "#ffd84a" }
+        ]
+        Shape {
+          required property var modelData
+          x: 35 - modelData.w / 2
+          y: 155
+          width: modelData.w
+          height: modelData.h
+          visible: show.flame > 0
+          preferredRendererType: Shape.CurveRenderer
+          transform: Scale {
+            origin.x: modelData.w / 2
+            origin.y: 0
+            xScale: show.flame * (0.9 + 0.1 * show.flicker)
+            yScale: show.flame * show.flicker * show.flameStretch
+          }
+          ShapePath {
+            strokeWidth: -1
+            fillGradient: LinearGradient {
+              x1: 0; y1: 0; x2: 0; y2: modelData.h
+              GradientStop { position: 0.0; color: modelData.top }
+              GradientStop { position: 0.6; color: modelData.bottom }
+              GradientStop { position: 1.0; color: Util.alpha(modelData.bottom, 0) }
+            }
+            PathSvg {
+              path: {
+                var w = modelData.w, h = modelData.h
+                return "M " + w / 2 + " 0 Q " + w + " " + h * 0.15 + " " + w * 0.86 + " " + h * 0.45
+                  + " Q " + w * 0.7 + " " + h * 0.8 + " " + w / 2 + " " + h
+                  + " Q " + w * 0.3 + " " + h * 0.8 + " " + w * 0.14 + " " + h * 0.45
+                  + " Q 0 " + h * 0.15 + " " + w / 2 + " 0 Z"
+              }
+            }
+          }
+        }
+      }
+
+      Repeater {
+        model: [-1, 1]
+        Shape {
+          required property var modelData
+          width: 80
+          height: 160
+          x: -modelData * (1 - show.finT) * 12
+          opacity: Math.min(1, show.finT * 1.5)
+          preferredRendererType: Shape.CurveRenderer
+          ShapePath {
+            strokeColor: Util.alpha("white", 0.35)
+            strokeWidth: 0.8
+            fillGradient: LinearGradient {
+              x1: 0; y1: 126; x2: 0; y2: 162
+              GradientStop { position: 0.0; color: Qt.lighter(show.tint, 1.3) }
+              GradientStop { position: 1.0; color: Qt.darker(show.tint, 1.6) }
+            }
+            PathSvg {
+              path: modelData < 0
+                ? "M 7 126 L 7 156 L -12 162 Q -15 146 -4 134 Z"
+                : "M 62 128 L 64 156 L 82 162 Q 85 146 74 136 Z"
+            }
+          }
+        }
+      }
+    }
+
     // The Peak, big, rising into place.
     PeakArt {
       id: peak
       panel: palette
       height: show.height * 0.6
       width: height / 2
-      x: show.width * 0.3 - width / 2
-      y: show.height * 0.5 - height * 0.52 + (1 - show.stageT) * show.height * 0.06
+      x: stage.restX + show.shakeX
+      y: stage.restY + show.liftY
       colorway: show.colorway
       tint: show.tint
       glow: show.glow
@@ -349,12 +500,12 @@ PanelWindow {
       height: peak.height
       x: peak.x
       y: peak.y + peak.height
-      opacity: 0.22 * show.stageT
+      opacity: 0.22 * show.stageT * Math.max(0, 1 + show.liftY / (show.height * 0.35))
       transform: Scale { origin.y: mirror.height / 2; yScale: -1 }
     }
     Rectangle {
-      x: peak.x - peak.width
-      y: peak.y + peak.height * 0.985
+      x: stage.restX - peak.width
+      y: stage.restY + peak.height * 0.985
       width: peak.width * 3
       height: peak.height * 0.6
       gradient: Gradient {
@@ -369,8 +520,8 @@ PanelWindow {
     Rectangle {
       id: wave
       property real k: 0
-      readonly property real cx: peak.x + peak.width * (35 / 80)
-      readonly property real cy: peak.y + peak.height * (157 / 160)
+      readonly property real cx: stage.restX + peak.width * (35 / 80)
+      readonly property real cy: stage.restY + peak.height * (157 / 160)
       width: peak.width * (0.9 + 5 * k)
       height: width * 0.22
       radius: height / 2
@@ -382,6 +533,62 @@ PanelWindow {
       opacity: k > 0 && k < 1 ? (1 - k) * show.stageT : 0
     }
     NumberAnimation { id: shock; target: wave; property: "k"; from: 0; to: 1; duration: 1100; easing.type: Easing.OutCubic }
+
+    // Exhaust smoke billowing along the floor.
+    Repeater {
+      model: 18
+      Rectangle {
+        id: puff
+        required property int index
+        readonly property real side: index % 2 ? 1 : -1
+        readonly property real fx: stage.restX + peak.width * (35 / 80)
+        readonly property real fy: stage.restY + peak.height * 0.985
+        readonly property real reach: (60 + (index * 37) % 110) * show.u
+        width: (34 + (index * 13) % 30) * show.u
+        height: width
+        radius: width / 2
+        color: index % 3 ? "#d9dce3" : "#b7bcc6"
+        opacity: 0
+        x: fx - width / 2
+        y: fy - height / 2
+        SequentialAnimation {
+          running: show.smoking
+          loops: Animation.Infinite
+          PauseAnimation { duration: (puff.index * 97) % 600 }
+          ParallelAnimation {
+            NumberAnimation { target: puff; property: "x"; from: puff.fx - puff.width / 2; to: puff.fx - puff.width / 2 + puff.side * puff.reach * 2.2; duration: 1300; easing.type: Easing.OutCubic }
+            NumberAnimation { target: puff; property: "y"; from: puff.fy - puff.height / 2; to: puff.fy - puff.height / 2 - (puff.index % 4) * 12 * show.u; duration: 1300; easing.type: Easing.OutCubic }
+            NumberAnimation { target: puff; property: "scale"; from: 0.4; to: 2.2; duration: 1300 }
+            SequentialAnimation {
+              NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.7; duration: 200 }
+              NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 1100; easing.type: Easing.InQuad }
+            }
+          }
+        }
+      }
+    }
+
+    // Speed streaks round the Peak as it climbs.
+    Repeater {
+      model: 8
+      Rectangle {
+        id: streak
+        required property int index
+        visible: show.flying && show.liftY < -show.height * 0.05
+        width: 2 * show.u
+        height: (40 + (index * 23) % 60) * show.u
+        radius: width / 2
+        x: index % 2 ? peak.x - (30 + index * 14) * show.u : peak.x + peak.width + (20 + index * 14) * show.u
+        color: Util.alpha("white", 0.45)
+        NumberAnimation on y {
+          running: streak.visible
+          loops: Animation.Infinite
+          from: show.height * 0.1 + streak.index * 30 * show.u
+          to: show.height
+          duration: 280 + streak.index * 40
+        }
+      }
+    }
 
     // ---- the readout
     Column {
@@ -438,7 +645,8 @@ PanelWindow {
         Text {
           id: big
           textFormat: Text.PlainText
-          text: isFinite(show.shownF) && show.shownF > 0 ? String(Math.round(show.shownF)) : "—"
+          text: show.countText !== "" ? show.countText
+            : isFinite(show.shownF) && show.shownF > 0 ? String(Math.round(show.shownF)) : "—"
           color: show.phase === "preheat"
             ? Qt.tint("#f4eef6", Util.alpha(show.tint, 0.25 + 0.5 * show.progress))
             : Qt.tint("#ffffff", Util.alpha(show.tint, 0.35))
@@ -449,6 +657,7 @@ PanelWindow {
         }
         Text {
           y: big.height * 0.14
+          visible: show.countText === ""
           textFormat: Text.PlainText
           text: "°F"
           color: Util.alpha("#f4eef6", 0.6)
