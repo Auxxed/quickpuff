@@ -33,6 +33,20 @@ def test_steps_past_the_end_of_the_session_are_dropped():
     assert [a["at"] for a in ramps.plan([(10, 10), (50, 20)], 500, "live", session_s=45)] == [10]
 
 
+def test_no_steps_in_the_last_seconds_when_the_peak_cools_anyway():
+    assert [a["at"] for a in ramps.plan([(10, 10), (26, 20)], 500, "live", session_s=30)] == [10]
+
+
+def test_presets_fit_the_session():
+    assert ramps.steps_for("rise", 30) == [(10.0, 20.0), (20.0, 40.0)]
+    assert ramps.steps_for("rise", 55) == [(20.0, 20.0), (40.0, 40.0)]
+    for name in ramps.PRESETS:
+        for length in (20, 30, 45, 90):
+            steps = ramps.steps_for(name, length)
+            assert len(ramps.plan(steps, 500, "live", length)) >= 1
+            assert all(at < length - ramps.COAST_S for at, _ in steps)
+
+
 @pytest.mark.parametrize("bad", [[], [(500, 10)], [(10, 400)], [(1, 1)] * 9, [("x", 1)], [[1, 2, 3]]])
 def test_bad_steps_are_refused(bad):
     with pytest.raises((ValueError, TypeError)):
@@ -132,7 +146,8 @@ def test_a_boost_ramp_plays_each_step_then_puts_the_boost_back(tmp_path):
     d = daemon(tmp_path, peak)
     save_config({**load_config(), "ramps": {"1": "rise"}})
     play(d)
-    assert peak.calls[:2] == [("boost", 20.0, 15.0), ("boost", 36.0, 15.0)]
+    # Rise on a 45 s profile: 40 s heated before the coast, steps at 16 and 32 s.
+    assert peak.calls[:2] == [("boost", 20.0, 16.0), ("boost", 36.0, 13.0)]
     assert peak.calls[-1] == ("boost-setting", 15.0, 15.0)
     assert d.status["ramp_running"] is None
 
@@ -184,35 +199,71 @@ def test_the_probe_needs_a_yes(tmp_path):
         asyncio.run(d._ramp_probe({}))
 
 
-def test_the_probe_finds_live_targets_and_always_stops_the_cycle(tmp_path):
-    peak = HeaterPeak(takes_live=True)
+def probing(tmp_path, takes_live):
+    """A daemon and a Peak whose heater sits at its target once Ready and,
+    if it takes live targets, follows a new one."""
+    peak = HeaterPeak(takes_live=takes_live)
     d = daemon(tmp_path, peak)
     d.status["operating_state_id"] = IDLE
-    original_start = peak.start_heat_cycle
+    original_start, original_set = peak.start_heat_cycle, peak.set_live_target_f
 
     async def start():
         await original_start()
         d.status["operating_state_id"] = ACTIVE
-        d.status["temp_f"] = 545.0  # the heater following the new target
+        d.status["heater_temp_f"] = 519.0
 
-    peak.start_heat_cycle = start
+    async def set_target(f):
+        await original_set(f)
+        if takes_live and d.status["operating_state_id"] == ACTIVE:
+            d.status["heater_temp_f"] = f - 1
+
+    peak.start_heat_cycle, peak.set_live_target_f = start, set_target
+    return d, peak
+
+
+def test_the_probe_finds_live_targets_and_always_stops_the_cycle(tmp_path):
+    d, peak = probing(tmp_path, takes_live=True)
     report = asyncio.run(d._ramp_probe({"confirm": True}))
-    assert report["method"] == "live" and report["readback_f"] == 545.0
+    assert report["method"] == "live" and report["readback_f"] == 545.0 and report["heater_rise_f"] == 25.0
     assert ("stop",) in peak.calls and peak.calls[-1] == ("target", 520.0)
     assert load_config()["ramp_method"] == "live" and load_config()["ramp_probed"] is True
 
 
 def test_a_peak_that_ignores_live_targets_gets_boost(tmp_path):
-    peak = HeaterPeak(takes_live=False)
-    d = daemon(tmp_path, peak)
-    d.status["operating_state_id"] = IDLE
-    original_start = peak.start_heat_cycle
-
-    async def start():
-        await original_start()
-        d.status["operating_state_id"] = ACTIVE
-        d.status["temp_f"] = 521.0
-
-    peak.start_heat_cycle = start
+    d, peak = probing(tmp_path, takes_live=False)
     assert asyncio.run(d._ramp_probe({"confirm": True}))["method"] == "boost"
     assert ("stop",) in peak.calls
+
+
+def test_a_heater_still_warming_up_isnt_mistaken_for_live(tmp_path):
+    d, peak = probing(tmp_path, takes_live=False)
+    original = peak.set_live_target_f
+
+    async def warming(f):
+        await original(f)
+        d.status["heater_temp_f"] = 519.0  # finishing its climb to the old target
+
+    started = peak.start_heat_cycle
+
+    async def start():
+        await started()
+        d.status["heater_temp_f"] = 480.0  # Ready, but the heater not there yet
+
+    peak.start_heat_cycle, peak.set_live_target_f = start, warming
+    report = asyncio.run(d._ramp_probe({"confirm": True}))
+    assert report["heater_rise_f"] >= 10 and report["method"] == "boost"
+
+
+def test_no_heater_reading_is_no_verdict(tmp_path):
+    d, peak = probing(tmp_path, takes_live=True)
+    d.status["heater_temp_f"] = None
+    peak.start_heat_cycle = HeaterPeak.start_heat_cycle.__get__(peak)
+
+    async def start():
+        peak.calls.append(("start",))
+        d.status["operating_state_id"] = ACTIVE
+
+    peak.start_heat_cycle = start
+    with pytest.raises(RuntimeError):
+        asyncio.run(d._ramp_probe({"confirm": True}))
+    assert ("stop",) in peak.calls and "ramp_probed" not in load_config()

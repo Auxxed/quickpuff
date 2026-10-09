@@ -42,6 +42,36 @@ def test_silence_has_no_tempo():
     assert not tracker.playing and tracker.tempo() is None
 
 
+def test_the_followed_tempo_holds_through_a_brief_disagreement():
+    lock = beat.TempoLock()
+    assert lock.update(144) is None and lock.update(143) == 143
+    assert lock.update(95) == 143 and lock.update(96) == 143  # the 2-against-3 swing
+    assert lock.update(144) == 143 and lock.update(141) == 143  # no drift
+    assert [lock.update(96) for _ in range(3)][-1] == 96   # a real change, held
+    assert lock.update(None) is None and lock.bpm is None
+
+
+def test_a_rhythm_that_repeats_at_two_and_three_beats_keeps_the_followed_tempo():
+    # Kicks on a 3+3+2 trap pattern at 144: repeats at both 2 and 3 eighth notes.
+    rate, seconds, bpm = beat.RATE, 10.0, 144
+    out = array.array("h", [0]) * int(seconds * rate)
+    eighth = 60.0 / bpm / 2
+    t, pattern, k = 0.0, [3, 3, 2], 0
+    while t < seconds:
+        start = int(t * rate)
+        for i in range(int(0.1 * rate)):
+            if start + i < len(out):
+                out[start + i] = int(20000 * math.exp(-i / (0.03 * rate)) * math.sin(2 * math.pi * 60 * i / rate))
+        t += pattern[k % 3] * eighth
+        k += 1
+    tracker = beat.BeatTracker()
+    tracker.feed(out.tobytes())
+    free = tracker.tempo()[0]
+    for prefer in (free, 96.0, 144.0):
+        kept = tracker.tempo(prefer)[0]
+        assert kept == free or abs(kept - prefer) <= 0.04 * prefer
+
+
 def test_dance_picks_a_style_and_the_peaks_tempo_setting():
     assert beat.dance(80)[0] == "breathe" and beat.dance(110)[0] == "spin" and beat.dance(140)[0] == "disco"
     style, tempo = beat.dance(120)
@@ -68,7 +98,7 @@ class Heard:
     def __init__(self, bpm):
         self.bpm = bpm
 
-    def tempo(self):
+    def tempo(self, prefer=None):
         return None if self.bpm is None else (self.bpm, 0.9)
 
 
@@ -84,6 +114,8 @@ def test_the_lantern_dances_while_music_plays(tmp_path, monkeypatch):
     d._music_palette = no_art
     asyncio.run(d._set_ambient("visualizer", True))
     d._beats = Heard(128)
+    asyncio.run(d._ambient_step())
+    assert peak.lights == []  # one reading isn't a tempo yet
     asyncio.run(d._ambient_step())
     colors, style, tempo, show = peak.lights[-1]
     assert style == "disco" and show is True and len(colors) >= 2

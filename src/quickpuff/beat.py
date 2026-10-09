@@ -19,6 +19,7 @@ FPS = RATE / FRAME             # 40 frames a second
 WINDOW_FRAMES = int(8 * FPS)   # eight seconds
 MIN_BPM, MAX_BPM = 70.0, 180.0
 SILENCE_RMS = 120.0            # of 32768: below this it's not music
+PREFER_SHARE = 0.8             # the followed tempo stays while this close to the best
 
 
 class BeatTracker:
@@ -62,9 +63,12 @@ class BeatTracker:
         """Music (not silence) over the last second or two."""
         return len(self.rms) >= FPS and sum(self.rms) / len(self.rms) > SILENCE_RMS
 
-    def tempo(self) -> tuple[float, float] | None:
+    def tempo(self, prefer: float | None = None) -> tuple[float, float] | None:
         """(beats per minute, confidence 0-1) from the last eight seconds, or
-        None without enough music to tell."""
+        None without enough music to tell. With `prefer` (the tempo already
+        being followed), that tempo wins while it repeats nearly as strongly
+        as the best: trap and swing repeat at both 2 and 3 beats, and the
+        estimate shouldn't hop between them."""
         if not self.playing or len(self.onsets) < WINDOW_FRAMES * 0.75:
             return None
         curve = list(self.onsets)
@@ -78,6 +82,13 @@ class BeatTracker:
         for lag in range(lo, hi + 1):
             scores[lag] = sum(curve[i] * curve[i + lag] for i in range(len(curve) - lag)) / power
         best = max(scores, key=scores.get)
+        if prefer:
+            lag = round(60 * FPS / prefer)
+            near = [l for l in (lag - 1, lag, lag + 1) if l in scores]
+            if near:
+                kept = max(near, key=scores.get)
+                if scores[kept] >= PREFER_SHARE * scores[best]:
+                    best = kept
         # Refine between frames, then prefer the tempo a listener would tap.
         left, mid, right = scores.get(best - 1, 0.0), scores[best], scores.get(best + 1, 0.0)
         bend = (left - right) / (2 * (left - 2 * mid + right)) if (left - 2 * mid + right) else 0.0
@@ -87,6 +98,41 @@ class BeatTracker:
         while bpm > 160:
             bpm /= 2
         return round(bpm, 1), max(0.0, min(1.0, mid))
+
+
+class TempoLock:
+    """The tempo the lantern follows: taken once two readings agree, and
+    changed only when a different one holds for `hold` readings in a row (or
+    the song changes), so it doesn't flip styles every few seconds."""
+
+    def __init__(self, hold: int = 3, tolerance: float = 0.04) -> None:
+        self.hold, self.tolerance = hold, tolerance
+        self.bpm: float | None = None
+        self._candidate: float | None = None
+        self._count = 0
+
+    def _same(self, a: float, b: float) -> bool:
+        return abs(a - b) <= self.tolerance * b
+
+    def reset(self) -> None:
+        self.bpm, self._candidate, self._count = None, None, 0
+
+    def update(self, bpm: float | None) -> float | None:
+        if bpm is None:
+            self.reset()
+            return None
+        if self.bpm is not None and self._same(bpm, self.bpm):
+            # Agreeing readings leave it be: a drifting number would cross a
+            # style's edge (breathe/spin at 95) and rewrite the lantern.
+            self._candidate, self._count = None, 0
+            return self.bpm
+        if self._candidate is not None and self._same(bpm, self._candidate):
+            self._count += 1
+        else:
+            self._candidate, self._count = bpm, 1
+        if self._count >= (2 if self.bpm is None else self.hold):
+            self.bpm, self._candidate, self._count = round(bpm, 1), None, 0
+        return self.bpm
 
 
 # How the lantern dances: a style for the tempo, and the Peak's own tempo

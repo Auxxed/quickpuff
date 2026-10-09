@@ -25,12 +25,19 @@ MAX_STEPS = 8
 MAX_STEP_AT_S = 120.0
 METHODS = ("live", "boost")
 
-# Offsets (°F) from the profile's own temperature, seconds after Ready.
+# The Peak lets the heater coast for about the last five seconds of every
+# session (measured: it cools whatever the target), so steps stop before then.
+COAST_S = 5.0
+DEFAULT_SESSION_S = 30.0
+
+# Offsets (°F) from the profile's own temperature, at a fraction of the
+# session's heated stretch (its length less the coast), so a preset fits a
+# 30 s profile and a 60 s one alike.
 PRESETS: dict[str, dict[str, Any]] = {
-    "rise": {"label": "Rise", "line": "Starts at your temperature, climbs 20 then 40 °F", "steps": [(15, 20), (30, 40)]},
-    "cloud": {"label": "Cloud climb", "line": "Up 15, then 30, then 45 °F: big finish", "steps": [(10, 15), (20, 30), (30, 45)]},
-    "wave": {"label": "Wave", "line": "Swells 30 °F and eases back, twice", "steps": [(10, 30), (20, 0), (30, 30), (40, 0)]},
-    "low": {"label": "Low & slow", "line": "Drops 40 °F for flavour, comes back up by the end", "steps": [(0, -40), (20, -20), (35, 0)]},
+    "rise": {"label": "Rise", "line": "Starts at your temperature, climbs 20 then 40 °F", "steps": [(0.4, 20), (0.8, 40)]},
+    "cloud": {"label": "Cloud climb", "line": "Up 15, then 30, then 45 °F: big finish", "steps": [(0.3, 15), (0.6, 30), (0.9, 45)]},
+    "wave": {"label": "Wave", "line": "Swells 30 °F and eases back, twice", "steps": [(0.2, 30), (0.4, 0), (0.6, 30), (0.8, 0)]},
+    "low": {"label": "Low & slow", "line": "Drops 40 °F for flavour, comes back up by the end", "steps": [(0.0, -40), (0.45, -20), (0.85, 0)]},
 }
 
 
@@ -67,11 +74,15 @@ def normalize(steps: list[Any]) -> list[tuple[float, float]]:
     return sorted(out)
 
 
-def steps_for(choice: Any) -> list[tuple[float, float]] | None:
-    """A stored ramp (a preset name or custom steps) as steps, or None."""
+def steps_for(choice: Any, session_s: float | None = None) -> list[tuple[float, float]] | None:
+    """A stored ramp (a preset name or custom steps) as steps in seconds after
+    Ready, or None. Presets are fitted to the session's length."""
     if isinstance(choice, str):
         preset = PRESETS.get(choice)
-        return None if preset is None else normalize(preset["steps"])
+        if preset is None:
+            return None
+        heated = max(1.0, (session_s or DEFAULT_SESSION_S) - COAST_S)
+        return normalize([(frac * heated, offset) for frac, offset in preset["steps"]])
     if isinstance(choice, list):
         try:
             return normalize(choice)
@@ -87,14 +98,14 @@ def plan(steps: list[tuple[float, float]], base_f: float, method: str, session_s
     targets clamped to the Peak's range. With "boost", a step can only add to
     the base temperature (a boost doesn't stack on a boost: each one is sized
     from the base), downward steps are dropped, and each boost lasts until
-    the next step or the end of the session. Steps past the session's end
-    are dropped."""
+    the next step or the end of the session. Steps in the session's last
+    COAST_S seconds (when the Peak cools regardless) are dropped."""
     if method not in METHODS:
         raise ValueError(f"Unknown ramp method {method!r}")
     actions: list[dict[str, Any]] = []
     current = base_f
     for i, (at, offset) in enumerate(steps):
-        if session_s is not None and at >= session_s:
+        if session_s is not None and at >= session_s - COAST_S:
             break
         target = min(MAX_TEMP_F, max(MIN_TEMP_F, base_f + offset))
         if method == "boost":
@@ -113,9 +124,9 @@ def plan(steps: list[tuple[float, float]], base_f: float, method: str, session_s
     return actions
 
 
-def describe(choice: Any) -> dict[str, Any] | None:
+def describe(choice: Any, session_s: float | None = None) -> dict[str, Any] | None:
     """For the status and panel: the ramp's name, a line about it, its steps."""
-    steps = steps_for(choice)
+    steps = steps_for(choice, session_s)
     if steps is None:
         return None
     if isinstance(choice, str):

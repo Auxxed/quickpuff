@@ -504,6 +504,8 @@ class QuickPuffDaemon:
         self.music_light = _as_bool(load_config().get("music_light"))
         self.visualizer = _as_bool(load_config().get("visualizer"))
         self._beats = beat.BeatTracker()
+        self._tempo_lock = beat.TempoLock()
+        self._tempo_track = ""
         self._listen_task: asyncio.Task | None = None
         self._ambient_task: asyncio.Task | None = None
         # What the lantern was last given, and on which link (a new link starts over).
@@ -1770,8 +1772,9 @@ class QuickPuffDaemon:
         cfg = load_config()
         stored = cfg.get("ramps") if isinstance(cfg.get("ramps"), dict) else {}
         shown = {}
+        lengths = {p.get("index"): p.get("time") for p in self.status.get("profiles") or [] if isinstance(p, dict)}
         for key, choice in stored.items():
-            described = ramps.describe(choice)
+            described = ramps.describe(choice, lengths.get(int(key)) if str(key).isdigit() else None)
             if described and str(key).isdigit() and 0 <= int(key) < PROFILE_COUNT:
                 shown[str(key)] = described
         method = cfg.get("ramp_method") if cfg.get("ramp_method") in ramps.METHODS else "boost"
@@ -1795,7 +1798,7 @@ class QuickPuffDaemon:
         save_config(cfg)
         self.status.update(self._ramp_fields())
         await self._broadcast_event("status", self.status)
-        return self._ramp_fields()
+        return {**self._ramp_fields(), "profiles": self.status.get("profiles") or []}
 
     def _cancel_ramp(self) -> None:
         task, self._ramp_task = self._ramp_task, None
@@ -1808,8 +1811,8 @@ class QuickPuffDaemon:
         index = self.status.get("current_profile")
         cfg = load_config()
         stored = cfg.get("ramps") if isinstance(cfg.get("ramps"), dict) else {}
-        steps = ramps.steps_for(stored.get(str(index))) if isinstance(index, int) else None
         profile = next((p for p in self.status.get("profiles") or [] if p.get("index") == index), None)
+        steps = ramps.steps_for(stored.get(str(index)), (profile or {}).get("time")) if isinstance(index, int) else None
         if not steps or not profile or not profile.get("temp_f"):
             return
         method = cfg.get("ramp_method") if cfg.get("ramp_method") in ramps.METHODS else "boost"
@@ -1837,8 +1840,12 @@ class QuickPuffDaemon:
                 self.status.update(self._ramp_fields())
                 await self._broadcast_event("status", self.status)
                 log.info("Ramp %s: step %d/%d, %s°F (%s)", label, step + 1, len(actions), action["target_f"], method)
-            # Let the last step play out before putting things back.
-            await asyncio.sleep(30)
+            # Let the last step play out, then put things back once the session
+            # is over (not on a timer: the next session may be another profile's).
+            for _ in range(int((float(profile.get("time") or 60) + 60) * 2)):
+                if self.status.get("operating_state_id") != int(OperatingState.HEAT_CYCLE_ACTIVE):
+                    break
+                await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -1877,6 +1884,7 @@ class QuickPuffDaemon:
                     raise RuntimeError("The Peak didn't reach temperature within two minutes")
                 await asyncio.sleep(0.5)
             await asyncio.sleep(3)
+            before = self.status.get("heater_temp_f")
             async with self._cmd_lock:
                 base = await dev.get_live_target_f()
                 await dev.set_live_target_f(base + 25)
@@ -1884,13 +1892,17 @@ class QuickPuffDaemon:
             temps = []
             for _ in range(14):
                 await asyncio.sleep(1)
-                temp = self.status.get("temp_f")
+                temp = self.status.get("heater_temp_f")
                 if isinstance(temp, (int, float)):
                     temps.append(float(temp))
-            rise = (max(temps[-5:]) - base) if temps else 0.0
-            report = {"base_f": round(base, 1), "asked_f": round(base + 25, 1), "readback_f": round(readback, 1),
+            if not temps or not isinstance(before, (int, float)):
+                raise RuntimeError("No heater temperature came in during the test, so it couldn't tell; try again")
+            rise = max(temps[-5:]) - float(before)
+            report = {"base_f": round(base, 1), "before_f": round(float(before), 1), "asked_f": round(base + 25, 1), "readback_f": round(readback, 1),
                       "heater_rise_f": round(rise, 1), "temps": [round(t) for t in temps]}
-            live = abs(readback - (base + 25)) < 2 and rise >= 10
+            # It settles near the new target, well past the old one (the
+            # heater can still be climbing to the old one when we write).
+            live = abs(readback - (base + 25)) < 2 and max(temps[-5:]) >= base + 15
             report["method"] = "live" if live else "boost"
         finally:
             try:
@@ -2017,9 +2029,13 @@ class QuickPuffDaemon:
         if not colors and self.theme_light:
             colors = await asyncio.to_thread(ambient.theme_palette)
             source = "theme" if colors else None
-        heard = self._beats.tempo() if self.visualizer else None
-        if heard:
-            bpm = heard[0]
+        if track != self._tempo_track:
+            self._tempo_track = track
+            self._tempo_lock.reset()
+        heard = self._beats.tempo(self._tempo_lock.bpm) if self.visualizer else None
+        locked = self._tempo_lock.update(heard[0] if heard else None)
+        if heard and locked:
+            bpm = locked
             style, tempo = beat.dance(bpm)
             colors = colors or await asyncio.to_thread(ambient.theme_palette) or VISUALIZER_COLORS
             if len(colors) == 1:
@@ -3040,6 +3056,22 @@ class QuickPuffDaemon:
         self._resting = False
         self._demo = None
         self._cancel_demo_task()
+        # The lantern and audio loops and a ramp: stopped and waited for (the
+        # listener kills its pw-record on the way out), so shutdown doesn't
+        # hang behind them.
+        loops = [t for t in (self._ambient_task, self._listen_task, self._ramp_task) if t and not t.done()]
+        self.visualizer = False
+        for task in loops:
+            task.cancel()
+        if loops:
+            await asyncio.wait(loops, timeout=3)
+        self._ambient_task = self._listen_task = self._ramp_task = None
+        if self._session_bus is not None:
+            try:
+                self._session_bus.disconnect()
+            except Exception:
+                pass
+            self._session_bus = None
         for task in (self._rest_task, self._wake_task, self._profile_refresh_task):
             if task:
                 task.cancel()
@@ -3059,7 +3091,18 @@ class QuickPuffDaemon:
                 pass
         if self._server:
             self._server.close()
-            await self._server.wait_closed()
+            # wait_closed() waits for every client to hang up, and the bar and
+            # panel keep an event feed open for good: close them from this end.
+            for writer in list(self.clients):
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+            self.clients.clear()
+            try:
+                await asyncio.wait_for(self._server.wait_closed(), 2)
+            except asyncio.TimeoutError:
+                log.warning("Some clients didn't hang up; stopping anyway")
         self._remove_socket()
 
 
