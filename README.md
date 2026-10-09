@@ -206,6 +206,8 @@ Control → Showtime or with `quickpuff showtime off|corner|stage`.
 signature chime at Ready, a sound for each ready animation (countdown beeps and
 a liftoff for the rocket, a cannon pop for confetti, bubbling lava, an aurora
 shimmer, fireworks, smoke, a neon buzz) and a resolve when the session is over.
+Each one is timed to its picture: a puff leaves with every smoke ring, the neon
+buzz flickers with the sign, and a firework booms as its shell bursts.
 Switch them off under Control → Showtime, or with `quickpuff sounds off`;
 `quickpuff sounds on --volume 50` sets the level. They play through PipeWire's
 `pw-play`.
@@ -424,8 +426,10 @@ The panel's display type is [Rajdhani](https://fonts.google.com/specimen/Rajdhan
 by the Indian Type Foundry, the face the Puffco app uses for its numbers and
 headings, bundled in `fonts/` under the SIL Open Font License (`fonts/OFL.txt`).
 
-The sounds in `sounds/` were made for QuickPuff with ElevenLabs' sound-effects
-model, then trimmed, levelled and encoded as Ogg Vorbis.
+The sounds in `sounds/` are synthesised from scratch by `tools/make-sounds.py`
+(oscillators, filtered noise and a small reverb) and are MIT like the rest of
+the repository. `python3 tools/make-sounds.py` rebuilds them; it needs numpy and
+ffmpeg.
 
 ## License
 
