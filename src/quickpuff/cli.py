@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, ramps
 from .constants import READY_ANIMATIONS, SHOWTIME_MODES
 from .paths import DEFAULTS, MONITOR_NAME, clamp_volume, load_config, save_config, ui_settings
 from .paths import switched_on as _switched_on
@@ -529,12 +529,26 @@ async def async_main(argv: list[str] | None = None) -> int:
     surprise = sub.add_parser("surprise", help="Give the profile you used a new light after each session")
     surprise.add_argument("action", choices=["on", "off"])
 
+    ramp = sub.add_parser("ramp", help="Heat ramps: a session that changes temperature as it goes")
+    ramp_sub = ramp.add_subparsers(dest="ramp_cmd")
+    ramp_set = ramp_sub.add_parser("set", help="Give a profile a ramp: a preset, or --steps")
+    ramp_set.add_argument("index", type=int, help="Heat profile, 0-3")
+    ramp_set.add_argument("preset", nargs="?", help="rise, cloud, wave or low")
+    ramp_set.add_argument("--steps", nargs="+", metavar="S:F", help="Your own steps: seconds after Ready:offset °F, e.g. 15:+20 30:+40")
+    ramp_off = ramp_sub.add_parser("off", help="Take a profile's ramp off")
+    ramp_off.add_argument("index", type=int)
+    ramp_probe = ramp_sub.add_parser("probe", help="One short test cycle to learn how this Peak takes a ramp")
+    ramp_probe.add_argument("--yes", action="store_true", help="Yes, heat the Peak now (I'm next to it)")
+
     wrapped = sub.add_parser("wrapped", help="Your month, year or all time in sessions, Wrapped style")
     wrapped.add_argument("period", choices=["month", "year", "all"], nargs="?", default="month")
     wrapped.add_argument("--show", action="store_true", help="Play it on screen as an animated recap (saves the card to ~/Pictures)")
 
     theme_light = sub.add_parser("theme-light", help="Light the lantern in your Omarchy theme's colours, and follow theme changes")
     theme_light.add_argument("action", choices=["on", "off"])
+
+    visualizer = sub.add_parser("visualizer", help="The lantern dances to what's playing: the Peak's own animation at the music's tempo")
+    visualizer.add_argument("action", choices=["on", "off"])
 
     music_light = sub.add_parser("music-light", help="Light the lantern in the colours of the album art playing (overrides the theme light)")
     music_light.add_argument("action", choices=["on", "off"])
@@ -802,9 +816,38 @@ async def async_main(argv: list[str] | None = None) -> int:
     elif cmd == "surprise":
         result = await call("set_surprise", {"enable": args.action == "on"})
         print(json.dumps(result) if raw else f"Surprise me: {args.action}")
+    elif cmd == "ramp":
+        if args.ramp_cmd == "set":
+            if not args.preset and not args.steps:
+                raise SystemExit("Name a preset (rise, cloud, wave, low) or give --steps")
+            payload = {"index": args.index}
+            if args.steps:
+                payload["steps"] = [list(st) for st in ramps.parse_steps(args.steps)]
+            else:
+                payload["preset"] = args.preset
+            result = await call("set_ramp", payload)
+        elif args.ramp_cmd == "off":
+            result = await call("set_ramp", {"index": args.index, "off": True})
+        elif args.ramp_cmd == "probe":
+            if not args.yes:
+                raise SystemExit("This heats the Peak for about a minute. Run `quickpuff ramp probe --yes` when you're next to it.")
+            result = await call("ramp_probe", {"confirm": True}, timeout=240)
+            print(json.dumps(result) if raw else (
+                f"Probe done: this Peak takes ramps by {result['method']} "
+                f"(asked {result['asked_f']}°F, it read back {result['readback_f']}°F, heater rose {result['heater_rise_f']}°F)"))
+            return
+        else:
+            result = await call("status", {})
+        if raw:
+            print(json.dumps({k: result.get(k) for k in ("ramps", "ramp_method", "ramp_probed")}))
+        else:
+            print(ramp_text(result))
     elif cmd == "wrapped":
         result = await call("wrapped", {"period": args.period, "show": args.show})
         print(json.dumps(result) if raw else wrapped_text(result))
+    elif cmd == "visualizer":
+        result = await call("set_visualizer", {"enable": args.action == "on"})
+        print(json.dumps(result) if raw else f"Visualiser: {args.action} (it listens to your desktop's sound, never kept, and lights the lantern while music plays)")
     elif cmd in ("theme-light", "music-light"):
         key = cmd.replace("-", "_")
         result = await call(f"set_{key}", {"enable": args.action == "on"})
@@ -926,4 +969,18 @@ def wrapped_text(w: dict) -> str:
     if w.get("hottest"):
         lines.append(f"  Hottest session: {w['hottest']['temp_f']}°F · average heat-up {w.get('avg_heatup_s') or '?'} s")
     lines.append(f"  You're a {w['personality']['title']}: {w['personality']['line']}")
+    return "\n".join(lines)
+
+
+def ramp_text(status: dict) -> str:
+    """The ramps on each profile, and how they're played."""
+    method = status.get("ramp_method", "boost")
+    lines = [f"Ramps play by {method}" + ("" if status.get("ramp_probed") else " (run `quickpuff ramp probe --yes` once, next to the Peak, to check for live targets)")]
+    names = {p.get("index"): p.get("name") for p in status.get("profiles") or [] if isinstance(p, dict)}
+    shown = status.get("ramps") or {}
+    for index in range(4):
+        ramp = shown.get(str(index))
+        name = names.get(index) or f"Profile {index + 1}"
+        lines.append(f"  {index} {name}: " + (f"{ramp['label']} ({ramp['line']})" if ramp else "no ramp"))
+    lines.append("Presets: " + ", ".join(f"{k} ({v['label']})" for k, v in ramps.PRESETS.items()))
     return "\n".join(lines)

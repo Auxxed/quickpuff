@@ -9,7 +9,8 @@ Section {
   glyph: ""
   title: "LANTERN COLORS"
   trailing: panel.ambientNow
-    ? (panel.ambientNow.source === "music" ? "Following the music" : "Following your theme")
+    ? (panel.ambientNow.source === "visualizer" ? "Dancing · " + panel.ambientNow.bpm + " BPM"
+       : panel.ambientNow.source === "music" ? "Following the music" : "Following your theme")
     : ""
 
   SwitchRow {
@@ -26,6 +27,14 @@ Section {
     label: "Match the album art playing"
     checked: panel.musicLightOn
     onToggled: panel.toggleMusicLight()
+  }
+
+  SwitchRow {
+    panel: ambientSection.panel
+    width: parent.width
+    label: "Dance to the music"
+    checked: panel.visualizerOn
+    onToggled: panel.toggleVisualizer()
   }
 
   // The colours on the lantern now, and what they came from.
@@ -54,7 +63,7 @@ Section {
       textFormat: Text.PlainText
       elide: Text.ElideRight
       text: !panel.ambientNow ? ""
-        : panel.ambientNow.source === "music"
+        : panel.ambientNow.source !== "theme"
           ? (panel.ambientNow.track || "Now playing")
           : "Your theme's colors"
       color: panel.foreground
@@ -67,7 +76,9 @@ Section {
     width: parent.width
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
-    text: panel.themeLightOn || panel.musicLightOn
+    text: panel.visualizerOn
+      ? "While music plays the lantern dances to its tempo in the album's colours (or your theme's). QuickPuff listens to your desktop's sound to find the beat; nothing is kept."
+      : panel.themeLightOn || panel.musicLightOn
       ? "The lantern takes these colours whenever it's on (your heat profiles keep theirs). Switch both off and it gets its own light back."
       : "Let the lantern glow in your theme's colours, following you when you switch themes, or in the colours of the album you're playing."
     color: panel.dim

@@ -236,7 +236,27 @@ profiles' lights (Lights → Lantern colors):
   player is playing, the lantern takes the colours of the album art. It wins
   over the theme light until the music stops.
 
-Switch both off and the lantern gets back the light it had before.
+- **Dance to the music** (`quickpuff visualizer on`): while music plays, the
+  lantern runs one of the Peak's own animations (breathe, spin or disco) at the
+  song's tempo, in the album's colours or your theme's. QuickPuff finds the beat
+  by listening to your desktop's sound; it lights the lantern while it plays.
+
+Switch them all off and the lantern gets back the light it had before.
+
+### Heat ramps
+
+A ramp changes the temperature as a session goes (Control → Heat ramp, per
+profile): **Rise** climbs 20 then 40 °F, **Cloud climb** goes up in three steps
+for a big finish, **Wave** swells and eases back, and **Low & slow** drops for
+flavour and comes back up. Or write your own:
+`quickpuff ramp set 1 --steps 10:+15 25:+30` (seconds after Ready : °F from the
+profile's temperature). Pressing heat, stop or boost, or the session ending,
+stops a ramp where it is; temperatures stay within 400–620 °F.
+
+Ramps play through the Peak's Boost (up only, at most 36 °F at a time) until
+`quickpuff ramp probe --yes` shows your Peak also takes a new target
+mid-session. The probe heats the Peak for about a minute, so run it once when
+you're next to it.
 
 ### Wrapped
 
@@ -352,6 +372,9 @@ quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, 
 quickpuff surprise on              # a new light after each session
 quickpuff theme-light on           # the lantern in your Omarchy theme's colours
 quickpuff music-light on           # the lantern in the playing album art's colours
+quickpuff visualizer on            # the lantern dances to what's playing
+quickpuff ramp set 1 rise          # a heat ramp on profile 1 (rise, cloud, wave, low or --steps)
+quickpuff ramp                     # each profile's ramp; `ramp off 1`, `ramp probe --yes`
 quickpuff wrapped year --show      # your year in sessions, on screen (month, year or all)
 quickpuff showtime stage           # heat cycles over the desktop: off, corner or stage
 quickpuff sounds on --volume 70    # Showtime and ready-animation sounds
@@ -400,6 +423,10 @@ shows what you have):
   `colors.toml` (in `~/.local/state/omarchy/current/theme`) every few seconds,
   the same bounded, no-symlink read as its own files. With the music light on
   it asks media players over MPRIS (the session bus) what's playing.
+- **Audio:** with the visualiser on, the daemon records your desktop's output
+  through PipeWire (`pw-record`, 8 kHz mono) to find the beat. The sound is
+  analysed as it arrives and only a few seconds of loudness figures are held;
+  nothing is saved or sent anywhere. Turning the visualiser off stops it.
 - **Bluetooth:** the daemon holds the one connection to your Peak. While it
   connects, it's the system's pairing agent so the Peak can bond without a
   prompt. It says yes only for the Peak it's connecting to, refuses pairing

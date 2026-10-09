@@ -1182,6 +1182,27 @@ class PuffcoBLE:
         await self.write(f"/u/app/hc/{index}/btim", float(seconds), data_type="float32")
         await self._reload_if_current(index)
 
+    async def get_live_target_f(self) -> float:
+        """The running heat cycle's target (/p/app/thc), not a saved profile's."""
+        return float(PuffcoUtils.c_to_f(float(await self.read("/p/app/thc/temp", 0, 4, "float32"))))
+
+    async def set_live_target_f(self, fahrenheit: float) -> None:
+        """Move the running heat cycle's target; the saved profile keeps its own."""
+        await self.write("/p/app/thc/temp", float(PuffcoUtils.f_to_c(fahrenheit)), data_type="float32")
+
+    async def get_live_boost(self) -> tuple[float, float]:
+        return await self.get_profile_boost_temp_f(None), await self.get_profile_boost_time(None)
+
+    async def set_live_boost(self, fahrenheit: float, seconds: float) -> None:
+        """Size the running cycle's Boost (°F up, for seconds), leaving the profile's."""
+        await self.write("/p/app/thc/btmp", float(fahrenheit), data_type="float32")
+        await self.write("/p/app/thc/btim", float(seconds), data_type="float32")
+
+    async def live_boost(self, fahrenheit: float, seconds: float) -> None:
+        """A Boost of this size and length on the running cycle."""
+        await self.set_live_boost(fahrenheit, seconds)
+        await self.boost_heat_cycle()
+
     get_current_profile_name = get_profile_name
     get_current_profile_temp = get_profile_temp
     get_current_profile_duration = get_profile_time

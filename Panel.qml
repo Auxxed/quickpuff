@@ -88,7 +88,9 @@ Panel {
       pendingQtip = undefined
       pendingSurprise = undefined
       pendingThemeLight = undefined
+      pendingRamp = undefined
       pendingMusicLight = undefined
+      pendingVisualizer = undefined
       pendingCleanEvery = -1
       pendingBrightness = -1
       pendingDeviceName = ""
@@ -416,7 +418,9 @@ Panel {
   property var pendingQtip: undefined
   property var pendingSurprise: undefined
   property var pendingThemeLight: undefined
+  property var pendingRamp: undefined
   property var pendingMusicLight: undefined
+  property var pendingVisualizer: undefined
   property int pendingCleanEvery: -1
   property int pendingBrightness: -1
   property string page: "control"
@@ -821,6 +825,39 @@ Panel {
     onTriggered: if (!root.cycleOn) root.applyLightColor(root.pickHex)
   }
 
+  // Heat ramps: the active profile's, checked against the known presets.
+  readonly property var rampOptions: [
+    { "value": "off", "label": "Off" },
+    { "value": "rise", "label": "Rise" },
+    { "value": "cloud", "label": "Cloud" },
+    { "value": "wave", "label": "Wave" },
+    { "value": "low", "label": "Low" }
+  ]
+  readonly property var activeRamp: {
+    var all = statusData.ramps
+    var r = all && typeof all === "object" ? all[String(currentProfile)] : null
+    if (!r || typeof r !== "object" || typeof r.key !== "string") return null
+    return { "key": r.key, "label": Plain.plain(r.label, 30), "line": Plain.plain(r.line, 140) }
+  }
+  readonly property string currentRamp: pendingRamp !== undefined ? pendingRamp
+    : activeRamp && rampOptions.some(function(o) { return o.value === activeRamp.key }) ? activeRamp.key : "off"
+  readonly property string rampMethod: statusData.ramp_method === "live" ? "live" : "boost"
+  readonly property bool rampProbed: statusData.ramp_probed === true
+  readonly property var rampRunning: {
+    var r = statusData.ramp_running
+    if (!r || typeof r !== "object") return null
+    var step = Number(r.step), steps = Number(r.steps), target = Number(r.target_f)
+    if (!isFinite(step) || !isFinite(steps) || !isFinite(target) || steps < 1 || steps > 8) return null
+    return { "step": step, "steps": steps, "target_f": target }
+  }
+
+  function setRamp(value) {
+    if (currentProfile < 0) return
+    pendingRamp = value
+    runArgv(value === "off" ? ["quickpuff", "ramp", "off", String(currentProfile)]
+                            : ["quickpuff", "ramp", "set", String(currentProfile), value])
+  }
+
   readonly property var vaporLevels: [
     { "value": "smooth", "label": "Smooth" },
     { "value": "bold", "label": "Bold" },
@@ -957,6 +994,9 @@ Panel {
   readonly property bool themeLightOn: pendingThemeLight !== undefined
     ? pendingThemeLight === true
     : statusData.theme_light === true
+  readonly property bool visualizerOn: pendingVisualizer !== undefined
+    ? pendingVisualizer === true
+    : statusData.visualizer === true
   readonly property bool musicLightOn: pendingMusicLight !== undefined
     ? pendingMusicLight === true
     : statusData.music_light === true
@@ -964,10 +1004,12 @@ Panel {
   // shown as it came: known sources, #rrggbb colours, a plain track name.
   readonly property var ambientNow: {
     var a = statusData.ambient
-    if (!a || typeof a !== "object" || (a.source !== "theme" && a.source !== "music") || !Array.isArray(a.colors)) return null
+    if (!a || typeof a !== "object" || ["theme", "music", "visualizer"].indexOf(a.source) < 0 || !Array.isArray(a.colors)) return null
     var colors = a.colors.filter(function(c) { return typeof c === "string" && /^#[0-9a-fA-F]{6}$/.test(c) }).slice(0, 3)
     if (!colors.length) return null
-    return { "source": a.source, "colors": colors, "track": Plain.plain(typeof a.track === "string" ? a.track : "", 120) }
+    var bpm = Number(a.bpm)
+    return { "source": a.source, "colors": colors, "track": Plain.plain(typeof a.track === "string" ? a.track : "", 120),
+             "bpm": isFinite(bpm) && bpm > 0 && bpm < 400 ? Math.round(bpm) : 0 }
   }
   readonly property bool saverOn: pendingSaver !== undefined
     ? pendingSaver === true
@@ -1078,6 +1120,12 @@ Panel {
     var next = !themeLightOn
     pendingThemeLight = next
     runArgv(["quickpuff", "theme-light", next ? "on" : "off"])
+  }
+
+  function toggleVisualizer() {
+    var next = !visualizerOn
+    pendingVisualizer = next
+    runArgv(["quickpuff", "visualizer", next ? "on" : "off"])
   }
 
   function toggleMusicLight() {
@@ -1555,6 +1603,8 @@ Panel {
       if (l && typeof l === "object") inner.push([l.colors, 16])
     }
     if (d.ambient && typeof d.ambient === "object") inner.push([d.ambient.colors, 3])
+    if (d.ramps && typeof d.ramps === "object")
+      for (var rk in d.ramps) if (d.ramps[rk] && typeof d.ramps[rk] === "object") inner.push([d.ramps[rk].steps, 8])
     var trends = ["heatup", "battery"]
     for (i = 0; i < trends.length; i++) {
       var t = wear[trends[i]]
@@ -1718,7 +1768,9 @@ Panel {
       root.pendingSaver = undefined
       root.pendingSurprise = undefined
       root.pendingThemeLight = undefined
+      root.pendingRamp = undefined
       root.pendingMusicLight = undefined
+      root.pendingVisualizer = undefined
       root.pendingCleanEvery = -1
       root.pendingBrightness = -1
       root.pendingDeviceName = ""

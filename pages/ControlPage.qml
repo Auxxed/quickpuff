@@ -580,6 +580,38 @@ Column {
 
   Section {
     panel: controlPage.panel
+    visible: panel.hasProfiles && panel.currentProfile >= 0
+    title: "HEAT RAMP"
+    glyph: "\uf2c9"
+    trailing: panel.rampRunning ? "Step " + panel.rampRunning.step + "/" + panel.rampRunning.steps + " · " + panel.formatTemp(panel.rampRunning.target_f, (panel.rampRunning.target_f - 32) * 5 / 9) : ""
+
+    Segmented {
+      panel: controlPage.panel
+      width: parent.width
+      compact: true
+      options: panel.rampOptions
+      value: panel.currentRamp
+      onPicked: function(value) { panel.setRamp(value) }
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: panel.currentRamp === "off"
+        ? "The session changes temperature as it goes: start low for flavour, climb for clouds."
+        : (panel.activeRamp ? panel.activeRamp.line : "")
+          + (panel.currentRamp === "low" && panel.rampMethod !== "live"
+            ? ". It steps down, which needs live targets: run quickpuff ramp probe --yes once, next to the Peak."
+            : panel.rampMethod === "live" ? "." : ". Played with Boost: up only, at most 36 °F.")
+      color: panel.dim
+      font.family: panel.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  Section {
+    panel: controlPage.panel
     id: boostSection
     visible: panel.hasProfiles && panel.currentProfile >= 0
     title: "BOOST"

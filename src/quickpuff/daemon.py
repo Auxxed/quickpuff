@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import __version__, ambient, audit, bluez, demo, faults, history
+from . import __version__, ambient, audit, beat, bluez, demo, faults, history, ramps
 from .ble import LoraxError, PuffcoBLE
 from .constants import PROFILE_COUNT, OperatingState
 from .paths import (
@@ -108,6 +108,10 @@ AMBIENT_POLL_S = 3.0
 AMBIENT_BUS_RETRY_S = 30.0
 # A new link's lantern is unknown: settled once (theme, music or its own light back).
 AMBIENT_UNSETTLED = ("?",)
+# The visualiser listens to the desktop's output through PipeWire.
+PW_RECORD = "/usr/bin/pw-record"
+VISUALIZER_RETRY_S = 10.0
+VISUALIZER_COLORS = ["#ff4fa3", "#8a5cff", "#2ad4ff"]
 
 # Polling: quick while heating, steady while the panel is open, and slow the
 # rest of the time so the Peak's radio isn't kept busy all day.
@@ -202,7 +206,9 @@ LOCAL_COMMANDS = frozenset(
         "set_qtip_reminder",
         "set_surprise",
         "set_theme_light",
+        "set_ramp",
         "set_music_light",
+        "set_visualizer",
         "set_battery_saver",
         "set_handoff",
         "claim",
@@ -496,6 +502,9 @@ class QuickPuffDaemon:
         self._surprise_rng = random.Random()
         self.theme_light = _as_bool(load_config().get("theme_light"))
         self.music_light = _as_bool(load_config().get("music_light"))
+        self.visualizer = _as_bool(load_config().get("visualizer"))
+        self._beats = beat.BeatTracker()
+        self._listen_task: asyncio.Task | None = None
         self._ambient_task: asyncio.Task | None = None
         # What the lantern was last given, and on which link (a new link starts over).
         self._ambient_applied: tuple[str, ...] | None = AMBIENT_UNSETTLED
@@ -505,6 +514,8 @@ class QuickPuffDaemon:
         self._session_bus: Any = None
         self._bus_retry_at = 0.0
         self._art_seen: tuple[str, list[str] | None] = ("", None)
+        self._ramp_task: asyncio.Task | None = None
+        self._ramp_running: dict[str, Any] | None = None
         self._session_reached_temp = False
         self._cycle_ts: float | None = None
         self._battery_at_start: Any = None
@@ -547,6 +558,7 @@ class QuickPuffDaemon:
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
         self.status.update(self._ambient_fields())
+        self.status.update(self._ramp_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -661,6 +673,7 @@ class QuickPuffDaemon:
         snap["qtip_reminder"] = self.qtip_reminder
         snap["surprise_light"] = self.surprise_light
         snap.update(self._ambient_fields())
+        snap.update(self._ramp_fields())
         snap["daily_limit"] = self.daily_limit
         snap["weekly_recap"] = self.weekly_recap
         snap["saved_lights"] = saved_lights.listing()
@@ -1018,6 +1031,7 @@ class QuickPuffDaemon:
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
         self.status.update(self._ambient_fields())
+        self.status.update(self._ramp_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         self.status["saved_lights"] = saved_lights.listing()
@@ -1128,6 +1142,7 @@ class QuickPuffDaemon:
                         await self._count_session()
                         self._spawn(self._sync_usage_safe(delay=5.0))
                         await self._notify_ready()
+                        self._maybe_start_ramp()
                     await self._check_low_battery()
                     await self._track_session_end(prev_state, new_state)
                     was_watching = watching
@@ -1749,10 +1764,155 @@ class QuickPuffDaemon:
         await self._broadcast_event("status", self.status)
         return {"surprise_light": self.surprise_light}
 
+    # ---------------------------------------------------------- heat ramps
+
+    def _ramp_fields(self) -> dict[str, Any]:
+        cfg = load_config()
+        stored = cfg.get("ramps") if isinstance(cfg.get("ramps"), dict) else {}
+        shown = {}
+        for key, choice in stored.items():
+            described = ramps.describe(choice)
+            if described and str(key).isdigit() and 0 <= int(key) < PROFILE_COUNT:
+                shown[str(key)] = described
+        method = cfg.get("ramp_method") if cfg.get("ramp_method") in ramps.METHODS else "boost"
+        return {"ramps": shown, "ramp_method": method, "ramp_probed": bool(cfg.get("ramp_probed")),
+                "ramp_running": self._ramp_running}
+
+    async def _set_ramp(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Give a profile a ramp (a preset or custom steps), or take it off."""
+        index = _validate_index(args)
+        cfg = load_config()
+        stored = dict(cfg.get("ramps") or {}) if isinstance(cfg.get("ramps"), dict) else {}
+        if args.get("off"):
+            stored.pop(str(index), None)
+        elif args.get("preset"):
+            if args["preset"] not in ramps.PRESETS:
+                raise ValueError(f"Pick a ramp: {', '.join(ramps.preset_names())}")
+            stored[str(index)] = str(args["preset"])
+        else:
+            stored[str(index)] = [list(s) for s in ramps.normalize(args.get("steps") or [])]
+        cfg["ramps"] = stored
+        save_config(cfg)
+        self.status.update(self._ramp_fields())
+        await self._broadcast_event("status", self.status)
+        return self._ramp_fields()
+
+    def _cancel_ramp(self) -> None:
+        task, self._ramp_task = self._ramp_task, None
+        if task and not task.done():
+            task.cancel()
+
+    def _maybe_start_ramp(self) -> None:
+        """At Ready: play the current profile's ramp, if it has one."""
+        self._cancel_ramp()
+        index = self.status.get("current_profile")
+        cfg = load_config()
+        stored = cfg.get("ramps") if isinstance(cfg.get("ramps"), dict) else {}
+        steps = ramps.steps_for(stored.get(str(index))) if isinstance(index, int) else None
+        profile = next((p for p in self.status.get("profiles") or [] if p.get("index") == index), None)
+        if not steps or not profile or not profile.get("temp_f"):
+            return
+        method = cfg.get("ramp_method") if cfg.get("ramp_method") in ramps.METHODS else "boost"
+        actions = ramps.plan(steps, float(profile["temp_f"]), method, profile.get("time"))
+        if actions:
+            self._ramp_task = asyncio.create_task(self._run_ramp(index, profile, method, actions))
+
+    async def _run_ramp(self, index: int, profile: dict[str, Any], method: str, actions: list[dict[str, Any]]) -> None:
+        dev = self.device
+        started = time.monotonic()
+        label = (ramps.describe((load_config().get("ramps") or {}).get(str(index))) or {}).get("label", "Ramp")
+        try:
+            for step, action in enumerate(actions):
+                await asyncio.sleep(max(0.0, started + action["at"] - time.monotonic()))
+                if self.device is not dev or not dev or not dev.is_connected:
+                    return
+                if self.status.get("operating_state_id") != int(OperatingState.HEAT_CYCLE_ACTIVE):
+                    return
+                async with self._cmd_lock:
+                    if method == "live":
+                        await dev.set_live_target_f(action["target_f"])
+                    else:
+                        await dev.live_boost(action["boost_f"], action["boost_s"])
+                self._ramp_running = {"label": label, "step": step + 1, "steps": len(actions), "target_f": action["target_f"]}
+                self.status.update(self._ramp_fields())
+                await self._broadcast_event("status", self.status)
+                log.info("Ramp %s: step %d/%d, %s°F (%s)", label, step + 1, len(actions), action["target_f"], method)
+            # Let the last step play out before putting things back.
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            log.warning("Ramp stopped: %s", exc)
+        finally:
+            self._ramp_running = None
+            self.status.update(self._ramp_fields())
+            # The running cycle's settings back to the profile's, for whatever comes next.
+            if dev and dev.is_connected and self.device is dev:
+                try:
+                    async with self._cmd_lock:
+                        if method == "live":
+                            await dev.set_live_target_f(float(profile["temp_f"]))
+                        elif profile.get("boost_temp_f") is not None and profile.get("boost_time") is not None:
+                            await dev.set_live_boost(float(profile["boost_temp_f"]), float(profile["boost_time"]))
+                except Exception as exc:
+                    log.debug("Ramp: couldn't put the cycle's settings back: %s", exc)
+
+    async def _ramp_probe(self, args: dict[str, Any]) -> dict[str, Any]:
+        """One short test cycle to learn whether this Peak takes a new target
+        mid-session ("live") or only Boost. Only with confirm, from idle; the
+        cycle is always stopped at the end."""
+        if not _as_bool(args.get("confirm")):
+            raise ValueError("This heats the Peak for about a minute. Run it with --yes when you're next to it.")
+        dev = self._require_device()
+        if self.status.get("operating_state_id") in CYCLE_STATES:
+            raise ValueError("Wait for the current session to finish first")
+        self._cancel_ramp()
+        report: dict[str, Any] = {}
+        try:
+            async with self._cmd_lock:
+                await dev.start_heat_cycle()
+            deadline = time.monotonic() + 120
+            while self.status.get("operating_state_id") != int(OperatingState.HEAT_CYCLE_ACTIVE):
+                if time.monotonic() > deadline:
+                    raise RuntimeError("The Peak didn't reach temperature within two minutes")
+                await asyncio.sleep(0.5)
+            await asyncio.sleep(3)
+            async with self._cmd_lock:
+                base = await dev.get_live_target_f()
+                await dev.set_live_target_f(base + 25)
+                readback = await dev.get_live_target_f()
+            temps = []
+            for _ in range(14):
+                await asyncio.sleep(1)
+                temp = self.status.get("temp_f")
+                if isinstance(temp, (int, float)):
+                    temps.append(float(temp))
+            rise = (max(temps[-5:]) - base) if temps else 0.0
+            report = {"base_f": round(base, 1), "asked_f": round(base + 25, 1), "readback_f": round(readback, 1),
+                      "heater_rise_f": round(rise, 1), "temps": [round(t) for t in temps]}
+            live = abs(readback - (base + 25)) < 2 and rise >= 10
+            report["method"] = "live" if live else "boost"
+        finally:
+            try:
+                async with self._cmd_lock:
+                    await dev.stop_heat_cycle()
+                    if "base_f" in report:
+                        await dev.set_live_target_f(report["base_f"])
+            except Exception as exc:
+                log.warning("Ramp probe: couldn't stop the test cycle cleanly: %s", exc)
+        cfg = load_config()
+        cfg["ramp_method"] = report["method"]
+        cfg["ramp_probed"] = True
+        save_config(cfg)
+        self.status.update(self._ramp_fields())
+        await self._broadcast_event("status", self.status)
+        log.info("Ramp probe: %s", report)
+        return report
+
     # ---------------------------------------------------------- theme and music lights
 
     def _ambient_fields(self) -> dict[str, Any]:
-        return {"theme_light": self.theme_light, "music_light": self.music_light, "ambient": self._ambient}
+        return {"theme_light": self.theme_light, "music_light": self.music_light, "visualizer": self.visualizer, "ambient": self._ambient}
 
     async def _set_ambient(self, key: str, enable: bool) -> dict[str, Any]:
         """Turn the theme or music light on or off. The lantern follows within
@@ -1812,15 +1972,62 @@ class QuickPuffDaemon:
                 await asyncio.sleep(0.1)
             self._poll_ambient_now = False
 
+    async def _listen(self) -> None:
+        """Feed the desktop's audio to the beat tracker while the visualiser is
+        on: 8 kHz mono from the output's monitor, analysed as it comes and
+        never kept."""
+        while self.visualizer:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    PW_RECORD, "--raw", "-P", "{ stream.capture.sink = true }", "--rate", str(beat.RATE),
+                    "--channels", "1", "--format", "s16", "-",
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL, start_new_session=True,
+                )
+            except OSError as exc:
+                log.warning("Visualiser: can't listen with %s: %s", PW_RECORD, exc)
+                await asyncio.sleep(VISUALIZER_RETRY_S)
+                continue
+            try:
+                while self.visualizer:
+                    chunk = await proc.stdout.read(1600)
+                    if not chunk:
+                        break
+                    self._beats.feed(chunk)
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
+            if self.visualizer:
+                await asyncio.sleep(VISUALIZER_RETRY_S)
+        self._beats = beat.BeatTracker()
+
+    def _keep_listening(self) -> None:
+        running = self._listen_task is not None and not self._listen_task.done()
+        if self.visualizer and not running:
+            self._listen_task = asyncio.create_task(self._listen())
+
     async def _ambient_step(self) -> None:
+        self._keep_listening()
         source, colors, track = None, None, ""
-        if self.music_light:
+        style, tempo, bpm = "fade", 0.3, None
+        if self.music_light or self.visualizer:
             colors, track = await self._music_palette()
             source = "music" if colors else None
         if not colors and self.theme_light:
             colors = await asyncio.to_thread(ambient.theme_palette)
             source = "theme" if colors else None
+        heard = self._beats.tempo() if self.visualizer else None
+        if heard:
+            bpm = heard[0]
+            style, tempo = beat.dance(bpm)
+            colors = colors or await asyncio.to_thread(ambient.theme_palette) or VISUALIZER_COLORS
+            if len(colors) == 1:
+                colors = colors + [ambient.led_color(c) for c in VISUALIZER_COLORS[1:2]]
+            source = "visualizer"
         shown = {"source": source, "colors": colors, "track": track} if colors else None
+        if shown and bpm:
+            shown["bpm"] = round(bpm)
         if shown != self._ambient:
             self._ambient = shown
             self.status.update(self._ambient_fields())
@@ -1831,7 +2038,9 @@ class QuickPuffDaemon:
             return
         if dev is not self._ambient_link:
             self._ambient_applied, self._ambient_link = AMBIENT_UNSETTLED, dev
-        wanted = tuple(colors) if colors else None
+        # The tempo moves in steps of 4 BPM, so a wobbling estimate doesn't
+        # rewrite the lantern every few seconds.
+        wanted = (style, str(round((bpm or 0) / 4) * 4), *colors) if colors else None
         if wanted == self._ambient_applied:
             return
         async with self._cmd_lock:
@@ -1845,8 +2054,11 @@ class QuickPuffDaemon:
                         self._save_quietly(cfg)
                     except Exception as exc:
                         log.debug("Theme/music light: couldn't keep the lantern's own light: %s", exc)
-                await dev.set_lantern_light(list(wanted), show=self.lantern)
-                log.info("Lantern now follows the %s: %s", source, ", ".join(wanted))
+                dancing = source == "visualizer"
+                await dev.set_lantern_light(list(colors), style=style, tempo=tempo, show=self.lantern or dancing)
+                if dancing:
+                    self._set_lantern(True)
+                log.info("Lantern now follows the %s: %s%s", source, ", ".join(colors), f" ({style} at {bpm:g} BPM)" if bpm else "")
             else:
                 cfg = load_config()
                 before = cfg.pop("lantern_before", None)
@@ -1864,6 +2076,7 @@ class QuickPuffDaemon:
         self.status["qtip_reminder"] = self.qtip_reminder
         self.status["surprise_light"] = self.surprise_light
         self.status.update(self._ambient_fields())
+        self.status.update(self._ramp_fields())
         self.status["daily_limit"] = self.daily_limit
         self.status["weekly_recap"] = self.weekly_recap
         await self._broadcast_event("status", self.status)
@@ -2315,10 +2528,14 @@ class QuickPuffDaemon:
             if _as_bool(args.get("show")):
                 await self._broadcast_event("wrapped", data)
             return data
+        if cmd == "set_ramp":
+            return await self._set_ramp(args)
         if cmd == "set_theme_light":
             return await self._set_ambient("theme_light", _as_bool(args.get("enable")))
         if cmd == "set_music_light":
             return await self._set_ambient("music_light", _as_bool(args.get("enable")))
+        if cmd == "set_visualizer":
+            return await self._set_ambient("visualizer", _as_bool(args.get("enable")))
         if cmd == "set_battery_saver":
             return await self._set_battery_saver(_as_bool(args.get("enable")))
         if cmd == "set_handoff":
@@ -2365,6 +2582,9 @@ class QuickPuffDaemon:
         self._strikes = 0
         self._poll_wake.set()
 
+        if cmd in ("start_heat", "stop_heat", "boost_heat"):
+            # Your hand on the heater: a ramp stops where it is.
+            self._cancel_ramp()
         if cmd == "start_heat":
             self._cancel_saver_sleep()
             await dev.start_heat_cycle()
@@ -2652,6 +2872,10 @@ class QuickPuffDaemon:
                         result = await self._sync_usage()
                     elif cmd == "faults":
                         result = await self._read_faults()
+                    elif cmd == "ramp_probe":
+                        # It waits on the poll for Ready, so it can't hold the lock
+                        # while it does; it takes it for each write instead.
+                        result = await self._ramp_probe(args)
                     elif cmd in LOCK_FREE_COMMANDS:
                         # The bar and panel ask every few seconds; they must not
                         # wait behind a Bluetooth command.
