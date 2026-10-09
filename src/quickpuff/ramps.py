@@ -1,9 +1,9 @@
-"""Heat ramps: a session that changes temperature as it goes.
+"""Flavour first: a session that starts low and finishes hot.
 
-A ramp is a few steps, each "this many seconds after Ready, go to the
-profile's temperature plus (or minus) this much". The daemon plays them while
-the session runs: start low for flavour and climb for clouds, or swell and
-ease off. Nothing here talks to the Peak.
+The ramp is a few steps, each "at this point after Ready, go to the profile's
+temperature plus (or minus) this much". The daemon plays them while the
+session runs: the first pull 40 °F low for the terpenes, the last 20 °F hot so
+nothing is left in the chamber. Nothing here talks to the Peak.
 
 Two ways to move the heater mid-session, picked per Peak by `quickpuff ramp
 probe` (which runs one short test cycle):
@@ -34,26 +34,13 @@ DEFAULT_SESSION_S = 30.0
 # session's heated stretch (its length less the coast), so a preset fits a
 # 30 s profile and a 60 s one alike.
 PRESETS: dict[str, dict[str, Any]] = {
-    "rise": {"label": "Rise", "line": "Starts at your temperature, climbs 20 then 40 °F", "steps": [(0.4, 20), (0.8, 40)]},
-    "cloud": {"label": "Cloud climb", "line": "Up 15, then 30, then 45 °F: big finish", "steps": [(0.3, 15), (0.6, 30), (0.9, 45)]},
-    "wave": {"label": "Wave", "line": "Swells 30 °F and eases back, twice", "steps": [(0.2, 30), (0.4, 0), (0.6, 30), (0.8, 0)]},
-    "low": {"label": "Low & slow", "line": "Drops 40 °F for flavour, comes back up by the end", "steps": [(0.0, -40), (0.45, -20), (0.85, 0)]},
+    "flavor": {"label": "Flavour first", "line": "Starts 40 °F under your temperature for flavour, finishes 20 °F hot to clear the chamber",
+               "steps": [(0.0, -40), (0.5, 0), (0.8, 20)]},
 }
 
 
 def preset_names() -> list[str]:
     return list(PRESETS)
-
-
-def parse_steps(spec: list[str]) -> list[tuple[float, float]]:
-    """Custom steps from the command line: "15:+20" (seconds:offset °F)."""
-    steps = []
-    for item in spec:
-        at, sep, offset = str(item).partition(":")
-        if not sep:
-            raise ValueError(f"Step {item!r}: write it as seconds:offset, like 15:+20")
-        steps.append((float(at), float(offset)))
-    return normalize(steps)
 
 
 def normalize(steps: list[Any]) -> list[tuple[float, float]]:
@@ -75,19 +62,14 @@ def normalize(steps: list[Any]) -> list[tuple[float, float]]:
 
 
 def steps_for(choice: Any, session_s: float | None = None) -> list[tuple[float, float]] | None:
-    """A stored ramp (a preset name or custom steps) as steps in seconds after
-    Ready, or None. Presets are fitted to the session's length."""
+    """A stored ramp (a preset name) as steps in seconds after Ready, or None.
+    Steps are fitted to the session's length."""
     if isinstance(choice, str):
         preset = PRESETS.get(choice)
         if preset is None:
             return None
         heated = max(1.0, (session_s or DEFAULT_SESSION_S) - COAST_S)
         return normalize([(frac * heated, offset) for frac, offset in preset["steps"]])
-    if isinstance(choice, list):
-        try:
-            return normalize(choice)
-        except (TypeError, ValueError):
-            return None
     return None
 
 
@@ -129,8 +111,5 @@ def describe(choice: Any, session_s: float | None = None) -> dict[str, Any] | No
     steps = steps_for(choice, session_s)
     if steps is None:
         return None
-    if isinstance(choice, str):
-        preset = PRESETS[choice]
-        return {"key": choice, "label": preset["label"], "line": preset["line"], "steps": [list(s) for s in steps]}
-    line = ", ".join(f"{at:g}s {off:+g}°F" for at, off in steps)
-    return {"key": "custom", "label": "Custom", "line": line, "steps": [list(s) for s in steps]}
+    preset = PRESETS[choice]
+    return {"key": choice, "label": preset["label"], "line": preset["line"], "steps": [list(s) for s in steps]}

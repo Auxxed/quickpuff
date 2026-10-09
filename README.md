@@ -243,20 +243,19 @@ profiles' lights (Lights → Lantern colors):
 
 Switch them all off and the lantern gets back the light it had before.
 
-### Heat ramps
+### Flavour first
 
-A ramp changes the temperature as a session goes (Control → Heat ramp, per
-profile): **Rise** climbs 20 then 40 °F, **Cloud climb** goes up in three steps
-for a big finish, **Wave** swells and eases back, and **Low & slow** drops for
-flavour and comes back up. Or write your own:
-`quickpuff ramp set 1 --steps 10:+15 25:+30` (seconds after Ready : °F from the
-profile's temperature). Pressing heat, stop or boost, or the session ending,
-stops a ramp where it is; temperatures stay within 400–620 °F.
+Switch it on for a profile (Control → Flavour first) and its sessions start
+40 °F under the profile's temperature, for the terpenes in the first pull, come
+back up halfway, and finish 20 °F hot so nothing is left in the chamber. The
+steps fit the profile's length and end before the last five seconds, when the
+Peak cools whatever it's set to. Pressing heat, stop or boost stops it where it
+is; temperatures stay within 400–620 °F.
 
-Ramps play through the Peak's Boost (up only, at most 36 °F at a time) until
-`quickpuff ramp probe --yes` shows your Peak also takes a new target
-mid-session. The probe heats the Peak for about a minute, so run it once when
-you're next to it.
+The low start needs a Peak that takes a new temperature mid-session, which
+`quickpuff ramp probe --yes` checks once (it heats the Peak for about a
+minute, so run it when you're next to it). Until then only the hot finish
+plays, through the Peak's Boost.
 
 ### Wrapped
 
@@ -373,8 +372,8 @@ quickpuff surprise on              # a new light after each session
 quickpuff theme-light on           # the lantern in your Omarchy theme's colours
 quickpuff music-light on           # the lantern in the playing album art's colours
 quickpuff visualizer on            # the lantern dances to what's playing
-quickpuff ramp set 1 rise          # a heat ramp on profile 1 (rise, cloud, wave, low or --steps)
-quickpuff ramp                     # each profile's ramp; `ramp off 1`, `ramp probe --yes`
+quickpuff ramp on 1                # flavour first on profile 1 (`ramp off 1`)
+quickpuff ramp                     # which profiles have it; `ramp probe --yes` checks the low start
 quickpuff wrapped year --show      # your year in sessions, on screen (month, year or all)
 quickpuff showtime stage           # heat cycles over the desktop: off, corner or stage
 quickpuff sounds on --volume 70    # Showtime and ready-animation sounds

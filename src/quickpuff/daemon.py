@@ -1782,18 +1782,14 @@ class QuickPuffDaemon:
                 "ramp_running": self._ramp_running}
 
     async def _set_ramp(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Give a profile a ramp (a preset or custom steps), or take it off."""
+        """Flavour first on (or off) for a profile."""
         index = _validate_index(args)
         cfg = load_config()
         stored = dict(cfg.get("ramps") or {}) if isinstance(cfg.get("ramps"), dict) else {}
-        if args.get("off"):
-            stored.pop(str(index), None)
-        elif args.get("preset"):
-            if args["preset"] not in ramps.PRESETS:
-                raise ValueError(f"Pick a ramp: {', '.join(ramps.preset_names())}")
-            stored[str(index)] = str(args["preset"])
+        if _as_bool(args.get("on")):
+            stored[str(index)] = "flavor"
         else:
-            stored[str(index)] = [list(s) for s in ramps.normalize(args.get("steps") or [])]
+            stored.pop(str(index), None)
         cfg["ramps"] = stored
         save_config(cfg)
         self.status.update(self._ramp_fields())

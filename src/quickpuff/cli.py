@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, ramps
+from . import __version__
 from .constants import READY_ANIMATIONS, SHOWTIME_MODES
 from .paths import DEFAULTS, MONITOR_NAME, clamp_volume, load_config, save_config, ui_settings
 from .paths import switched_on as _switched_on
@@ -529,14 +529,11 @@ async def async_main(argv: list[str] | None = None) -> int:
     surprise = sub.add_parser("surprise", help="Give the profile you used a new light after each session")
     surprise.add_argument("action", choices=["on", "off"])
 
-    ramp = sub.add_parser("ramp", help="Heat ramps: a session that changes temperature as it goes")
+    ramp = sub.add_parser("ramp", help="Flavour first: a session that starts 40 °F low and finishes 20 °F hot")
     ramp_sub = ramp.add_subparsers(dest="ramp_cmd")
-    ramp_set = ramp_sub.add_parser("set", help="Give a profile a ramp: a preset, or --steps")
-    ramp_set.add_argument("index", type=int, help="Heat profile, 0-3")
-    ramp_set.add_argument("preset", nargs="?", help="rise, cloud, wave or low")
-    ramp_set.add_argument("--steps", nargs="+", metavar="S:F", help="Your own steps: seconds after Ready:offset °F, e.g. 15:+20 30:+40")
-    ramp_off = ramp_sub.add_parser("off", help="Take a profile's ramp off")
-    ramp_off.add_argument("index", type=int)
+    for word in ("on", "off"):
+        sw = ramp_sub.add_parser(word, help=f"Flavour first {word} for a heat profile")
+        sw.add_argument("index", type=int, help="Heat profile, 0-3")
     ramp_probe = ramp_sub.add_parser("probe", help="One short test cycle to learn how this Peak takes a ramp")
     ramp_probe.add_argument("--yes", action="store_true", help="Yes, heat the Peak now (I'm next to it)")
 
@@ -817,23 +814,14 @@ async def async_main(argv: list[str] | None = None) -> int:
         result = await call("set_surprise", {"enable": args.action == "on"})
         print(json.dumps(result) if raw else f"Surprise me: {args.action}")
     elif cmd == "ramp":
-        if args.ramp_cmd == "set":
-            if not args.preset and not args.steps:
-                raise SystemExit("Name a preset (rise, cloud, wave, low) or give --steps")
-            payload = {"index": args.index}
-            if args.steps:
-                payload["steps"] = [list(st) for st in ramps.parse_steps(args.steps)]
-            else:
-                payload["preset"] = args.preset
-            result = await call("set_ramp", payload)
-        elif args.ramp_cmd == "off":
-            result = await call("set_ramp", {"index": args.index, "off": True})
+        if args.ramp_cmd in ("on", "off"):
+            result = await call("set_ramp", {"index": args.index, "on": args.ramp_cmd == "on"})
         elif args.ramp_cmd == "probe":
             if not args.yes:
                 raise SystemExit("This heats the Peak for about a minute. Run `quickpuff ramp probe --yes` when you're next to it.")
             result = await call("ramp_probe", {"confirm": True}, timeout=240)
             print(json.dumps(result) if raw else (
-                f"Probe done: this Peak takes ramps by {result['method']} "
+                f"Probe done: this Peak takes temperature changes by {result['method']} "
                 f"(asked {result['asked_f']}°F, it read back {result['readback_f']}°F, heater rose {result['heater_rise_f']}°F)"))
             return
         else:
@@ -973,14 +961,13 @@ def wrapped_text(w: dict) -> str:
 
 
 def ramp_text(status: dict) -> str:
-    """The ramps on each profile, and how they're played."""
-    method = status.get("ramp_method", "boost")
-    lines = [f"Ramps play by {method}" + ("" if status.get("ramp_probed") else " (run `quickpuff ramp probe --yes` once, next to the Peak, to check for live targets)")]
+    """Which profiles start low and finish hot."""
+    lines = ["Flavour first: starts 40 °F under the profile, finishes 20 °F hot"]
+    if status.get("ramp_method") != "live":
+        lines.append("  (by Boost, so only the hot finish: run `quickpuff ramp probe --yes` once, next to the Peak, to check for the low start)")
     names = {p.get("index"): p.get("name") for p in status.get("profiles") or [] if isinstance(p, dict)}
     shown = status.get("ramps") or {}
     for index in range(4):
-        ramp = shown.get(str(index))
-        name = names.get(index) or f"Profile {index + 1}"
-        lines.append(f"  {index} {name}: " + (f"{ramp['label']} ({ramp['line']})" if ramp else "no ramp"))
-    lines.append("Presets: " + ", ".join(f"{k} ({v['label']})" for k, v in ramps.PRESETS.items()))
+        name = names.get(index) or f"P{index}"
+        lines.append(f"  {index} {name}: " + ("on" if shown.get(str(index)) else "off"))
     return "\n".join(lines)

@@ -1,5 +1,5 @@
-"""Heat ramps: planning steps, playing them through a session, stopping when
-you take over, and the probe that learns how a Peak takes them."""
+"""Flavour first: planning its steps, playing them through a session,
+stopping when you take over, and the probe that learns how a Peak takes them."""
 
 import asyncio
 
@@ -38,8 +38,9 @@ def test_no_steps_in_the_last_seconds_when_the_peak_cools_anyway():
 
 
 def test_presets_fit_the_session():
-    assert ramps.steps_for("rise", 30) == [(10.0, 20.0), (20.0, 40.0)]
-    assert ramps.steps_for("rise", 55) == [(20.0, 20.0), (40.0, 40.0)]
+    assert ramps.steps_for("flavor", 30) == [(0.0, -40.0), (12.5, 0.0), (20.0, 20.0)]
+    assert ramps.steps_for("flavor", 55) == [(0.0, -40.0), (25.0, 0.0), (40.0, 20.0)]
+    assert ramps.steps_for("rise", 30) is None and ramps.steps_for([[10, 20]], 30) is None
     for name in ramps.PRESETS:
         for length in (20, 30, 45, 90):
             steps = ramps.steps_for(name, length)
@@ -51,12 +52,6 @@ def test_presets_fit_the_session():
 def test_bad_steps_are_refused(bad):
     with pytest.raises((ValueError, TypeError)):
         ramps.normalize(bad)
-
-
-def test_parse_steps_reads_seconds_and_offsets():
-    assert ramps.parse_steps(["30:+40", "15:20"]) == [(15.0, 20.0), (30.0, 40.0)]
-    with pytest.raises(ValueError):
-        ramps.parse_steps(["15+20"])
 
 
 def test_every_preset_is_valid():
@@ -119,17 +114,21 @@ def daemon(tmp_path, peak):
     return d
 
 
-def test_set_ramp_stores_presets_and_custom_steps(tmp_path):
+def test_the_switch_turns_flavour_first_on_and_off(tmp_path):
     d = daemon(tmp_path, HeaterPeak())
-    asyncio.run(d._set_ramp({"index": 1, "preset": "rise"}))
-    assert load_config()["ramps"] == {"1": "rise"}
-    assert d.status["ramps"]["1"]["label"] == "Rise"
-    asyncio.run(d._set_ramp({"index": 2, "steps": [[20, 10], [5, 5]]}))
-    assert load_config()["ramps"]["2"] == [[5.0, 5.0], [20.0, 10.0]]
-    asyncio.run(d._set_ramp({"index": 1, "off": True}))
+    asyncio.run(d._set_ramp({"index": 1, "on": True}))
+    assert load_config()["ramps"] == {"1": "flavor"}
+    assert d.status["ramps"]["1"]["label"] == "Flavour first"
+    asyncio.run(d._set_ramp({"index": 1, "on": False}))
     assert "1" not in load_config()["ramps"]
-    with pytest.raises(ValueError):
-        asyncio.run(d._set_ramp({"index": 1, "preset": "volcano"}))
+
+
+def test_old_ramps_left_in_the_settings_do_nothing(tmp_path):
+    peak = HeaterPeak()
+    d = daemon(tmp_path, peak)
+    save_config({**load_config(), "ramps": {"1": "rise", "2": [[5, 5]]}, "ramp_method": "live"})
+    play(d)
+    assert peak.calls == [] and d._ramp_fields()["ramps"] == {}
 
 
 def play(d):
@@ -141,23 +140,23 @@ def play(d):
     asyncio.run(go())
 
 
-def test_a_boost_ramp_plays_each_step_then_puts_the_boost_back(tmp_path):
+def test_by_boost_only_the_hot_finish_plays_then_the_boost_goes_back(tmp_path):
     peak = HeaterPeak()
     d = daemon(tmp_path, peak)
-    save_config({**load_config(), "ramps": {"1": "rise"}})
+    save_config({**load_config(), "ramps": {"1": "flavor"}})
     play(d)
-    # Rise on a 45 s profile: 40 s heated before the coast, steps at 16 and 32 s.
-    assert peak.calls[:2] == [("boost", 20.0, 16.0), ("boost", 36.0, 13.0)]
+    # A 45 s profile: 40 s before the coast, the hot finish at 32 s until the end.
+    assert peak.calls[0] == ("boost", 20.0, 13.0)
     assert peak.calls[-1] == ("boost-setting", 15.0, 15.0)
     assert d.status["ramp_running"] is None
 
 
-def test_a_live_ramp_moves_the_target_and_restores_it(tmp_path):
+def test_live_starts_low_finishes_hot_and_restores(tmp_path):
     peak = HeaterPeak()
     d = daemon(tmp_path, peak)
-    save_config({**load_config(), "ramps": {"1": "low"}, "ramp_method": "live"})
+    save_config({**load_config(), "ramps": {"1": "flavor"}, "ramp_method": "live"})
     play(d)
-    assert [c[1] for c in peak.calls if c[0] == "target"] == [480.0, 500.0, 520.0, 520.0]
+    assert [c[1] for c in peak.calls if c[0] == "target"] == [480.0, 520.0, 540.0, 520.0]
 
 
 def test_no_ramp_no_writes(tmp_path):
@@ -170,7 +169,7 @@ def test_no_ramp_no_writes(tmp_path):
 def test_a_ramp_stops_when_the_session_does(tmp_path):
     peak = HeaterPeak()
     d = daemon(tmp_path, peak)
-    save_config({**load_config(), "ramps": {"1": "cloud"}})
+    save_config({**load_config(), "ramps": {"1": "flavor"}, "ramp_method": "live"})
     d.status["operating_state_id"] = IDLE
     play(d)
     assert [c for c in peak.calls if c[0] == "boost"] == []
@@ -179,7 +178,7 @@ def test_a_ramp_stops_when_the_session_does(tmp_path):
 def test_your_heat_command_cancels_a_running_ramp(tmp_path):
     peak = HeaterPeak()
     d = daemon(tmp_path, peak)
-    save_config({**load_config(), "ramps": {"1": "cloud"}})
+    save_config({**load_config(), "ramps": {"1": "flavor"}, "ramp_method": "live"})
 
     async def go():
         d._maybe_start_ramp()

@@ -581,29 +581,25 @@ Column {
   Section {
     panel: controlPage.panel
     visible: panel.hasProfiles && panel.currentProfile >= 0
-    title: "HEAT RAMP"
+    title: "FLAVOUR FIRST"
     glyph: "\uf2c9"
-    trailing: panel.rampRunning ? "Step " + panel.rampRunning.step + "/" + panel.rampRunning.steps + " · " + panel.formatTemp(panel.rampRunning.target_f, (panel.rampRunning.target_f - 32) * 5 / 9) : ""
+    trailing: isNaN(panel.rampTarget) ? "" : "Now " + panel.formatTemp(panel.rampTarget, (panel.rampTarget - 32) * 5 / 9)
 
-    Segmented {
+    SwitchRow {
       panel: controlPage.panel
       width: parent.width
-      compact: true
-      options: panel.rampOptions
-      value: panel.currentRamp
-      onPicked: function(value) { panel.setRamp(value) }
+      label: "Start low, finish hot"
+      checked: panel.flavorFirst
+      onToggled: panel.toggleFlavorFirst()
     }
 
     Text {
       width: parent.width
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      text: panel.currentRamp === "off"
-        ? "The session changes temperature as it goes: start low for flavour, climb for clouds."
-        : (panel.activeRamp ? panel.activeRamp.line : "")
-          + (panel.currentRamp === "low" && panel.rampMethod !== "live"
-            ? ". It steps down, which needs live targets: run quickpuff ramp probe --yes once, next to the Peak."
-            : panel.rampMethod === "live" ? "." : ". Played with Boost: up only, at most 36 °F.")
+      text: panel.rampMethod === "live"
+        ? "This profile's first pull runs 40° under its temperature for flavour, the last 20° over it so nothing's left in the chamber."
+        : "The last pull runs 20° hot so nothing's left in the chamber. (The low start needs a one-time check: quickpuff ramp probe --yes, next to the Peak.)"
       color: panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption

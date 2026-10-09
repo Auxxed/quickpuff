@@ -825,37 +825,24 @@ Panel {
     onTriggered: if (!root.cycleOn) root.applyLightColor(root.pickHex)
   }
 
-  // Heat ramps: the active profile's, checked against the known presets.
-  readonly property var rampOptions: [
-    { "value": "off", "label": "Off" },
-    { "value": "rise", "label": "Rise" },
-    { "value": "cloud", "label": "Cloud" },
-    { "value": "wave", "label": "Wave" },
-    { "value": "low", "label": "Low" }
-  ]
-  readonly property var activeRamp: {
+  // Flavour first: on for the active profile, and the target while it plays.
+  readonly property bool flavorFirst: pendingRamp !== undefined ? pendingRamp === true : (function() {
     var all = statusData.ramps
     var r = all && typeof all === "object" ? all[String(currentProfile)] : null
-    if (!r || typeof r !== "object" || typeof r.key !== "string") return null
-    return { "key": r.key, "label": Plain.plain(r.label, 30), "line": Plain.plain(r.line, 140) }
-  }
-  readonly property string currentRamp: pendingRamp !== undefined ? pendingRamp
-    : activeRamp && rampOptions.some(function(o) { return o.value === activeRamp.key }) ? activeRamp.key : "off"
+    return !!r && typeof r === "object" && r.key === "flavor"
+  })()
   readonly property string rampMethod: statusData.ramp_method === "live" ? "live" : "boost"
-  readonly property bool rampProbed: statusData.ramp_probed === true
-  readonly property var rampRunning: {
+  readonly property real rampTarget: {
     var r = statusData.ramp_running
-    if (!r || typeof r !== "object") return null
-    var step = Number(r.step), steps = Number(r.steps), target = Number(r.target_f)
-    if (!isFinite(step) || !isFinite(steps) || !isFinite(target) || steps < 1 || steps > 8) return null
-    return { "step": step, "steps": steps, "target_f": target }
+    var target = r && typeof r === "object" ? Number(r.target_f) : NaN
+    return isFinite(target) && target >= 300 && target <= 700 ? target : NaN
   }
 
-  function setRamp(value) {
+  function toggleFlavorFirst() {
     if (currentProfile < 0) return
-    pendingRamp = value
-    runArgv(value === "off" ? ["quickpuff", "ramp", "off", String(currentProfile)]
-                            : ["quickpuff", "ramp", "set", String(currentProfile), value])
+    var on = !flavorFirst
+    pendingRamp = on
+    runArgv(["quickpuff", "ramp", on ? "on" : "off", String(currentProfile)])
   }
 
   readonly property var vaporLevels: [
@@ -1604,7 +1591,7 @@ Panel {
     }
     if (d.ambient && typeof d.ambient === "object") inner.push([d.ambient.colors, 3])
     if (d.ramps && typeof d.ramps === "object")
-      for (var rk in d.ramps) if (d.ramps[rk] && typeof d.ramps[rk] === "object") inner.push([d.ramps[rk].steps, 8])
+      for (var rk in d.ramps) if (d.ramps[rk] && typeof d.ramps[rk] === "object") inner.push([d.ramps[rk].steps, 3])
     var trends = ["heatup", "battery"]
     for (i = 0; i < trends.length; i++) {
       var t = wear[trends[i]]
