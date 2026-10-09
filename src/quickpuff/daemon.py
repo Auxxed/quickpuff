@@ -440,6 +440,9 @@ class QuickPuffDaemon:
         self._profile_refresh_task: asyncio.Task | None = None
         # `quickpuff demo`: shown to clients, never written into self.status.
         self._demo: DemoShow | None = None
+        # The last Peak seen connected, so a demo while it rests (or has
+        # handed over) still shows this Peak rather than a stock one.
+        self._known_peak: dict[str, Any] | None = None
         self._demo_task: asyncio.Task | None = None
         self._clean_serial: str | None = None
         self._load_clean(load_config().get("last_serial"))
@@ -590,6 +593,12 @@ class QuickPuffDaemon:
         self.status.update(snap)
         self.status["telemetry"] = history.get_stats()
         self.status.update(self._clean_fields())
+        self._remember_peak()
+
+    def _remember_peak(self) -> None:
+        if self.status.get("connected") and self.status.get("profiles"):
+            fields = demo.stock_peak().keys()
+            self._known_peak = copy.deepcopy({k: self.status.get(k) for k in fields if k in self.status})
 
     def _on_ble_drop(self) -> None:
         if self._resting or self._yielded:
@@ -1396,6 +1405,7 @@ class QuickPuffDaemon:
             if self._profiles_dirty_at != started:
                 continue  # more edits landed mid-read; read again once they settle
             self.status["profiles"] = profiles
+            self._remember_peak()
             await self._broadcast_event("status", self.status)
             return
 
@@ -1803,11 +1813,16 @@ class QuickPuffDaemon:
         """
         if self.status.get("operating_state_id") in CYCLE_STATES:
             raise RuntimeError("The Peak is heating for real. Run the demo once it's done.")
-        stock = not (self.status.get("connected") and self.status.get("profiles"))
+        connected = bool(self.status.get("connected") and self.status.get("profiles"))
+        stock = not connected and not self._known_peak
         if stock:
             # No Peak to borrow, or no profiles read yet: show a stock one.
             device = demo.stock_peak()
             battery, current = device["battery"], device["current_profile"]
+        elif not connected:
+            # Resting or handed over: play it on this Peak as last seen.
+            device = {**demo.stock_peak(), **copy.deepcopy(self._known_peak), "connected": True}
+            battery, current = device.get("battery"), device.get("current_profile")
         else:
             device = {"profiles": copy.deepcopy(self.status["profiles"])}
             battery, current = self.status.get("battery"), self.status.get("current_profile")

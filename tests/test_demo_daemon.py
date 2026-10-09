@@ -376,6 +376,21 @@ def test_a_peak_without_profiles_or_at_rest_gets_the_stock_one_too(tmp_path):
         assert started["stock_peak"] is True and started["name"] == "High"
 
 
+def test_a_resting_peak_it_has_seen_plays_as_itself(tmp_path):
+    d = connected(tmp_path)
+    d._apply_snapshot({})  # a snapshot while connected: the Peak is remembered
+    # Battery saver lets go: the live status empties out.
+    d.status.update({"connected": False, "resting": True, "profiles": [], "device_name": "",
+                     "operating_state": "Resting", "operating_state_id": -1})
+    started = asyncio.run(d.handle("demo", {}))
+    assert started["stock_peak"] is False and started["name"] == "Evening"
+    frame = asyncio.run(d.handle("status", {}))
+    assert frame["connected"] is True and frame["device_name"] == "Delly"
+    assert [p["name"] for p in frame["profiles"]] == ["Mine", "Evening", "Hot", "Hotter"]
+    assert d.status["profiles"] == []  # the real status is left as it is
+    asyncio.run(d.handle("demo_stop", {}))
+
+
 def test_a_link_lost_mid_demo_leaves_the_show_running(tmp_path):
     d = connected(tmp_path)
 
