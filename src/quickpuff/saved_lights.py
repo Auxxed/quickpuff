@@ -10,7 +10,6 @@ it back without knowing how it was made.
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 from typing import Any
 
@@ -18,12 +17,14 @@ import cbor2
 
 from .codec import decode_puffco_json, first_color
 from .moods import decode_cycle
-from .paths import data_dir, write_json_atomic
+from .paths import RefusedFile, data_dir, read_json_bounded, report_readable, report_unusable, write_json_atomic
 
 MAX_SAVED = 40
 MAX_NAME = 32
 # A profile light is a few hundred bytes; anything far past that isn't one.
 MAX_RAW = 4096
+# Forty lights of up to MAX_RAW bytes each, written as hex, with room to spare.
+MAX_FILE_BYTES = 1024 * 1024
 
 
 def _path():
@@ -58,17 +59,49 @@ def reacts_to_inhale(raw: bytes) -> bool:
     return bool((cycle or {}).get("inhale"))
 
 
+def _well_formed(entry: Any) -> bool:
+    """A saved light as save() writes it: an id, a name no longer than
+    MAX_NAME, and bytes (as hex) no longer than a profile light can be."""
+    if not isinstance(entry, dict):
+        return False
+    ident, name, raw = entry.get("id"), entry.get("name"), entry.get("raw")
+    return (
+        isinstance(ident, str)
+        and bool(ident)
+        and isinstance(name, str)
+        and len(name) <= MAX_NAME
+        and isinstance(raw, str)
+        and 0 < len(raw) <= 2 * MAX_RAW
+    )
+
+
 def _load() -> list[dict[str, Any]]:
+    """The saved lights, or none.
+
+    A lights.json that is refused (a link, a FIFO, another account's,
+    oversized) reads as none and is logged, and _store won't replace it.
+    One that is damaged, or holds more lights than save() ever keeps, reads
+    as none too and the next save replaces it.
+    """
+    path = _path()
     try:
-        data = json.loads(_path().read_text())
-    except (OSError, json.JSONDecodeError):
+        data = read_json_bounded(path, MAX_FILE_BYTES)
+    except (OSError, ValueError) as exc:
+        report_unusable(path, exc)
         return []
+    report_readable(path)
     lights = data.get("lights") if isinstance(data, dict) else None
-    return [x for x in lights or [] if isinstance(x, dict) and x.get("id") and x.get("raw")]
+    kept = [x for x in lights or [] if _well_formed(x)] if isinstance(lights, list) else []
+    if len(kept) > MAX_SAVED:
+        report_unusable(path, ValueError(f"{path} holds more than {MAX_SAVED} saved lights"))
+        return []
+    return kept
 
 
 def _store(lights: list[dict[str, Any]]) -> None:
-    write_json_atomic(_path(), {"lights": lights}, indent=2)
+    # Raises RefusedFile for a lights.json _load refused; the caller asked
+    # for this change, so it hears that it didn't happen.
+    write_json_atomic(_path(), {"lights": lights}, indent=2, max_bytes=MAX_FILE_BYTES)
 
 
 def _clean_name(name: Any) -> str:
@@ -131,6 +164,8 @@ def delete(ident: str) -> None:
 # and reads those settings back instead of re-deriving them.
 
 MAX_MEMO = 64
+# MAX_MEMO cycles of a few colours each, with room to spare.
+MAX_MEMO_BYTES = 256 * 1024
 
 
 def _memo_path():
@@ -138,10 +173,15 @@ def _memo_path():
 
 
 def _memo() -> dict[str, Any]:
+    """The remembered cycles. One that is refused reads as empty (logged)
+    and isn't replaced; a damaged one reads as empty and is."""
+    path = _memo_path()
     try:
-        data = json.loads(_memo_path().read_text())
-    except (OSError, json.JSONDecodeError):
+        data = read_json_bounded(path, MAX_MEMO_BYTES)
+    except (OSError, ValueError) as exc:
+        report_unusable(path, exc)
         return {}
+    report_readable(path)
     return data if isinstance(data, dict) else {}
 
 
@@ -152,10 +192,18 @@ def remember_cycle(raw: bytes, cycle: dict[str, Any]) -> None:
     # Oldest first; keep the most recent.
     while len(memo) > MAX_MEMO:
         memo.pop(next(iter(memo)))
-    write_json_atomic(_memo_path(), memo)
+    try:
+        write_json_atomic(_memo_path(), memo, max_bytes=MAX_MEMO_BYTES)
+    except RefusedFile as exc:
+        # Only a memo of what was written: the light is on the Peak already,
+        # so a cycles.json that was refused is left alone without failing that.
+        report_unusable(_memo_path(), exc)
 
 
 def recall_cycle(raw: bytes) -> dict[str, Any] | None:
     found = _memo().get(light_id(raw))
-    return dict(found) if isinstance(found, dict) else None
+    # Only the shape remember_cycle writes; anything else is re-derived.
+    if isinstance(found, dict) and isinstance(found.get("style"), str) and isinstance(found.get("colors"), list):
+        return dict(found)
+    return None
 

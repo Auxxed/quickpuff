@@ -12,7 +12,8 @@ and still supply per-session temperature, duration and color.
 
 from __future__ import annotations
 
-import json
+import logging
+import os
 import re
 import statistics
 import time
@@ -22,9 +23,22 @@ from pathlib import Path
 from typing import Any
 
 from . import wear
-from .paths import data_dir, write_json_atomic
+from .paths import (
+    RefusedFile,
+    data_dir,
+    device_file_stem,
+    read_json_bounded,
+    report_readable,
+    report_unusable,
+    write_json_atomic,
+)
+
+log = logging.getLogger("quickpuff.history")
 
 RETENTION_DAYS = 730
+# Two years of heavy use with notes is a few MiB. A file past this isn't a
+# history QuickPuff wrote, so it is refused rather than read into memory.
+MAX_HISTORY_BYTES = 16 * 1024 * 1024
 
 _device_serial: str | None = None
 
@@ -43,9 +57,8 @@ def _legacy_path() -> Path:
 
 def history_path() -> Path:
     if _device_serial:
-        # A leading dot would hide the file or read as a relative path part.
-        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", _device_serial).lstrip(".") or "peak"
-        return data_dir() / "devices" / f"{safe}.json"
+        # The serial comes from the Peak: made safe for a file name.
+        return data_dir() / "devices" / f"{device_file_stem(_device_serial)}.json"
     return _legacy_path()
 
 
@@ -53,32 +66,25 @@ def _adopt_legacy(serial: str) -> None:
     """Move history from before it was kept per Peak onto the Peak it came from."""
     target = history_path()
     legacy = _legacy_path()
-    if target.exists() or not legacy.exists():
+    # lexists: a link already at the target counts as taken, not as free.
+    if os.path.lexists(target):
         return
     try:
-        data = json.loads(legacy.read_text())
-    except (OSError, json.JSONDecodeError):
+        data = read_json_bounded(legacy, MAX_HISTORY_BYTES)
+    except (OSError, ValueError) as exc:
+        report_unusable(legacy, exc)
         return
     if not isinstance(data, dict) or data.get("device_log_serial") not in (None, serial):
         return
-    write_json_atomic(target, data)
-    # Renamed rather than deleted, and so a second Peak can't adopt it too.
-    legacy.rename(legacy.with_name("dabs.json.migrated"))
+    try:
+        write_json_atomic(target, data, max_bytes=MAX_HISTORY_BYTES)
+        # Renamed rather than deleted, and so a second Peak can't adopt it too.
+        legacy.rename(legacy.with_name("dabs.json.migrated"))
+    except OSError as exc:
+        log.warning("Couldn't move the shared dab history onto this Peak: %s", exc)
 
 
-def _load() -> dict[str, Any]:
-    path = history_path()
-    if path.exists():
-        try:
-            data = json.loads(path.read_text())
-            if isinstance(data, dict):
-                data.setdefault("last_total", None)
-                data.setdefault("events", [])
-                data.setdefault("first_seen", None)
-                data.setdefault("device_total_seen", False)
-                return data
-        except (OSError, json.JSONDecodeError):
-            pass
+def _empty() -> dict[str, Any]:
     return {
         "last_total": None,
         "events": [],
@@ -87,8 +93,42 @@ def _load() -> dict[str, Any]:
     }
 
 
-def _save(data: dict[str, Any]) -> None:
-    write_json_atomic(history_path(), data)
+def _load() -> dict[str, Any]:
+    """This Peak's history, or an empty one.
+
+    A file that is refused (a link, a FIFO, another account's, oversized)
+    reads as empty and is logged; _save can't replace it either, because
+    write_json_atomic refuses whatever its reader would have refused, so
+    the refusal is never written over with a fresh history. A damaged file
+    reads as empty too and is replaced on the next save, as it always was.
+    """
+    path = history_path()
+    try:
+        data = read_json_bounded(path, MAX_HISTORY_BYTES)
+    except (OSError, ValueError) as exc:
+        report_unusable(path, exc)
+        return _empty()
+    report_readable(path)
+    if not isinstance(data, dict):
+        return _empty()
+    data.setdefault("last_total", None)
+    data.setdefault("events", [])
+    data.setdefault("first_seen", None)
+    data.setdefault("device_total_seen", False)
+    return data
+
+
+def _save(data: dict[str, Any]) -> bool:
+    """Save the history. Used as dabs happen, so a file that is refused is
+    logged and left alone rather than stopping the poll that got here;
+    False when nothing was saved."""
+    path = history_path()
+    try:
+        write_json_atomic(path, data, max_bytes=MAX_HISTORY_BYTES)
+    except RefusedFile as exc:
+        report_unusable(path, exc)
+        return False
+    return True
 
 
 def record_total(total_dabs: int | None) -> dict[str, Any] | None:
@@ -592,7 +632,9 @@ def set_note(key: Any, text: Any) -> dict[str, Any]:
         notes[key] = {"text": clean, "updated": time.time()}
     else:
         notes.pop(key, None)
-    _save(data)
+    # Someone is waiting on this one: a refused file is an error they see,
+    # not a note that quietly went nowhere.
+    write_json_atomic(history_path(), data, max_bytes=MAX_HISTORY_BYTES)
     return {"key": key, "note": clean}
 
 

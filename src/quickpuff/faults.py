@@ -8,16 +8,25 @@ are left out.
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any
 
 from .audit import Entry, parse_entry, place
-from .paths import data_dir, write_json_atomic
+from .paths import (
+    RefusedFile,
+    data_dir,
+    device_file_stem,
+    read_json_bounded,
+    report_readable,
+    report_unusable,
+    write_json_atomic,
+)
 
 SYSTEM_BOOT = 12
 CLOCK_ADJUST = 13
+# A Peak's fault ring is a few hundred short entries; a cache well past this
+# isn't one QuickPuff wrote.
+MAX_CACHE_BYTES = 1024 * 1024
 
 FAULTS: dict[int, tuple[str, str]] = {
     0: ("CHARGE_LOW_CAPACITY", "Battery charged below its expected capacity"),
@@ -63,33 +72,51 @@ def empty_cache(serial: str) -> dict[str, Any]:
 
 
 def cache_path(serial: str) -> Path:
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", serial).lstrip(".") or "peak"
-    return data_dir() / "devices" / f"{safe}.faults.json"
+    # The serial comes from the Peak: made safe for a file name.
+    return data_dir() / "devices" / f"{device_file_stem(serial)}.faults.json"
 
 
 def load_cache(serial: str) -> dict[str, Any]:
     """The fault log entries already read from this Peak, so a daemon restart
-    doesn't walk the whole ring again."""
+    doesn't walk the whole ring again.
+
+    A cache that is refused (a link, a FIFO, another account's, oversized)
+    starts empty and is logged, and save_cache won't replace it; a damaged
+    one starts empty and is replaced, as it always was.
+    """
+    path = cache_path(serial)
     try:
-        raw = json.loads(cache_path(serial).read_text())
+        raw = read_json_bounded(path, MAX_CACHE_BYTES)
+    except (OSError, ValueError) as exc:
+        report_unusable(path, exc)
+        return empty_cache(serial)
+    report_readable(path)
+    if raw is None:
+        return empty_cache(serial)
+    try:
         entries = {int(i): parse_entry(int(i), bytes.fromhex(h)) for i, h in raw.get("entries", {}).items()}
         placed = {int(i): float(t) for i, t in raw.get("placed", {}).items()}
         return {"serial": serial, "end": int(raw.get("end", 0)), "entries": entries, "placed": placed}
-    except (OSError, ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError):
         return empty_cache(serial)
 
 
 def save_cache(cache: dict[str, Any]) -> None:
+    """Keep what has been read. Only a cache, so a file that is refused is
+    logged and left alone rather than failing the fault read that got here."""
     path = cache_path(cache["serial"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(
-        path,
-        {
-            "end": int(cache["end"]),
-            "entries": {str(i): e.raw.hex() for i, e in cache["entries"].items()},
-            "placed": {str(i): t for i, t in cache["placed"].items()},
-        },
-    )
+    try:
+        write_json_atomic(
+            path,
+            {
+                "end": int(cache["end"]),
+                "entries": {str(i): e.raw.hex() for i, e in cache["entries"].items()},
+                "placed": {str(i): t for i, t in cache["placed"].items()},
+            },
+            max_bytes=MAX_CACHE_BYTES,
+        )
+    except RefusedFile as exc:
+        report_unusable(path, exc)
 
 
 def remember_times(found: list[dict[str, Any]], placed: dict[int, float]) -> None:
