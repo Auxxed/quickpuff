@@ -210,11 +210,37 @@ def read_json_bounded(path: Path, max_bytes: int) -> Any:
     if raw is None:
         return None
     try:
-        return json.loads(raw.decode("utf-8"))
-    except (ValueError, RecursionError) as exc:
-        # ValueError covers bad UTF-8 and bad JSON; RecursionError, nesting
-        # too deep to parse.
+        return loads_json(raw.decode("utf-8"))
+    except ValueError as exc:
+        # Bad UTF-8, bad JSON, or nested deeper than anything QuickPuff writes.
         raise ValueError(f"{path} isn't valid JSON ({exc})") from exc
+
+
+# Deeper than any file, request or reply QuickPuff writes (those are a few
+# levels), and far inside what any Python can parse.
+MAX_JSON_DEPTH = 64
+
+
+def loads_json(text: str, max_depth: int = MAX_JSON_DEPTH) -> Any:
+    """json.loads, with nesting capped at max_depth: ValueError past it.
+
+    The cap is checked here rather than left to the parser, which gives up at
+    a depth that depends on the Python version and the stack size, so a
+    deeply nested document can parse on one machine and fail on another. The
+    walk is iterative, so the check itself can't run out of stack.
+    """
+    try:
+        value = json.loads(text)
+    except RecursionError as exc:
+        raise ValueError("nested too deep to parse") from exc
+    pending = [(value, 1)] if isinstance(value, (dict, list)) else []
+    while pending:
+        item, depth = pending.pop()
+        if depth > max_depth:
+            raise ValueError(f"nested more than {max_depth} levels deep")
+        children = item.values() if isinstance(item, dict) else item
+        pending.extend((child, depth + 1) for child in children if isinstance(child, (dict, list)))
+    return value
 
 
 # Files already reported, so a poll that reads one every second says so once

@@ -134,10 +134,34 @@ class TestBoundedJson:
         assert not isinstance(info.value, OSError)
 
     def test_nesting_too_deep_to_parse_is_bad_json(self, tmp_path):
+        # Whether the parser gives up on this depends on the Python and the
+        # stack size; the explicit cap refuses it either way.
         target = tmp_path / "deep.json"
         target.write_text("[" * 100_000 + "]" * 100_000)
         with pytest.raises(ValueError, match="isn't valid JSON"):
             paths.read_json_bounded(target, 1_000_000)
+
+    def test_nesting_one_past_the_cap_is_bad_json_on_every_python(self, tmp_path):
+        # Shallow enough that every Python parses it, so only the cap refuses it.
+        depth = paths.MAX_JSON_DEPTH + 1
+        target = tmp_path / "deep.json"
+        target.write_text('{"a": ' * (depth - 1) + "[]" + "}" * (depth - 1))
+        with pytest.raises(ValueError, match="more than 64 levels"):
+            paths.read_json_bounded(target, 1_000_000)
+
+    def test_nesting_at_the_cap_reads(self, tmp_path):
+        target = tmp_path / "ok.json"
+        target.write_text("[" * paths.MAX_JSON_DEPTH + "]" * paths.MAX_JSON_DEPTH)
+        expected = []
+        for _ in range(paths.MAX_JSON_DEPTH - 1):
+            expected = [expected]
+        assert paths.read_json_bounded(target, 1_000_000) == expected
+
+    def test_loads_json_counts_objects_and_lists_alike(self):
+        assert paths.loads_json('{"a": [{"b": [1, 2]}]}', max_depth=4) == {"a": [{"b": [1, 2]}]}
+        with pytest.raises(ValueError):
+            paths.loads_json('{"a": [{"b": [[1]]}]}', max_depth=4)
+        assert paths.loads_json("5", max_depth=1) == 5
 
     def test_bad_utf8_is_bad_json(self, tmp_path):
         target = tmp_path / "x.json"

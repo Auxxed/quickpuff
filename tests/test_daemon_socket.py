@@ -201,6 +201,26 @@ def test_requests_that_are_not_objects_get_an_error_and_the_line_stays_open(tmp_
     asyncio.run(run())
 
 
+def test_a_request_nested_past_the_cap_gets_an_error_on_every_python(tmp_path, monkeypatch):
+    # Valid JSON every Python parses, so only the explicit depth cap refuses it.
+    d = make_daemon(tmp_path, monkeypatch)
+    deep = "[" * 100 + "]" * 100
+
+    async def run():
+        await d.start()
+        try:
+            payload = ('{"id": 4, "cmd": "ping", "args": {"x": %s}}\n' % deep).encode()
+            payload += b'{"id": 5, "cmd": "ping"}\n'
+            lines, closed = await _talk(d.socket_path, payload)
+            assert not closed
+            assert lines[0]["ok"] is False and "levels deep" in lines[0]["error"]
+            assert lines[1]["id"] == 5 and lines[1]["ok"] is True
+        finally:
+            await d.close()
+
+    asyncio.run(run())
+
+
 # ---- the socket file -------------------------------------------------------------
 
 

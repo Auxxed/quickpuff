@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .paths import socket_path
+from .paths import loads_json, socket_path
 
 
 class DaemonNotRunning(RuntimeError):
@@ -35,7 +35,12 @@ async def rpc(
             line = await asyncio.wait_for(reader.readline(), timeout=timeout)
             if not line:
                 raise RuntimeError("Daemon closed the connection")
-            msg = json.loads(line.decode())
+            try:
+                msg = loads_json(line.decode())
+            except ValueError as exc:
+                raise RuntimeError(f"The daemon sent something that isn't JSON ({exc})") from exc
+            if not isinstance(msg, dict):
+                raise RuntimeError("The daemon sent something that isn't a reply")
             if msg.get("event"):
                 continue
             if not msg.get("ok"):

@@ -6,13 +6,12 @@ Bluetooth; `gather` does the real probing.
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import Any
 
 from . import __version__
-from .paths import RuntimeDirMissing, load_config
+from .paths import RuntimeDirMissing, load_config, loads_json
 from .proc import run_bounded
 
 PLUGIN_ID = "auxxed.quickpuff"
@@ -180,7 +179,7 @@ def read_idle_state() -> dict[str, Any] | None:
     if code != 0 or not out:
         return None
     try:
-        parsed = json.loads(out)
+        parsed = loads_json(out)
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
@@ -245,8 +244,8 @@ async def gather() -> list[Check]:
     if omarchy_found:
         code, out = _run([OMARCHY, "plugin", "list", "--json"], timeout=10)
         try:
-            plugins = json.loads(out) if code == 0 and out else None
-        except (ValueError, RecursionError):
+            plugins = loads_json(out) if code == 0 and out else None
+        except ValueError:
             plugins = None
         if not isinstance(plugins, list):
             plugins = None

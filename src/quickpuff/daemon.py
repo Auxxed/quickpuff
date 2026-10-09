@@ -29,6 +29,7 @@ from .paths import (
     RefusedFile,
     RuntimeDirMissing,
     load_config,
+    loads_json,
     open_private_dir,
     save_config,
     socket_path,
@@ -2488,8 +2489,8 @@ class QuickPuffDaemon:
                 if not line:
                     break
                 try:
-                    msg = json.loads(line.decode("utf-8"))
-                except (ValueError, RecursionError) as exc:
+                    msg = loads_json(line.decode("utf-8"))
+                except ValueError as exc:
                     await self._send(writer, {"ok": False, "error": f"bad json: {exc}"})
                     continue
                 if not isinstance(msg, dict) or not isinstance(msg.get("args") or {}, dict):
