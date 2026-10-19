@@ -18,7 +18,7 @@ def played_cues():
 
 def test_every_cue_the_overlays_play_is_bundled():
     cues = played_cues()
-    assert len(cues) == 11
+    assert len(cues) == 14
     for name in cues:
         assert (SOUNDS / f"{name}.ogg").read_bytes()[:4] == b"OggS", name
 

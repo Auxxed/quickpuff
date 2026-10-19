@@ -269,7 +269,7 @@ PanelWindow {
   // Plays sounds/<name>.ogg (one of the bundled cues) through pw-play,
   // fire-and-forget, stopped after ten seconds at most.
   // How many versions each cue has in sounds/: firework, firework-2, ...
-  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2 })
+  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2, "thunder": 2 })
 
   function cue(name) {
     if (!soundsOn || !/^[a-z]+$/.test(name)) return

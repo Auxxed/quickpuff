@@ -614,6 +614,95 @@ def neon(rng):
     return reverb(soft(mix, -10), rng, seconds=0.9, wet=0.1, predelay=0.01)
 
 
+# Electric shows.
+
+
+@cue(4.0, -18.0, fade=0.8)
+def thunder(rng, crack_db=-3, roll_db=-16):
+    """Lightning (Storm, one per strike): the bolt's tearing crack on the beat,
+    a falling sub boom under it, then thunder rolling away: brown noise
+    swelling in a few waves, darker the further it travels."""
+    t = clock(4.0)
+    n = len(t)
+    # The crack: a rapid train of bright ticks, densest at the strike and
+    # thinning out over a quarter of a second, over one sharp snap.
+    tick = np.zeros((2, n))
+    tearing = lambda x: 1400 * np.exp(-x / 0.07)
+    for when in events(rng, 0.4, tearing, 1400):
+        g = grain(rng, rng.uniform(0.0015, 0.006), rng.uniform(1500, 7500), rng.uniform(0.8, 2.0))
+        place(tick, pan(g * rng.lognormal(0, 0.6), rng.uniform(-0.5, 0.5)), when)
+    snap = filtered(noise(rng, n), highpass(700)) * hit(t, 0, 0.0008, 0.02)
+    crack = peaked(peaked(tick, -2) + stereo(peaked(snap, -4)), crack_db)
+    boom = sine(line(t, [(0, 72), (0.45, 34), (4.0, 28)]), n) * hit(t, 0.008, 0.012, 0.5)
+    # The roll: a first wave off the strike and a few more behind it, with a
+    # slow flutter, low-passed tighter as it goes.
+    swell = 0.35 * hit(t, 0.04, 0.06, 0.5)
+    for _ in range(4):
+        swell += rng.uniform(0.45, 1.0) * hit(t, rng.uniform(0.25, 1.5), rng.uniform(0.08, 0.3), rng.uniform(0.35, 0.9))
+    flutter = filtered(noise(rng, n), lowpass(8, 2))
+    flutter = 0.65 + 0.35 * flutter / (np.max(np.abs(flutter)) + 1e-12)
+    rumble = np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)])
+    rumble = swept(rumble, lambda f, tt: lp_gain(f, np.interp(tt, [0, 0.3, 4.0], [1500, 520, 150]), 2))
+    rumble = rumble * swell * flutter
+    mix = soft(crack, -3) + stereo(peaked(boom, -5)) + scaled(rumble, roll_db, 0.1, 2.0)
+    return reverb(soft(mix, -2), rng, seconds=2.6, wet=0.22, predelay=0.03, bright=4500.0, dark=600.0)
+
+
+@cue(4.0, -18.0, fade=0.8, name="thunder-2")
+def thunder_2(rng):
+    """A strike further off: less crack, more roll."""
+    return thunder(rng, crack_db=-9, roll_db=-14)
+
+
+@cue(6.6, -22.0, fade=1.0)
+def rain(rng):
+    """Storm's bed: rain and gusting wind for the length of the 6.6 s show, in
+    over its first 0.8 s and out over the last 1.0 s as the sky clears."""
+    t = clock(6.6)
+    n = len(t)
+    sky = smooth(np.minimum(1, np.minimum(t / 0.8, (6.6 - t) / 1.0)))
+    drops = np.zeros((2, n))
+    for when in events(rng, 6.6, lambda x: 480, 480):
+        g = grain(rng, rng.uniform(0.002, 0.008), rng.uniform(2200, 9500), rng.uniform(1.5, 5.0))
+        place(drops, pan(g * rng.lognormal(0, 0.35), rng.uniform(-0.9, 0.9)), when)
+    drops = soft(scaled(drops, -26), -19)
+    hiss = filtered(np.vstack([tilted(rng, n, -3), tilted(rng, n, -3)]), bandpass(5200, 0.6))
+    wind = np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)])
+    wind = swept(wind, lambda f, tt: bp_gain(f, 420 + 240 * np.sin(TAU * tt / 4.4), 1.4))
+    gust = 0.6 + 0.4 * np.sin(TAU * t / 5.5 + 1.0)
+    mix = (drops + scaled(hiss, -33) + scaled(wind * gust, -28)) * sky
+    return reverb(mix, rng, seconds=1.2, wet=0.18, predelay=0.012)
+
+
+@cue(6.4, -19.5, fade=0.6)
+def plasma(rng):
+    """Plasma globe: a zap and a soft thump as the core lights (0.55 s into the
+    6.4 s show), then the globe's hum (the neon lamp recording, low and
+    filtered) with the tendrils crackling as they reach the glass; out with the
+    light over the last 0.9 s."""
+    t = clock(6.4)
+    n = len(t)
+    lit = smooth(np.clip((t - 0.55) / 0.35, 0, 1)) * smooth(np.clip((6.4 - t) / 0.9, 0, 1))
+    lamp = np.zeros((2, n))
+    place(lamp, from_onset(recording("neon-lamp"), 0.6, 0.0), 0)
+    hum = swept(lamp, lambda f, tt: bp_gain(f, 700 + 350 * np.sin(TAU * tt / 2.3) + 200 * np.sin(TAU * tt / 0.85), 0.9))
+    # The core lighting: a quick upward zap of noise and a low thump.
+    zap = swept(noise(rng, n), lambda f, tt: bp_gain(f, np.interp(tt, [0.5, 0.75], [500, 5000]), 3.0))
+    zap *= hit(t, 0.5, 0.15, 0.08)
+    thump = sine(line(t, [(0, 95), (0.55, 95), (0.8, 42), (6.4, 42)]), n) * hit(t, 0.55, 0.006, 0.2)
+    # Crackle: little bursts of ticks, more often once the tendrils reach
+    # (0.7 s to 1.5 s in), each scattered across the stereo field.
+    crackle = np.zeros((2, n))
+    reaching = lambda x: 0.0 if x < 0.7 or x > 5.6 else 9.0 + 7.0 * np.sin(x * 2.1) ** 2
+    for when in events(rng, 6.4, reaching, 16.0):
+        side = rng.uniform(-0.9, 0.9)
+        for k in range(rng.integers(3, 9)):
+            g = grain(rng, rng.uniform(0.001, 0.004), rng.uniform(2500, 8000), rng.uniform(1.0, 2.5))
+            place(crackle, pan(g * rng.lognormal(0, 0.5), side), when + rng.uniform(0, 0.035))
+    mix = (scaled(hum, -24, 1.5, 5.0) * lit + scaled(crackle, -29, 1.0, 5.5) + stereo(peaked(zap, -14)) + stereo(peaked(thump, -9)))
+    return reverb(soft(mix, -6), rng, seconds=1.4, wet=0.2, predelay=0.015)
+
+
 # -------------------------------------------------------------------- output
 
 

@@ -67,7 +67,7 @@ PanelWindow {
   // fire-and-forget, stopped after ten seconds at most. Nothing when sounds
   // are off.
   // How many versions each cue has in sounds/: firework, firework-2, ...
-  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2 })
+  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2, "thunder": 2 })
 
   function cue(name) {
     if (!overlay.soundsOn || !/^[a-z]+$/.test(name)) return
@@ -2775,7 +2775,7 @@ PanelWindow {
     readonly property int count: 9
 
     NumberAnimation on t { from: 0; to: 1; duration: 6400; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("neon")
+    Component.onCompleted: overlay.cue("plasma")
 
     // Where tendril `i` leaves the glass now, and its points out from the
     // core: a wandering angle, a fast jitter along its length.
@@ -3005,7 +3005,7 @@ PanelWindow {
     readonly property real readyAt: strikes[3].at
 
     NumberAnimation on t { from: 0; to: 1; duration: 6600; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("smoke")
+    Component.onCompleted: overlay.cue("rain")
     onNowChanged: {
       while (fired < strikes.length && now >= strikes[fired].at) {
         var sp = strikes[fired]
@@ -3014,7 +3014,7 @@ PanelWindow {
         made.push({ "at": sp.at, "x": sp.x, "big": sp.big === true, "main": main, "forks": forksFor(main, sp.big === true) })
         bolts = made
         fired++
-        overlay.cue("firework")
+        overlay.cue("thunder")
       }
     }
 
