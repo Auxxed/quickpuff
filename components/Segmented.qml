@@ -84,16 +84,6 @@ Item {
     NumberAnimation { target: seg; property: "land"; from: 1; to: 0; duration: 650; easing.type: Easing.OutCubic }
   }
 
-  // The pill glows from underneath, like a neon tube along its foot.
-  Glow {
-    visible: seg.selectedIndex >= 0
-    hue: Util.alpha(Color.accent, 0.3)
-    x: seg.pillLeft + (seg.pillRight - seg.pillLeft) / 2 - 50
-    y: seg.height - 50
-    opacity: 0.6 + 0.4 * seg.land
-    transform: Scale { origin.x: 50; origin.y: 50; xScale: (seg.pillRight - seg.pillLeft) * 1.15 / 100; yScale: seg.height * 0.75 / 100 }
-  }
-
   Rectangle {
     visible: seg.selectedIndex >= 0
     x: seg.pillLeft
@@ -104,6 +94,7 @@ Item {
     border.width: 1
     border.color: Color.accent
 
+    // A neon tube along its foot.
     Rectangle {
       anchors.left: parent.left
       anchors.right: parent.right
@@ -144,8 +135,8 @@ Item {
       SequentialAnimation {
         id: glyphHop
         PauseAnimation { duration: 110 }
-        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.22; duration: 110; easing.type: Easing.OutQuad }
-        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.0; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 2.6 }
+        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.12; duration: 110; easing.type: Easing.OutQuad }
+        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.0; duration: 320; easing.type: Easing.OutCubic }
       }
 
       Grid {
@@ -154,9 +145,9 @@ Item {
         spacing: seg.stacked ? Style.space(2) : Style.space(5)
         horizontalItemAlignment: Grid.AlignHCenter
         verticalItemAlignment: Grid.AlignVCenter
-        scale: cellMouse.pressed ? 0.92 : (cell.selected && seg.stacked ? 1.04 : 1)
+        scale: cellMouse.pressed ? 0.94 : 1
 
-        Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
+        Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
         Text {
           id: cellGlyph
@@ -176,7 +167,6 @@ Item {
           color: cell.selected ? panel.foreground : cell.ink
           font.family: panel.fontFamily
           font.pixelSize: seg.compact || seg.stacked ? Style.font.caption : Style.font.bodySmall
-          font.bold: cell.selected
 
           Behavior on color { ColorAnimation { duration: 160 } }
         }
