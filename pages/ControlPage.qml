@@ -133,9 +133,8 @@ Column {
         width: parent.width
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        text: panel.atTemp
-          ? panel.formatDuration(panel.timerSecondsLeft) + " left before the Peak cools down"
-          : "Ready in about " + panel.formatDuration(panel.timerSecondsLeft)
+        // What the ring's number is, without saying it twice.
+        text: panel.atTemp ? "Left before the Peak cools down" : "Until it's ready, roughly"
         color: panel.dim
         font.family: panel.fontFamily
         font.pixelSize: Style.font.caption
