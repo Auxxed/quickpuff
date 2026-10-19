@@ -703,6 +703,87 @@ def plasma(rng):
     return reverb(soft(mix, -6), rng, seconds=1.4, wet=0.2, predelay=0.015)
 
 
+# Wonder shows.
+
+
+def bubble(rng, f0, tau):
+    """One bubble: a sine at its resonance, rising in pitch as it rings out."""
+    m = n_of(tau * 6)
+    x = np.arange(m) / SR
+    f = f0 * (1 + 0.9 * x / (tau * 6))
+    return np.sin(phase(f, m)) * np.clip(x / 0.0015, 0, 1) * np.exp(-x / tau)
+
+
+@cue(6.8, -21.5, fade=1.0)
+def deep(rng):
+    """Deep sea: the hush of deep water swelling slowly, bubbles wobbling up
+    past you, and a whale calling far off in the blue (and another answering),
+    in over the show's first 0.8 s and out over its last 1.0 s."""
+    t = clock(6.8)
+    n = len(t)
+    water = smooth(np.minimum(1, np.minimum(t / 0.8, (6.8 - t) / 1.0)))
+    hush = np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)])
+    hush = swept(hush, lambda f, tt: lp_gain(f, 260 + 90 * np.sin(TAU * tt / 3.1), 2))
+    hush *= 0.7 + 0.3 * np.sin(TAU * t / 3.4)
+    pops = np.zeros((2, n))
+    for when in events(rng, 6.6, lambda x: 7.0, 7.0):
+        for k in range(rng.integers(1, 4)):
+            b = bubble(rng, rng.uniform(380, 1500), rng.uniform(0.018, 0.05)) * rng.uniform(0.4, 1.0)
+            place(pops, pan(b, rng.uniform(-0.8, 0.8)), when + k * rng.uniform(0.03, 0.09))
+    pops = filtered(pops, lowpass(2600, 2))
+    calls = np.zeros((2, n))
+    for at, glide, side in ((1.3, (170, 310, 230), -0.4), (3.9, (230, 380, 290), 0.5)):
+        m = n_of(1.9)
+        x = np.arange(m) / SR
+        f = np.interp(x, [0, 0.8, 1.9], glide) * (1 + 0.012 * np.sin(TAU * 5.2 * x))
+        voice = partials(f, m, [1.0, 0.55, 0.3, 0.16, 0.08])
+        voice = filtered(voice, bandpass(620, 0.7)) * smooth(np.minimum(1, np.minimum(x / 0.35, (1.9 - x) / 0.6)))
+        place(calls, pan(voice, side), at)
+    calls = filtered(calls, lowpass(1600, 2))
+    mix = (scaled(hush, -27) + scaled(pops, -30, 0.5, 6.0) + scaled(calls, -26, 1.3, 5.8)) * water
+    return reverb(mix, rng, seconds=3.6, wet=0.45, predelay=0.04, bright=3000.0, dark=700.0)
+
+
+@cue(6.8, -18.5, fade=1.0)
+def warp(rng):
+    """Warp: the drive spooling up as the stars stretch (speed building as the
+    square of time until the drop 1.8 s in), a boom as it drops out of warp,
+    then the galaxy: a deep, wide chord with stars chiming over it, fading
+    with the show's last second."""
+    t = clock(6.8)
+    n = len(t)
+    drop = 1.8
+    spool = np.clip(t / drop, 0, 1) ** 2 * (t < drop)
+    rush = np.vstack([tilted(rng, n, -3), tilted(rng, n, -3)])
+    rush = swept(rush, lambda f, tt: bp_gain(f, 250 + 5500 * np.clip(tt / drop, 0, 1) ** 2, 1.6))
+    rush *= (0.08 + spool) * hit(t, 0, 0.01, 99) * np.where(t < drop, 1.0, np.exp(-(t - drop) / 0.12))
+    whine = np.zeros((2, n))
+    for ch, cents in ((0, -8), (1, 8)):
+        f = (55 + 495 * np.clip(t / drop, 0, 1) ** 2) * 2 ** (cents / 1200)
+        whine[ch] = saw(f, n, rng.uniform(), top=7000)
+    whine = filtered(whine, lowpass(2400, 2)) * spool
+    boom = sine(line(t, [(0, 80), (drop, 80), (drop + 0.5, 30), (6.8, 28)]), n) * hit(t, drop, 0.008, 0.6)
+    crack = filtered(noise(rng, n), highpass(1200)) * hit(t, drop, 0.002, 0.06)
+    galaxy = smooth(np.clip((t - drop) / 1.4, 0, 1)) * smooth(np.clip((6.8 - t) / 1.6, 0, 1))
+    pad = np.zeros((2, n))
+    for name in ("D3", "A3", "E4", "F#4", "A4", "C#5"):
+        for ch in range(2):
+            for cents in (-9, -3, 4, 10):
+                pad[ch] += saw(hz(name) * 2 ** ((cents + rng.uniform(-2, 2)) / 1200), n, rng.uniform(), top=5000)
+    pad = swept(pad / 24, lambda f, tt: lp_gain(f, 300 + 1500 * np.clip((tt - drop) / 3.0, 0, 1), 2)) * galaxy
+    stars = np.zeros((2, n))
+    scale = [hz(name) for name in ("A5", "C#6", "E6", "F#6", "A6", "E7")]
+    m = n_of(1.4)
+    x = np.arange(m) / SR
+    for when in np.sort(rng.uniform(drop + 0.3, 5.4, 11)):
+        f = scale[rng.integers(len(scale))]
+        bell = np.sin(TAU * f * x + 1.4 * np.exp(-x / 0.1) * np.sin(TAU * 3.5 * f * x)) * np.exp(-x / 0.4)
+        place(stars, pan(bell * rng.uniform(0.08, 0.16) * np.interp(when, t, galaxy), rng.uniform(-0.85, 0.85)), when)
+    mix = (scaled(rush, -20, 0.8, drop) + scaled(whine, -27, 1.0, drop) + stereo(peaked(boom, -6))
+           + stereo(peaked(crack, -14)) + scaled(pad, -25, 3.0, 5.0) + stars)
+    return reverb(soft(mix, -3), rng, seconds=2.8, wet=0.35, predelay=0.03)
+
+
 # -------------------------------------------------------------------- output
 
 

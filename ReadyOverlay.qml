@@ -2306,7 +2306,7 @@ PanelWindow {
     readonly property var hues: [overlay.tint, "#58f0ff", "#b38cff", Qt.lighter(overlay.tint, 1.4), "#7affd2", "#ff8ad8"]
 
     NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("bubbles")
+    Component.onCompleted: overlay.cue("deep")
 
     // The water, darker the deeper it goes.
     Rectangle {
@@ -2587,7 +2587,6 @@ PanelWindow {
     readonly property real lean: -18 * Math.PI / 180
     readonly property real rMin: height * 0.03
     readonly property real rMax: height * 0.46
-    property bool dropped: false
 
     // Where a point on the disc (polar, in the disc's own plane) lands on
     // screen, and how near the viewer it is (0 back, 1 front).
@@ -2597,8 +2596,8 @@ PanelWindow {
     function spin(r) { return Math.max(0, since) * (0.18 + 0.75 * rMin * 3 / Math.max(r, rMin)) }
 
     NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("liftoff")
-    onSinceChanged: if (since >= 0 && !dropped) { dropped = true; overlay.cue("shimmer") }
+    // One cue for the whole trip: the drive spooling up, the drop, the galaxy.
+    Component.onCompleted: overlay.cue("warp")
 
     Rectangle { anchors.fill: parent; color: "#010208"; opacity: 0.8 * warp.dark }
 
