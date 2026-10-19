@@ -358,12 +358,12 @@ def test_raw_commands_work_under_debug(tmp_path, monkeypatch):
 
 
 def test_notify_text_is_plain_and_short():
-    hostile = "<b>Peak</b> & \x1b[31m‮evil⁦\x85 name\n" + "x" * 500
+    hostile = "<b>Peak</b> & \x1b[31m\u202eevil\u2066\x85 name\n" + "x" * 500
     clean = notify_text(hostile, 80)
-    assert not set(clean) & set("<>&\x1b\x85\n‮⁦")
+    assert not set(clean) & set("<>&\x1b\x85\n\u202e\u2066")
     assert len(clean) <= 80 and clean.endswith("…")
     assert notify_text("Peak   Pro\t is ready", 80) == "Peak Pro is ready"
-    assert notify_text("a‏b؜c", 80) == "abc"
+    assert notify_text("a\u200fb\u061cc", 80) == "abc"
 
 
 def test_notifications_go_through_the_absolute_notify_send_with_plain_text(tmp_path, monkeypatch):

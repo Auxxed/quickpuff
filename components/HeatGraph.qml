@@ -10,7 +10,7 @@ import qs.Commons
 Section {
   id: graph
 
-  glyph: ""
+  glyph: "\uF201"
   title: panel.heatTraceLive ? "HEAT CURVE" : "LAST SESSION"
   trailing: {
     var pts = panel.heatPoints

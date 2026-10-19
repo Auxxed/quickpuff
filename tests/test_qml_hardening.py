@@ -112,3 +112,25 @@ def test_no_file_too_big_for_the_marketplace_scanner():
         if name and (ROOT / name.decode()).is_file() and (ROOT / name.decode()).stat().st_size > 512 * 1024
     ]
     assert big == []
+
+
+# Bidi controls, zero-width characters and private-use glyphs (Nerd Font
+# icons) are invisible or ambiguous in a review; sources spell them as
+# escapes instead. Built from code points so this file holds none itself.
+INVISIBLE = re.compile("[%s]" % "".join(
+    "%s-%s" % (chr(a), chr(b)) for a, b in (
+        (0x061C, 0x061C), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2069),
+        (0xFEFF, 0xFEFF), (0xE000, 0xF8FF), (0xF0000, 0x10FFFF),
+    )
+))
+
+
+def test_no_invisible_characters_in_code():
+    code = [p for p in ROOT.rglob("*") if p.suffix in (".qml", ".js", ".py", ".sh") and ".git" not in p.parts]
+    found = [
+        f"{p.relative_to(ROOT)}:{n}"
+        for p in code
+        for n, line in enumerate(p.read_text(errors="replace").splitlines(), 1)
+        if INVISIBLE.search(line)
+    ]
+    assert found == []

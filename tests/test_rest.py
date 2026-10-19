@@ -273,7 +273,7 @@ def test_bar_battery_carries_a_glyph_and_a_due_clean_is_a_wrench_not_a_word(caps
     print_waybar({"connected": True, "battery": 30, "operating_state": "Idle", "operating_state_id": 5, "clean_due": True})
     out = json.loads(capsys.readouterr().out)
     assert out["class"] == "clean"
-    assert out["text"] == " 30% "
+    assert out["text"] == "\uf243 30% \uf0ad"
     assert "clean" not in out["text"]
     print_waybar({"connected": True, "battery": 30, "charge_source": "USB", "operating_state": "Idle", "operating_state_id": 5})
-    assert json.loads(capsys.readouterr().out)["text"] == " 30%"
+    assert json.loads(capsys.readouterr().out)["text"] == "\uf0e7 30%"

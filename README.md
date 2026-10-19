@@ -491,10 +491,16 @@ the exact command to regenerate each is at the top of the file.
 Each tab is a file in `pages/`, and each reusable piece is a file in
 `components/`. Every extracted file takes the panel as a `panel` property
 (`panel: root`) and reads state and calls actions through it; a bare
-`root: root` would bind to itself. Ready animations live in
-`ReadyOverlay.qml`: add a component there, then list it in `READY_ANIMATIONS`
-in `src/quickpuff/constants.py` and in the `readyAnimations` of both the panel
+`root: root` would bind to itself. Ready animations are one file each in
+`ready/`: add one there, take the overlay as its `host` property (and reach
+it as `<root id>.host`, never `host: host`), register it in
+`ReadyOverlay.qml`'s `animations`, then list it in `READY_ANIMATIONS` in
+`src/quickpuff/constants.py` and in the `readyAnimations` of both the panel
 and `BarWidget.qml` (which plays only names on its list).
+
+QML components with logic of their own have Qt Quick tests in `tests/qml`
+(hold to heat only fires on a full hold), run in CI and locally with
+`QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/qml`.
 
 Keep virtual environments outside the checkout: `omarchy plugin` refuses
 symlinks inside a plugin folder, and a venv is full of them.

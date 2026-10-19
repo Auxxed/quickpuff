@@ -698,7 +698,7 @@ Column {
   // so another animation is one more entry here and in ReadyOverlay.
   Section {
     panel: controlPage.panel
-    glyph: ""
+    glyph: "\uF135"
     title: "READY ANIMATION"
     trailing: panel.readyAnimation === "off" ? "" : "Plays when it's ready"
 

@@ -45,3 +45,22 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  # QML components with their own logic, under Qt's own test runner. Arch
+  # ships the same Qt 6 the shell runs on; the image is pinned by digest.
+  qml:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux@sha256:82b1b08faae9d61e3e7e13d562f4d09114d939105b0d59ff34140f3bd418593a
+    steps:
+      - name: Install Qt Quick
+        run: pacman -Syu --noconfirm qt6-declarative
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Hold to heat only fires on a full hold
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/qml

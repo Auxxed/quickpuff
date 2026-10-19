@@ -69,15 +69,37 @@ BarWidget {
     }
   }
 
+  // One widget per bar, one IPC target: the first widget answers, and opens
+  // the panel on the focused monitor through the shell.
+  property bool ipcOwner: false
+
+  function viaShell(action) {
+    var sh = bar ? bar.shell : null
+    if (!sh || typeof sh[action] !== "function") return false
+    if (action === "hide") sh.hide(moduleName)
+    else sh[action](moduleName, "{}")
+    return true
+  }
+
+  Timer {
+    interval: 1500
+    running: true
+    onTriggered: {
+      var items = root.bar && typeof root.bar.moduleWidgets === "function" ? root.bar.moduleWidgets(root.moduleName) : null
+      root.ipcOwner = !items || !items.length || items[0] === root
+    }
+  }
+
   IpcHandler {
     target: "auxxed.quickpuff"
+    enabled: root.ipcOwner
 
     function refresh(): void { root.broadcast("refresh") }
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.togglePanel() }
+    function open(): void { if (!root.viaShell("summon")) root.open() }
+    function close(): void { if (!root.viaShell("hide")) root.close() }
+    function show(): void { open() }
+    function hide(): void { close() }
+    function toggle(): void { if (!root.viaShell("toggle")) root.togglePanel() }
     // Plays the ready animation now, for trying it out.
     function celebrate(): void { root.playReady("") }
     // Plays a given ready animation (rocket, confetti, lava, ...); any other
@@ -346,18 +368,13 @@ BarWidget {
   // fills under the label and the cycle starts once it's full. A tap, or
   // letting go early, says how instead. The label sits beside the tray, and
   // a misclick shouldn't heat a 500°F chamber that may be in another room.
-  property real holdProgress: 0
-  NumberAnimation {
-    id: holdAnim
-    target: root
-    property: "holdProgress"
-    from: 0
-    to: 1
+  HoldToFire {
+    id: holdToHeat
     duration: 900
-    // Only a natural finish counts; stop() on release doesn't emit this.
-    onFinished: if (root.holdProgress >= 1) root.holdDone()
+    onFired: root.holdDone()
+    onCancelled: root.flash("\uf06d Hold to heat")
   }
-  NumberAnimation { id: holdFade; target: root; property: "holdProgress"; to: 0; duration: 220; easing.type: Easing.OutCubic }
+  readonly property real holdProgress: holdToHeat.progress
 
   function holdStart() {
     if (root.outputOffline) {
@@ -370,19 +387,14 @@ BarWidget {
     }
     flashTimer.stop()
     flashText = "\uf06d Keep holding"
-    holdFade.stop()
-    holdAnim.restart()
+    holdToHeat.start()
   }
 
   function holdEnd() {
-    if (!holdAnim.running) return
-    holdAnim.stop()
-    holdFade.restart()
-    flash("\uf06d Hold to heat")
+    holdToHeat.end()
   }
 
   function holdDone() {
-    holdFade.restart()
     flash("\uf06d Heating")
     cli.fire(["heat", "start"])
   }

@@ -9,7 +9,7 @@ import qs.Commons
 Section {
   id: cycleSection
 
-  glyph: ""
+  glyph: "\uF021"
   title: panel.activeProfile
     ? "COLOR CYCLE · " + String(panel.cleanName(panel.activeProfile.name) || ("Profile " + (panel.currentProfile + 1))).toUpperCase()
     : "COLOR CYCLE"
@@ -234,7 +234,7 @@ Section {
             id: paletteLabel
             anchors.centerIn: parent
             textFormat: Text.PlainText
-            text: (paletteChip.picked ? " " : "") + paletteChip.modelData.name
+            text: (paletteChip.picked ? "\uF00C " : "") + paletteChip.modelData.name
             color: "white"
             font.family: panel.fontFamily
             font.pixelSize: Style.font.caption
@@ -285,7 +285,7 @@ Section {
             anchors.centerIn: parent
             visible: dotMouse.containsMouse && panel.cycleColors.length > 1
             textFormat: Text.PlainText
-            text: ""
+            text: "\uF00D"
             color: panel.inkOn(cycleDot.modelData)
             font.family: panel.fontFamily
             font.pixelSize: Style.font.caption

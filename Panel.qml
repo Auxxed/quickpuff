@@ -706,14 +706,14 @@ Panel {
   // The Puffco app's animations for the Peak Pro (Breathe is from an older
   // app release; Lava Lamp and Confetti run on the Peak's particle engine).
   readonly property var cycleStyles: [
-    { "value": "fade", "label": "Fade", "glyph": "" },
-    { "value": "spin", "label": "Spin", "glyph": "" },
-    { "value": "breathe", "label": "Breathe", "glyph": "" },
-    { "value": "disco", "label": "Disco", "glyph": "" },
-    { "value": "split", "label": "Split", "glyph": "" },
-    { "value": "fill", "label": "Fill", "glyph": "" },
-    { "value": "lava", "label": "Lava", "glyph": "" },
-    { "value": "confetti", "label": "Confetti", "glyph": "" }
+    { "value": "fade", "label": "Fade", "glyph": "\uF0C2" },
+    { "value": "spin", "label": "Spin", "glyph": "\uF01E" },
+    { "value": "breathe", "label": "Breathe", "glyph": "\uF004" },
+    { "value": "disco", "label": "Disco", "glyph": "\uF005" },
+    { "value": "split", "label": "Split", "glyph": "\uF07E" },
+    { "value": "fill", "label": "Fill", "glyph": "\uF062" },
+    { "value": "lava", "label": "Lava", "glyph": "\uF043" },
+    { "value": "confetti", "label": "Confetti", "glyph": "\uF0D0" }
   ]
   readonly property var cyclePalettes: [
     { "name": "Rainbow", "colors": ["#ff0000", "#ffaa00", "#f6f600", "#00e05a", "#0080ff", "#a020ff"] },

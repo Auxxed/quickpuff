@@ -10,7 +10,7 @@ import qs.Commons
 Section {
   id: lightsSection
 
-  glyph: ""
+  glyph: "\uF004"
   title: "MY LIGHTS"
   trailing: panel.savedLights.length ? panel.savedLights.length + " saved" : ""
 
@@ -117,7 +117,7 @@ Section {
           text: {
             var style = String(lightRow.modelData.style || "")
             var label = style === "custom" ? "Exclusive" : style === "solid" ? "Solid" : style.charAt(0).toUpperCase() + style.slice(1)
-            return lightRow.worn ? " On this profile · " + label : label
+            return lightRow.worn ? "\uF00C On this profile · " + label : label
           }
           color: panel.dim
           font.family: panel.fontFamily
@@ -156,7 +156,7 @@ Section {
         TileButton {
           panel: lightsSection.panel
           anchors.verticalCenter: parent.verticalCenter
-          glyph: ""
+          glyph: "\uF040"
           onActivated: {
             panel.namingLight = false
             panel.renamingLight = lightRow.modelData.id
@@ -181,7 +181,7 @@ Section {
             id: sureLabel
             anchors.centerIn: parent
             textFormat: Text.PlainText
-            text: lightRow.confirming ? "Delete?" : ""
+            text: lightRow.confirming ? "Delete?" : "\uF1F8"
             color: lightRow.confirming || trashMouse.containsMouse ? panel.urgent : panel.dim
             font.family: panel.fontFamily
             font.pixelSize: lightRow.confirming ? Style.font.caption : Style.font.bodySmall
@@ -211,7 +211,7 @@ Section {
       visible: !panel.namingLight
       width: parent.width
       label: panel.wearingSaved ? "Already saved" : "Save this profile's light"
-      glyph: panel.wearingSaved ? "" : ""
+      glyph: panel.wearingSaved ? "\uF00C" : "\uF0C7"
       tint: Color.accent
       emphasized: !panel.wearingSaved
       onActivated: {
