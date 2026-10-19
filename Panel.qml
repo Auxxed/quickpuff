@@ -2010,6 +2010,40 @@ Panel {
               }
             }
 
+            // While it heats, soft blooms of the profile's light drift
+            // behind the Peak.
+            Repeater {
+              model: 2
+              Glow {
+                required property int index
+                property real drift: 0
+                NumberAnimation on drift {
+                  running: root.heating && root.opened
+                  loops: Animation.Infinite
+                  from: 0
+                  to: 1
+                  duration: 5200 + index * 1900
+                }
+                hue: Util.alpha(index ? Qt.lighter(root.profileTint, 1.35) : root.profileTint, 0.32)
+                x: heroArt.x + heroArt.width * 0.5 + Math.sin(drift * 6.283 + index * 2.1) * heroArt.width * 0.45 - 50
+                y: heroArt.y + heroArt.height * (0.55 + 0.14 * Math.cos(drift * 6.283 + index)) - 50
+                scale: heroArt.width * (1.7 + 0.5 * index) / 100
+                opacity: root.heating ? 0.55 * Math.min(1, hero.litGlow * 1.2) : 0
+                Behavior on opacity { NumberAnimation { duration: 700 } }
+              }
+            }
+
+            // Neon on the numbers: a glow behind them in the heat's colour,
+            // stronger the hotter the chamber (and flaring white at Ready).
+            Glow {
+              readonly property real hot: root.connected ? Math.max(0, Math.min(1, (heroTempRow.shownF - 140) / 380)) : 0
+              hue: Util.alpha(Qt.tint(heroTempRow.baseTone, Util.alpha("#ffffff", 0.5 * hero.flare)), 0.42)
+              x: heroLabels.x + heroTempRow.x + heroTemp.width * 0.5 - 50
+              y: heroLabels.y + heroTempRow.y + heroTemp.height * 0.56 - 50
+              opacity: Math.min(1, (0.12 + 0.88 * hot) * hero.stage(2) + 0.8 * hero.flare)
+              transform: Scale { origin.x: 50; origin.y: 50; xScale: heroTemp.width * 1.8 / 100; yScale: heroTemp.height * 1.25 / 100 }
+            }
+
             PeakArt {
               id: heroArt
               panel: root
@@ -2028,6 +2062,7 @@ Panel {
               asleep: !root.connected
               progress: root.preheating ? root.heatProgress : -1
               searching: !root.needsSetup && (root.connecting || root.resting)
+              crackle: root.preheating
               dozing: !root.connected && !root.needsSetup && !root.connecting && !root.resting && !root.handedOff
             }
 

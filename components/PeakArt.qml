@@ -36,6 +36,8 @@ Item {
   property bool searching: false
   // Asleep and not being woken: a few z's drift up off the chamber.
   property bool dozing: false
+  // Heating: arcs of electricity crackle off the chamber now and then.
+  property bool crackle: false
   readonly property bool live: panel ? panel.opened : false
 
   implicitWidth: Style.space(60)
@@ -74,6 +76,41 @@ Item {
     duration: 820
     easing.type: Easing.InOutCubic
     onStopped: art.glintY = -1
+  }
+
+  // The arcs: one or two jagged sparks up off the chamber's cap, each
+  // flickering on for a moment, at uneven intervals.
+  property var arcs: []
+  property real arcFlash: 0
+  function strike() {
+    var out = []
+    var n = 1 + Math.floor(Math.random() * 2)
+    for (var a = 0; a < n; a++) {
+      var x = 52 + Math.random() * 17, y = 80.5
+      var ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.8
+      var len = 13 + Math.random() * 15
+      var pts = [Qt.point(x, y)]
+      for (var k = 1; k <= 5; k++) {
+        var f = k / 5
+        pts.push(Qt.point(x + Math.cos(ang) * len * f + (Math.random() - 0.5) * 5,
+                          y + Math.sin(ang) * len * f + (Math.random() - 0.5) * 5))
+      }
+      out.push(pts)
+    }
+    arcs = out
+    arcAnim.restart()
+  }
+  Timer {
+    interval: 600
+    running: art.crackle && art.live
+    repeat: true
+    onTriggered: { art.strike(); interval = 320 + Math.random() * 760 }
+  }
+  SequentialAnimation {
+    id: arcAnim
+    NumberAnimation { target: art; property: "arcFlash"; from: 1; to: 0.25; duration: 45 }
+    NumberAnimation { target: art; property: "arcFlash"; to: 1; duration: 35 }
+    NumberAnimation { target: art; property: "arcFlash"; to: 0; duration: 170; easing.type: Easing.InQuad }
   }
 
   // Per colorway: pedestal [light, dark], hood [light, dark], chamber cap.
@@ -383,6 +420,34 @@ Item {
             return "M" + art.glassLeft(a) + "," + a + " L" + art.glassRight(a) + "," + a
               + " L" + art.glassRight(b) + "," + b + " L" + art.glassLeft(b) + "," + b + " Z"
           }
+        }
+      }
+    }
+
+    // The arcs off the chamber, glowing in the ring's colour.
+    Repeater {
+      model: art.arcFlash > 0 ? art.arcs.length : 0
+      Shape {
+        required property int index
+        width: 80
+        height: 160
+        opacity: art.arcFlash
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: Util.alpha(Qt.lighter(art.ringColor, 1.4), 0.35)
+          strokeWidth: 3.2
+          fillColor: "transparent"
+          joinStyle: ShapePath.RoundJoin
+          capStyle: ShapePath.RoundCap
+          PathPolyline { path: art.arcs[index] }
+        }
+        ShapePath {
+          strokeColor: Qt.tint(art.ringColor, Util.alpha("#ffffff", 0.85))
+          strokeWidth: 0.9
+          fillColor: "transparent"
+          joinStyle: ShapePath.MiterJoin
+          capStyle: ShapePath.RoundCap
+          PathPolyline { path: art.arcs[index] }
         }
       }
     }
