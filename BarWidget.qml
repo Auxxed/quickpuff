@@ -557,7 +557,8 @@ BarWidget {
     loops: Animation.Infinite
     alwaysRunToEnd: true
     onRunningChanged: if (!running) root.opacity = 1
-    NumberAnimation { to: 0.55; duration: 800; easing.type: Easing.InOutSine }
+    // Shallow, so the temperature stays easy to read at the dip.
+    NumberAnimation { to: 0.72; duration: 800; easing.type: Easing.InOutSine }
     NumberAnimation { to: 1.0; duration: 800; easing.type: Easing.InOutSine }
   }
 
