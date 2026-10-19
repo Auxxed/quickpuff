@@ -43,8 +43,8 @@ Item {
   SequentialAnimation on headGlow {
     running: ring.visible && ring.panel && ring.panel.opened
     loops: Animation.Infinite
-    NumberAnimation { to: 0.55; duration: 900; easing.type: Easing.InOutSine }
-    NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 0.55; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
   }
 
   Canvas {

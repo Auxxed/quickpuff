@@ -129,27 +129,6 @@ BorderSurface {
         GradientStop { position: 1.0; color: Util.alpha(chip.tint, 0.32) }
       }
 
-      Rectangle {
-        property real k: 0
-        visible: chip.shownProgress < 0.999
-        width: Math.max(chip.height, fillBody.width * 0.45)
-        height: parent.height
-        x: -width + (fillBody.width + width) * k
-        gradient: Gradient {
-          orientation: Gradient.Horizontal
-          GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
-          GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.13) }
-          GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
-        }
-        NumberAnimation on k {
-          running: progressFill.visible && chip.shownProgress < 0.999 && panel.opened
-          loops: Animation.Infinite
-          from: 0
-          to: 1
-          duration: 1600
-          easing.type: Easing.InOutQuad
-        }
-      }
     }
 
     // The leading edge, lit.

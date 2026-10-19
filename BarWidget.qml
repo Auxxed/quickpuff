@@ -242,7 +242,8 @@ BarWidget {
   property real flare: 0
   property real lastFlash: 0
   // Ready, seen by the poll or the feed (whichever's first; never twice).
-  // Calm motion (the panel's setting) keeps the charge line, drops the hop.
+  // Calm motion (the panel's setting) keeps the charge line, drops the hop
+  // and the breathing.
   property bool calm: false
   function readyFlash() {
     if (Date.now() - lastFlash < 4000) return
@@ -493,11 +494,11 @@ BarWidget {
 
     property real breath: 1
     SequentialAnimation on breath {
-      running: root.burning
+      running: root.burning && !root.calm
       loops: Animation.Infinite
       alwaysRunToEnd: true
-      NumberAnimation { to: 0.45; duration: 1300; easing.type: Easing.InOutSine }
-      NumberAnimation { to: 1; duration: 1300; easing.type: Easing.InOutSine }
+      NumberAnimation { to: 0.45; duration: 800; easing.type: Easing.InOutSine }
+      NumberAnimation { to: 1; duration: 800; easing.type: Easing.InOutSine }
     }
 
     Rectangle {
@@ -544,18 +545,19 @@ BarWidget {
   // Ready: the label hops, so the bar says it too.
   SequentialAnimation {
     id: readyHop
-    NumberAnimation { target: button; property: "scale"; to: 1.16; duration: 120; easing.type: Easing.OutQuad }
-    NumberAnimation { target: button; property: "scale"; to: 1.0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 2.6 }
+    NumberAnimation { target: button; property: "scale"; to: 1.08; duration: 120; easing.type: Easing.OutQuad }
+    NumberAnimation { target: button; property: "scale"; to: 1.0; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 1.2 }
   }
 
   // Breathes while the chamber climbs, so a glance at the bar says "almost".
+  // Calm motion keeps it steady; the charge line still shows the climb.
   SequentialAnimation on opacity {
-    running: root.outputClass === "preheat"
+    running: root.outputClass === "preheat" && !root.calm
     loops: Animation.Infinite
     alwaysRunToEnd: true
     onRunningChanged: if (!running) root.opacity = 1
-    NumberAnimation { to: 0.55; duration: 900; easing.type: Easing.InOutSine }
-    NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 0.55; duration: 800; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1.0; duration: 800; easing.type: Easing.InOutSine }
   }
 
   // WidgetButton only accepts left/right/middle, so catch mouse 5 (forward

@@ -74,6 +74,9 @@ Panel {
   }
 
   // ---------------------------------------------------------------- motion
+  // One period for everything that breathes (the Peak's ring, the state dot,
+  // the timer's head, the bar), so nothing beats against anything else.
+  readonly property int heartbeatMs: 1600
   // Bumped on an open that plays the intros: the sections cascade in, the
   // hero powers up, meters regrow and counts roll in. That's the first open
   // in a while (introGapMs); a glance in between opens straight onto the
@@ -314,9 +317,10 @@ Panel {
   readonly property bool lowHeatBattery: connected && !pluggedIn && Number(statusData.battery) <= 10
   readonly property string metaLabel: {
     if (!connected) return needsSetup ? "Setup needed" : (resting ? "Resting · waking…" : (handedOff ? "On another computer" : (connecting ? "Connecting…" : "Disconnected")))
+    // The target is on the profile line below while it heats; this line
+    // keeps to the state.
     var s = String(statusData.operating_state || "Connected")
-    if (heating && targetLabel !== "") s += " · " + targetLabel
-    else if (chamberLabel !== "") s += " · " + chamberLabel
+    if (chamberLabel !== "") s += " · " + chamberLabel
     return s
   }
 
@@ -1980,8 +1984,8 @@ Panel {
               running: root.preheating && root.opened
               loops: Animation.Infinite
               alwaysRunToEnd: true
-              NumberAnimation { to: 0.35; duration: 850; easing.type: Easing.InOutSine }
-              NumberAnimation { to: 1; duration: 850; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 0.35; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 1; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
             }
             // Idle but connected: a few slow, shallow breaths as the panel
             // opens, so it looks awake, then still (a breath that never
@@ -2031,7 +2035,9 @@ Panel {
             property real flare: 0
             function celebrate() {
               flareAnim.restart()
-              if (root.calm) return
+              // A ready show is about to fill the screen: the panel just
+              // flares and leaves the celebrating to it.
+              if (root.calm || root.readyAnimation !== "off") return
               heroBurst.fire()
               heroArt.glint()
               heroHop.restart()
@@ -2052,29 +2058,6 @@ Panel {
               gradient: Gradient {
                 GradientStop { position: 0.0; color: "transparent" }
                 GradientStop { position: 1.0; color: Util.alpha(hero.wash, 0.05 + 0.1 * hero.litGlow + 0.12 * hero.flare) }
-              }
-            }
-
-            // While it heats, soft blooms of the profile's light drift
-            // behind the Peak.
-            Repeater {
-              model: 2
-              Glow {
-                required property int index
-                property real drift: 0
-                NumberAnimation on drift {
-                  running: root.heating && root.opened && !root.calm
-                  loops: Animation.Infinite
-                  from: 0
-                  to: 1
-                  duration: 5200 + index * 1900
-                }
-                hue: Util.alpha(index ? Qt.lighter(root.profileTint, 1.35) : root.profileTint, 0.32)
-                x: heroArt.x + heroArt.width * 0.5 + Math.sin(drift * 6.283 + index * 2.1) * heroArt.width * 0.45 - 50
-                y: heroArt.y + heroArt.height * (0.55 + 0.14 * Math.cos(drift * 6.283 + index)) - 50
-                scale: heroArt.width * (1.7 + 0.5 * index) / 100
-                opacity: root.heating && !root.calm ? 0.55 * Math.min(1, hero.litGlow * 1.2) : 0
-                Behavior on opacity { NumberAnimation { duration: 700 } }
               }
             }
 
@@ -2189,8 +2172,8 @@ Panel {
                     SequentialAnimation on scale {
                       running: parent.visible && root.opened
                       loops: Animation.Infinite
-                      NumberAnimation { from: 0.5; to: 1.0; duration: 900; easing.type: Easing.OutSine }
-                      NumberAnimation { from: 1.0; to: 0.5; duration: 900; easing.type: Easing.InSine }
+                      NumberAnimation { from: 0.5; to: 1.0; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
+                      NumberAnimation { from: 1.0; to: 0.5; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
                     }
                   }
 
@@ -2290,31 +2273,8 @@ Panel {
                   radius: parent.radius
                   width: parent.width * root.heatProgress
                   color: root.profileTint
-                  clip: true
                   Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
-                  Rectangle {
-                    id: climbSheen
-                    visible: root.preheating
-                    width: Math.max(Style.space(30), climbFill.width * 0.4)
-                    height: parent.height
-                    property real k: 0
-                    x: -width + (climbFill.width + width) * k
-                    gradient: Gradient {
-                      orientation: Gradient.Horizontal
-                      GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
-                      GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.55) }
-                      GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
-                    }
-                    NumberAnimation on k {
-                      running: root.preheating && root.opened
-                      loops: Animation.Infinite
-                      from: 0
-                      to: 1
-                      duration: 1500
-                      easing.type: Easing.InOutQuad
-                    }
-                  }
                 }
               }
 

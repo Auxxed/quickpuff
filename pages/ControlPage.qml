@@ -35,11 +35,9 @@ Column {
       tint: panel.profileTint
       solid: !panel.heating
       emphasized: !panel.heating
-      pulse: panel.preheating
-      // Fills as the chamber climbs, energy running round its edge; full
-      // once it's there.
+      // Fills as the chamber climbs; full once it's there. While it heats,
+      // Stop is the action, so Heat keeps still.
       progress: panel.preheating ? panel.heatProgress : (panel.atTemp ? 1 : -1)
-      charging: panel.preheating
       onActivated: panel.runArgv(["quickpuff", "heat", "start"])
     }
 
@@ -61,6 +59,8 @@ Column {
       glyph: "\uf04d"
       tall: true
       tint: panel.urgent
+      // The live action once a heat starts: solid, like Heat at rest.
+      solid: panel.heating
       emphasized: panel.heating || panel.cooling
       onActivated: panel.runArgv(["quickpuff", "heat", "stop"])
     }
@@ -235,37 +235,6 @@ Column {
           }
           clip: true
 
-          // While this profile heats, energy circles its edge like the
-          // Heat button's.
-          property real orbit: 0
-          NumberAnimation on orbit {
-            running: tile.active && tile.visible && panel.heating && panel.opened && !panel.calm
-            loops: Animation.Infinite
-            from: 0
-            to: 1
-            duration: 2600
-          }
-          function edgePoint(t) {
-            var w = width, h = height, d = (((t % 1) + 1) % 1) * 2 * (w + h)
-            if (d < w) return Qt.point(d, 0)
-            if (d < w + h) return Qt.point(w, d - w)
-            if (d < 2 * w + h) return Qt.point(w - (d - w - h), h)
-            return Qt.point(0, h - (d - 2 * w - h))
-          }
-          Repeater {
-            model: tile.active && panel.heating && !panel.calm ? 8 : 0
-            Rectangle {
-              required property int index
-              readonly property point p: tile.edgePoint(tile.orbit - index * 0.01)
-              width: Style.space(7) * (1 - index * 0.09)
-              height: width
-              radius: width / 2
-              x: p.x - width / 2
-              y: p.y - height / 2
-              color: index === 0 ? Qt.tint(tile.tint, Util.alpha("#ffffff", 0.55)) : Util.alpha(Qt.lighter(tile.tint, 1.3), 0.4 * (1 - index / 8))
-            }
-          }
-
           Rectangle {
             id: sweepBand
             property real k: -1
@@ -324,8 +293,8 @@ Column {
               running: tile.active && tile.visible && panel.heating && panel.opened
               loops: Animation.Infinite
               alwaysRunToEnd: true
-              NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-              NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 0.35; duration: panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 1.0; duration: panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
             }
           }
 
