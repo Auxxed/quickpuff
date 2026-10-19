@@ -64,7 +64,7 @@ Rectangle {
     }
 
     SequentialAnimation on opacity {
-      running: meter.throb && panel.opened
+      running: meter.throb && meter.visible && panel.opened
       loops: Animation.Infinite
       alwaysRunToEnd: true
       NumberAnimation { to: 0.5; duration: 700; easing.type: Easing.InOutSine }
@@ -84,7 +84,7 @@ Rectangle {
         GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
       }
       NumberAnimation on k {
-        running: meter.sheen && panel.opened
+        running: meter.sheen && meter.visible && panel.opened
         loops: Animation.Infinite
         from: 0
         to: 1
@@ -110,7 +110,7 @@ Rectangle {
       color: index % 3 === 0 ? "#ffffff" : Qt.lighter(meter.fill, 1.4)
       opacity: (1 - k) * 0.9
       SequentialAnimation on k {
-        running: meter.sheen && meter.panel.opened
+        running: meter.sheen && meter.visible && meter.panel.opened
         loops: Animation.Infinite
         PauseAnimation { duration: (crackle.index * 230) % 900 }
         NumberAnimation { from: 0; to: 1; duration: 420 + (crackle.index % 3) * 80; easing.type: Easing.OutQuad }

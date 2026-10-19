@@ -29,7 +29,7 @@ Canvas {
   }
 
   RotationAnimation on rotation {
-    running: cring.rotating && panel.opened
+    running: cring.rotating && cring.visible && panel.opened
     loops: Animation.Infinite
     from: 0
     to: 360

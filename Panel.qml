@@ -1973,14 +1973,30 @@ Panel {
               NumberAnimation { to: 0.35; duration: 850; easing.type: Easing.InOutSine }
               NumberAnimation { to: 1; duration: 850; easing.type: Easing.InOutSine }
             }
-            // Idle but connected: a slow, shallow breath, so it looks awake.
+            // Idle but connected: a few slow, shallow breaths as the panel
+            // opens, so it looks awake, then still (a breath that never
+            // stopped kept the window redrawing for as long as it was open).
             property real idle: 1
-            SequentialAnimation on idle {
-              running: root.connected && !root.heating && root.opened && !root.calm
-              loops: Animation.Infinite
-              alwaysRunToEnd: true
-              NumberAnimation { to: 0.78; duration: 2300; easing.type: Easing.InOutSine }
-              NumberAnimation { to: 1; duration: 2300; easing.type: Easing.InOutSine }
+            SequentialAnimation {
+              id: idleBreath
+              loops: 3
+              NumberAnimation { target: hero; property: "idle"; to: 0.78; duration: 2300; easing.type: Easing.InOutSine }
+              NumberAnimation { target: hero; property: "idle"; to: 1; duration: 2300; easing.type: Easing.InOutSine }
+            }
+            function breathe() {
+              if (root.connected && !root.heating && root.opened && !root.calm) {
+                idleBreath.restart()
+              } else {
+                idleBreath.stop()
+                idle = 1
+              }
+            }
+            Connections {
+              target: root
+              function onHeatingChanged() { hero.breathe() }
+              function onConnectedChanged() { hero.breathe() }
+              function onCalmChanged() { hero.breathe() }
+              function onOpenedChanged() { if (!root.opened) hero.breathe() }
             }
 
             // Opening: the Peak powers up (its light climbing from dark) and
@@ -1989,6 +2005,7 @@ Panel {
             property real power: 1
             NumberAnimation { id: powerAnim; target: hero; property: "power"; from: 0; to: 1; duration: 900; easing.type: Easing.Linear }
             function powerUp() {
+              breathe()
               if (root.calm) { powerAnim.stop(); power = 1; return }
               powerAnim.restart()
               heroTemp.intro()

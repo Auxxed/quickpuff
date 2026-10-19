@@ -264,7 +264,7 @@ Section {
         visible: panel.heatTraceLive
 
         SequentialAnimation on scale {
-          running: panel.heatTraceLive && panel.opened
+          running: panel.heatTraceLive && graph.visible && panel.opened
           loops: Animation.Infinite
           NumberAnimation { from: 0.4; to: 1.0; duration: 800; easing.type: Easing.OutSine }
           NumberAnimation { from: 1.0; to: 0.4; duration: 800; easing.type: Easing.InSine }

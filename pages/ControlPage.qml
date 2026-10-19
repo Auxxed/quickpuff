@@ -238,7 +238,7 @@ Column {
           // Heat button's.
           property real orbit: 0
           NumberAnimation on orbit {
-            running: tile.active && panel.heating && panel.opened && !panel.calm
+            running: tile.active && tile.visible && panel.heating && panel.opened && !panel.calm
             loops: Animation.Infinite
             from: 0
             to: 1
@@ -320,7 +320,7 @@ Column {
             Behavior on opacity { NumberAnimation { duration: 200 } }
 
             SequentialAnimation on opacity {
-              running: tile.active && panel.heating && panel.opened
+              running: tile.active && tile.visible && panel.heating && panel.opened
               loops: Animation.Infinite
               alwaysRunToEnd: true
               NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
@@ -374,7 +374,9 @@ Column {
                   border.width: 1
                   border.color: Util.alpha(panel.foreground, 0.25)
 
-                  Behavior on color { ColorAnimation { duration: panel.cycleStepMs * 0.9 } }
+                  // A quick hop to each colour, like the Peak's LEDs: a glide
+                  // across the whole step kept the panel redrawing nonstop.
+                  Behavior on color { ColorAnimation { duration: Math.min(220, panel.cycleStepMs * 0.4) } }
 
                   Rectangle {
                     z: -1

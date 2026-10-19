@@ -38,7 +38,9 @@ Item {
   property bool dozing: false
   // Heating: arcs of electricity crackle off the chamber now and then.
   property bool crackle: false
-  readonly property bool live: panel ? panel.opened : false
+  // Animating only while it can be seen: a running animation keeps the
+  // window redrawing even when the item it moves is hidden.
+  readonly property bool live: (panel ? panel.opened : false) && visible
 
   implicitWidth: Style.space(60)
   implicitHeight: implicitWidth * 2

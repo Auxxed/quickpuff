@@ -50,7 +50,7 @@ BorderSurface {
   onHotChanged: if (hot && tall && !charging && panel.opened && !panel.calm) orbitOnce.restart()
   NumberAnimation { id: orbitOnce; target: chip; property: "orbit"; from: 0; to: 1; duration: 820; easing.type: Easing.InOutCubic }
   NumberAnimation on orbit {
-    running: chip.charging && panel.opened && !panel.calm
+    running: chip.charging && chip.visible && panel.opened && !panel.calm
     loops: Animation.Infinite
     from: 0
     to: 1
@@ -105,7 +105,7 @@ BorderSurface {
     visible: chip.pulse
 
     SequentialAnimation on opacity {
-      running: chip.pulse && panel.opened
+      running: chip.pulse && chip.visible && panel.opened
       loops: Animation.Infinite
       alwaysRunToEnd: true
       NumberAnimation { from: 0; to: 0.16; duration: 800; easing.type: Easing.InOutSine }
@@ -287,7 +287,7 @@ BorderSurface {
       Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
       RotationAnimation on rotation {
-        running: chip.spinning && panel.opened
+        running: chip.spinning && chip.visible && panel.opened
         loops: Animation.Infinite
         from: 0
         to: 360

@@ -182,7 +182,10 @@ Item {
         }
       }
 
+      // The attention dot beats three times as the panel opens (or as it
+      // turns up), then sits still: noticed, without nagging every open.
       Rectangle {
+        id: badgeDot
         visible: cell.modelData.badge === true
         anchors.top: parent.top
         anchors.right: parent.right
@@ -192,12 +195,17 @@ Item {
         radius: width / 2
         color: panel.urgent
 
-        SequentialAnimation on scale {
-          running: parent.visible && panel.opened
-          loops: Animation.Infinite
-          alwaysRunToEnd: true
-          NumberAnimation { to: 1.4; duration: 600; easing.type: Easing.OutSine }
-          NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InSine }
+        function beat() { if (visible && panel.opened && !panel.calm) badgeBeat.restart() }
+        onVisibleChanged: beat()
+        Connections {
+          target: seg.panel
+          function onOpenSerialChanged() { badgeDot.beat() }
+        }
+        SequentialAnimation {
+          id: badgeBeat
+          loops: 3
+          NumberAnimation { target: badgeDot; property: "scale"; to: 1.4; duration: 600; easing.type: Easing.OutSine }
+          NumberAnimation { target: badgeDot; property: "scale"; to: 1.0; duration: 600; easing.type: Easing.InSine }
         }
       }
 
