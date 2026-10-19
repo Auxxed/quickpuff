@@ -144,7 +144,7 @@ BarWidget {
     // Reached temperature: celebrate, on the overlay monitor. While
     // Showtime is up it calls the moment itself, off the live feed.
     if (root.outputClass === "preheat" && cls === "ready" && root.isOverlayScreen() && !showtimeLoader.active) root.playReady("")
-    if (root.outputClass === "preheat" && cls === "ready") readyHop.restart()
+    if (root.outputClass === "preheat" && cls === "ready") root.readyFlash()
     // A heat cycle began: raise the curtain (once per cycle).
     if (cls === "preheat" || cls === "ready") {
       if (!root.showtimeThisCycle && root.showtimeMode !== "off" && root.isOverlayScreen()) root.openShowtime()
@@ -193,9 +193,11 @@ BarWidget {
     connected: socketPath !== ""
     onStatus: function(d) {
       var s = d.connected === false ? -1 : Number(d.operating_state_id)
+      root.takeHeat(d)
       if (!isFinite(s) || s === root.liveState) return
       var was = root.liveState
       root.liveState = s
+      if (was === 7 && s === 8) root.readyFlash()
       // A cycle just began (or was found running): curtain up, once.
       if ((s === 7 || s === 8) && !root.showtimeThisCycle) {
         root.showtimeThisCycle = true
@@ -208,6 +210,45 @@ BarWidget {
     // `quickpuff wrapped --show`: the recap plays on the overlay screen.
     onWrapped: function(d) { if (root.isOverlayScreen()) root.openWrapped(d) }
   }
+  // ----------------------------------------------------------- charge line
+  // While the chamber climbs, a thin line of the profile's light charges up
+  // under the label with a spark at its head; at temperature it fills,
+  // flashes and the label hops, then it burns low through the session.
+  property real liveTemp: NaN
+  property real liveTarget: NaN
+  property color liveTint: root.bar ? root.bar.urgent : Color.urgent
+  // The chamber's reading and the active profile's target and colour, off
+  // the feed. Lists arrive as sequences: indexed, never Array.isArray'd.
+  function takeHeat(d) {
+    var t = Number(d.heater_temp_f)
+    root.liveTemp = isFinite(t) ? t : NaN
+    var list = d.profiles, cur = Number(d.current_profile)
+    if (!list || typeof list !== "object" || typeof list.length !== "number") return
+    for (var i = 0; i < Math.min(8, list.length); i++) {
+      var p = list[i]
+      if (!p || Number(p.index) !== cur) continue
+      var goal = Number(p.temp_f)
+      root.liveTarget = isFinite(goal) ? goal : NaN
+      if (/^#[0-9a-fA-F]{6}$/.test(String(p.color || ""))) root.liveTint = String(p.color)
+    }
+  }
+  readonly property bool charging: liveState === 7
+  readonly property bool burning: liveState === 8
+  readonly property real charge: charging && isFinite(liveTemp) && isFinite(liveTarget) && liveTarget > 90
+    ? Math.max(0, Math.min(1, (liveTemp - 80) / (liveTarget - 80))) : (burning ? 1 : 0)
+  property real shownCharge: charge
+  Behavior on shownCharge { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+  property real flare: 0
+  property real lastFlash: 0
+  // Ready, seen by the poll or the feed (whichever's first; never twice).
+  function readyFlash() {
+    if (Date.now() - lastFlash < 4000) return
+    lastFlash = Date.now()
+    readyHop.restart()
+    flareAnim.restart()
+  }
+  NumberAnimation { id: flareAnim; target: root; property: "flare"; from: 1; to: 0; duration: 1400; easing.type: Easing.OutCubic }
+
   // The daemon restarts now and then; pick the socket back up when it does.
   Timer {
     interval: 5000
@@ -434,6 +475,66 @@ BarWidget {
   Connections {
     target: readyLoader.item
     function onFinished() { readyLoader.active = false }
+  }
+
+  Item {
+    id: chargeLine
+    anchors.horizontalCenter: button.horizontalCenter
+    anchors.bottom: button.bottom
+    anchors.bottomMargin: Math.max(2, Style.space(3))
+    width: Math.max(Style.space(16), button.labelWidth)
+    height: Math.max(2, Style.space(2))
+    opacity: root.charging || root.burning ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: 450; easing.type: Easing.OutCubic } }
+
+    property real breath: 1
+    SequentialAnimation on breath {
+      running: root.burning
+      loops: Animation.Infinite
+      alwaysRunToEnd: true
+      NumberAnimation { to: 0.45; duration: 1300; easing.type: Easing.InOutSine }
+      NumberAnimation { to: 1; duration: 1300; easing.type: Easing.InOutSine }
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      radius: height / 2
+      color: Util.alpha(root.liveTint, 0.2)
+    }
+    Rectangle {
+      id: chargeFill
+      width: parent.width * root.shownCharge
+      height: parent.height
+      radius: height / 2
+      color: Qt.tint(root.liveTint, Util.alpha("#ffffff", 0.6 * root.flare))
+      opacity: root.burning ? 0.5 + 0.5 * chargeLine.breath : 1
+    }
+    // The spark at its head while it charges, and a flare of light along
+    // the whole line at Ready.
+    Rectangle {
+      visible: root.charging && root.shownCharge > 0.02
+      x: chargeFill.width - width / 2
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(6)
+      height: width
+      radius: width / 2
+      color: Util.alpha(Qt.lighter(root.liveTint, 1.4), 0.55)
+      Rectangle {
+        anchors.centerIn: parent
+        width: parent.width * 0.4
+        height: width
+        radius: width / 2
+        color: Qt.tint(root.liveTint, Util.alpha("#ffffff", 0.7))
+      }
+    }
+    Rectangle {
+      anchors.centerIn: parent
+      width: parent.width * (1 + 0.5 * (1 - root.flare))
+      height: Style.space(8)
+      radius: height / 2
+      color: Util.alpha(Qt.lighter(root.liveTint, 1.3), 0.45 * root.flare)
+      visible: root.flare > 0.01
+    }
   }
 
   // Ready: the label hops, so the bar says it too.
