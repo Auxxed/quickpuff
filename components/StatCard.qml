@@ -31,6 +31,13 @@ BorderSurface {
     : Border.controlSpec("normal", panel.foreground, Color.accent)
   implicitHeight: metricCol.implicitHeight + Style.spacing.controlPaddingY * 2
 
+  // The value rolls in whenever the panel opens on it or its page shows.
+  onVisibleChanged: if (visible && panel.opened) metricValue.intro()
+  Connections {
+    target: metric.panel
+    function onOpenSerialChanged() { if (metric.visible) metricValue.intro() }
+  }
+
   Rectangle {
     visible: metric.highlight
     anchors.fill: parent
@@ -71,8 +78,9 @@ BorderSurface {
         font.pixelSize: Style.font.caption
       }
     }
-    Text {
-      textFormat: Text.PlainText
+    RollingNumber {
+      id: metricValue
+      panel: metric.panel
       text: metric.value
       color: panel.foreground
       font.family: panel.displayFamily

@@ -14,6 +14,10 @@ Column {
   visible: panel.onControl && panel.connected
   spacing: Style.spacing.panelGap
 
+  // Slides in from the side of the tab it was switched to from.
+  transform: Translate { id: pageShift }
+  Reveal { panel: controlPage.panel; target: controlPage; shift: pageShift; cascade: false; slide: true }
+
   Row {
     id: actionRow
     width: parent.width
@@ -32,6 +36,8 @@ Column {
       solid: !panel.heating
       emphasized: !panel.heating
       pulse: panel.preheating
+      // Fills as the chamber climbs; full once it's there.
+      progress: panel.preheating ? panel.heatProgress : (panel.atTemp ? 1 : -1)
       onActivated: panel.runArgv(["quickpuff", "heat", "start"])
     }
 
@@ -70,9 +76,14 @@ Column {
   }
 
   Item {
+    id: timerRow
     width: parent.width
     visible: panel.timerActive
     implicitHeight: timerRing.height
+
+    // Rises in when heating starts.
+    transform: Translate { id: timerShift }
+    Reveal { panel: controlPage.panel; target: timerRow; shift: timerShift; appear: true }
 
     TimerRing {
       panel: controlPage.panel
@@ -84,11 +95,13 @@ Column {
       fillColor: panel.atTemp ? Color.accent : panel.urgent
       startColor: panel.atTemp ? Qt.lighter(Color.accent, 1.4) : Color.accent
 
-      Text {
+      RollingNumber {
+        panel: controlPage.panel
         anchors.centerIn: parent
-        textFormat: Text.PlainText
         text: panel.formatDuration(panel.timerSecondsLeft)
         color: panel.foreground
+        duration: 420
+        stagger: 35
         font.family: panel.displayFamily
         font.pixelSize: Math.round(Style.font.title * panel.displayScale)
         font.weight: Font.DemiBold
@@ -208,12 +221,40 @@ Column {
 
           Behavior on color { ColorAnimation { duration: 160 } }
 
-          // A little hop when this becomes the active profile.
-          onActiveChanged: if (active && panel.opened) tileHop.restart()
+          // A little hop when this becomes the active profile, and a band of
+          // its light sweeping across it.
+          onActiveChanged: if (active && panel.opened) { tileHop.restart(); tileSweep.restart() }
           SequentialAnimation {
             id: tileHop
             NumberAnimation { target: tile; property: "scale"; to: 1.045; duration: 110; easing.type: Easing.OutQuad }
             NumberAnimation { target: tile; property: "scale"; to: 1.0; duration: 260; easing.type: Easing.OutBack }
+          }
+          clip: true
+          Rectangle {
+            id: sweepBand
+            property real k: -1
+            visible: k > -1 && k < 1
+            width: tile.width * 0.55
+            height: tile.height * 2.2
+            y: -tile.height * 0.6
+            x: -width + (tile.width + width) * k
+            rotation: 18
+            gradient: Gradient {
+              orientation: Gradient.Horizontal
+              GradientStop { position: 0.0; color: Util.alpha(tile.tint, 0) }
+              GradientStop { position: 0.5; color: Util.alpha(Qt.lighter(tile.tint, 1.25), 0.28 * tile.tintStrength) }
+              GradientStop { position: 1.0; color: Util.alpha(tile.tint, 0) }
+            }
+          }
+          NumberAnimation {
+            id: tileSweep
+            target: sweepBand
+            property: "k"
+            from: 0
+            to: 1
+            duration: 720
+            easing.type: Easing.InOutCubic
+            onStopped: sweepBand.k = -1
           }
 
           // Puffco's heat-profile cards: the profile's colour, shaded
@@ -390,10 +431,12 @@ Column {
                 width: Math.max(tempReadout.implicitWidth + Style.space(10), Style.space(34))
                 height: parent.height
 
-                Text {
+                RollingNumber {
                   id: tempReadout
-                  textFormat: Text.PlainText
+                  panel: controlPage.panel
                   anchors.centerIn: parent
+                  duration: 380
+                  stagger: 30
                   text: {
                     var t = panel.formatTemp(tile.tempF, undefined)
                     return t !== "" ? t : "—"
@@ -474,10 +517,12 @@ Column {
                 width: Math.max(timeReadout.implicitWidth + Style.space(10), Style.space(34))
                 height: parent.height
 
-                Text {
+                RollingNumber {
                   id: timeReadout
-                  textFormat: Text.PlainText
+                  panel: controlPage.panel
                   anchors.centerIn: parent
+                  duration: 380
+                  stagger: 30
                   text: isFinite(tile.timeS) ? Math.round(tile.timeS) + "s" : "—"
                   color: timeTapMouse.containsMouse ? Color.accent
                     : (tile.active ? panel.foreground : panel.dim)
@@ -654,7 +699,8 @@ Column {
     Grid {
       id: animGrid
       width: parent.width
-      columns: 4
+      // Three across, so the longer names (Smoke Rings, Supernova) fit.
+      columns: 3
       rowSpacing: Style.spacing.controlGap
       columnSpacing: Style.spacing.controlGap
 

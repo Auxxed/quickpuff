@@ -14,6 +14,10 @@ Column {
   visible: panel.onDevice && panel.connected
   spacing: Style.spacing.panelGap
 
+  // Slides in from the side of the tab it was switched to from.
+  transform: Translate { id: pageShift }
+  Reveal { panel: devicePage.panel; target: devicePage; shift: pageShift; cascade: false; slide: true }
+
   Segmented {
     panel: devicePage.panel
     width: parent.width
@@ -27,9 +31,13 @@ Column {
   }
 
   Column {
+    id: infoPage
     width: parent.width
     visible: panel.onDeviceInfo
     spacing: Style.spacing.panelGap
+
+    transform: Translate { id: infoShift }
+    Reveal { panel: devicePage.panel; target: infoPage; shift: infoShift; cascade: false; slide: true; subTab: true; fromSide: -1 }
 
   Section {
     panel: devicePage.panel
@@ -172,10 +180,14 @@ Column {
       model: panel.faultLog && !panel.faultsLoading ? panel.faultLog.slice(0, panel.faultShown) : []
 
       FaultCard {
+        id: faultRow
         panel: devicePage.panel
         required property var modelData
+        required property int index
         width: parent ? parent.width : 0
         fault: modelData
+        transform: Translate { id: faultShift }
+        ListEnter { target: faultRow; shift: faultShift; index: faultRow.index; fresh: Date.now() - panel.faultsLoadedAt < 1500 }
       }
     }
 
@@ -264,9 +276,13 @@ Column {
   }
 
   Column {
+    id: tipsPage
     width: parent.width
     visible: panel.onDeviceTips
     spacing: Style.spacing.panelGap
+
+    transform: Translate { id: tipsShift }
+    Reveal { panel: devicePage.panel; target: tipsPage; shift: tipsShift; cascade: false; slide: true; subTab: true; fromSide: 1 }
 
     Section {
       panel: devicePage.panel

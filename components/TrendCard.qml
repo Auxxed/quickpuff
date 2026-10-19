@@ -14,6 +14,8 @@ StatCard {
   // Appended to every value: "s" for heat-up, "%" for battery.
   property string unit: ""
 
+  // Down while the card is out of sight, so its bars rise each time it shows.
+  readonly property bool grown: visible && panel.opened
   readonly property string trendState: trend && trend.state ? String(trend.state) : "learning"
   readonly property bool rising: trendState === "up"
   readonly property var months: trend && trend.months ? trend.months : []
@@ -64,10 +66,17 @@ StatCard {
           Rectangle {
             width: parent.width
             // Bars start a third of the way up so a few percent of change
-            // still reads, without pretending the low end is zero.
-            height: trendCard.monthPeak > 0
+            // still reads, without pretending the low end is zero. They rise
+            // left to right as the card shows.
+            height: trendCard.monthPeak > 0 && trendCard.grown
               ? parent.height * (0.35 + 0.65 * (Number(parent.modelData.value) / trendCard.monthPeak))
               : Style.space(2)
+            Behavior on height {
+              SequentialAnimation {
+                PauseAnimation { duration: 150 + index * 50 }
+                NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
+              }
+            }
             anchors.bottom: parent.bottom
             radius: 1
             color: parent.index === trendCard.months.length - 1

@@ -73,9 +73,41 @@ Panel {
     kickTimer.restart()
   }
 
+  // ---------------------------------------------------------------- motion
+  // Bumped on every open: the sections cascade in and the hero powers up.
+  property int openSerial: 0
+  property real openedAt: 0
+  // The last tab switch: which way it went (1 rightward, -1 leftward) and
+  // when, so the page it brings in slides from that side.
+  property int pageDir: 0
+  property real pageChangedAt: 0
+  property string lastPage: "control"
+
+  function pageIndexOf(name) {
+    for (var i = 0; i < pageOptions.length; i++) if (pageOptions[i].value === name) return i
+    return 0
+  }
+
+  onPageChanged: {
+    var from = pageIndexOf(lastPage), to = pageIndexOf(page)
+    pageDir = to > from ? 1 : (to < from ? -1 : 0)
+    lastPage = page
+    pageChangedAt = Date.now()
+    // A new page starts at its top.
+    scroller.contentY = 0
+  }
+  // The two-tab pages (Usage, Device) stamp their switches too, and on a
+  // stamp of their own, so only the sub-page slides.
+  property real subTabChangedAt: 0
+  onUsageTabChanged: { pageChangedAt = Date.now(); subTabChangedAt = pageChangedAt }
+  onDeviceTabChanged: { pageChangedAt = Date.now(); subTabChangedAt = pageChangedAt }
+
   onOpenedChanged: {
     if (opened) {
       refresh()
+      openedAt = Date.now()
+      openSerial++
+      hero.powerUp()
     } else {
       cancelEdit()
       pendingTemps = ({})
@@ -462,7 +494,12 @@ Panel {
   // Notes saved but not yet read back from the daemon, by session key.
   property var pendingNotes: ({})
   readonly property int trackedTotal: Number(telemetry.tracked_total) || 0
-  onOnUsageHistoryChanged: if (onUsageHistory) loadSessions()
+  onOnUsageHistoryChanged: if (onUsageHistory) { sessionsShownAt = Date.now(); loadSessions() }
+  // When History came into view and when the fault log was read: rows built
+  // soon after cascade in, rows rebuilt later don't.
+  property real sessionsShownAt: 0
+  property real faultsLoadedAt: 0
+  property real peaksFoundAt: 0
   onTrackedTotalChanged: if (onUsageHistory) loadSessions()
 
   property int pendingDailyLimit: -1
@@ -754,16 +791,39 @@ Panel {
     return false
   }
 
-  // Drives the panel's previews of the cycle; roughly the Peak's pace.
-  property int cycleTick: 0
+  // Drives the panel's previews of the cycle, roughly at the Peak's pace:
+  // one palette step per cycleStepMs. The phase runs continuously so the
+  // Lights page can glide between colours (every frame while it shows);
+  // elsewhere it only needs whole steps, so it ticks once a step.
+  property real cyclePhase: 0
+  readonly property int cycleTick: Math.floor(cyclePhase) % 720
   readonly property int cycleStepMs: Math.round(1500 - 1250 * cycleTempo)
-  readonly property color cycleNow: cycleColors.length
-    ? cycleColors[cycleTick % cycleColors.length] : Color.accent
+  readonly property color cycleNow: cycleColorAt(cyclePhase)
+  function advanceCycle(steps) { cyclePhase = (cyclePhase + steps) % 100800 }
+  FrameAnimation {
+    running: root.opened && root.onLights
+    onTriggered: root.advanceCycle(frameTime * 1000 / root.cycleStepMs)
+  }
   Timer {
     interval: root.cycleStepMs
     repeat: true
-    running: root.opened && (root.cycleOn || root.onLights || root.anyCycle)
-    onTriggered: root.cycleTick = (root.cycleTick + 1) % 720
+    running: root.opened && !root.onLights && (root.cycleOn || root.anyCycle)
+    onTriggered: root.advanceCycle(1 - (root.cyclePhase - Math.floor(root.cyclePhase)))
+  }
+
+  function mixColor(a, b, k) {
+    var x = Qt.color(a), y = Qt.color(b)
+    return Qt.rgba(x.r + (y.r - x.r) * k, x.g + (y.g - x.g) * k, x.b + (y.b - x.b) * k, 1)
+  }
+
+  // The cycle's colour at a point along its palette: whole numbers sit on a
+  // colour, the fraction between eases toward the next.
+  function cycleColorAt(pos) {
+    var c = cycleColors, n = c.length
+    if (!n) return Color.accent
+    var p = ((pos % n) + n) % n
+    var i = Math.floor(p), k = p - i
+    return mixColor(c[i], c[(i + 1) % n], k * k * (3 - 2 * k))
   }
 
   // ------------------------------------------------ custom colour picker
@@ -1173,7 +1233,12 @@ Panel {
     { "value": "aurora", "label": "Aurora", "glyph": "\uf186" },
     { "value": "fireworks", "label": "Fireworks", "glyph": "\uf005" },
     { "value": "smoke", "label": "Smoke Rings", "glyph": "\uf0c2" },
-    { "value": "neon", "label": "Neon", "glyph": "\uf0eb" }
+    { "value": "neon", "label": "Neon", "glyph": "\uf0eb" },
+    { "value": "supernova", "label": "Supernova", "glyph": "\uf185" },
+    { "value": "constellation", "label": "Star Chart", "glyph": "\uf006" },
+    { "value": "fireflies", "label": "Fireflies", "glyph": "\uf192" },
+    { "value": "deepsea", "label": "Deep Sea", "glyph": "\uf043" },
+    { "value": "warp", "label": "Warp", "glyph": "\uf1ce" }
   ]
   property string configReadyAnimation: "rocket"
   property string pendingReadyAnimation: ""
@@ -1347,8 +1412,11 @@ Panel {
 
   readonly property var stockSwatches: ({ "Blue": "#3b9eff", "Green": "#3dd68c", "Red": "#ff4d4d", "White": "#ffffff" })
 
-  // A celebratory pop the moment the chamber reaches temperature.
-  onAtTempChanged: if (atTemp && opened) heroBurst.fire()
+  // The moment the chamber reaches temperature: the Peak hops, a glint runs
+  // up its glass and confetti bursts off it.
+  onAtTempChanged: if (atTemp && opened) hero.celebrate()
+  // A new profile (or a new colour on this one) lands on the ring with a flash.
+  onProfileTintChanged: if (opened && connected) heroArt.pulse()
 
   // Profiles carry the LED color the device glows for them; it's how the app's
   // own editor identifies them, so the tiles show the same swatch. Anything
@@ -1728,6 +1796,7 @@ Panel {
         try { result = JSON.parse(out) } catch (e) {}
       }
       var list = result && typeof result === "object" ? Plain.list(result.devices, 32) : null
+      root.peaksFoundAt = Date.now()
       root.nearbyPeaks = list === null ? [] : list
     }
   }
@@ -1799,6 +1868,7 @@ Panel {
         root.faultError = true
         return
       }
+      root.faultsLoadedAt = Date.now()
       root.faultLog = list
       root.faultShown = 8
     }
@@ -1822,6 +1892,14 @@ Panel {
     onFileChanged: root.refresh()
   }
 
+  // The card eases to a new page's height instead of snapping to it (only
+  // while open, so it always opens at the right size).
+  property real shownContentHeight: content.implicitHeight
+  Behavior on shownContentHeight {
+    enabled: root.opened
+    NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
+  }
+
   // Layer-shell panel rather than PopupCard: the tiles have text fields, and
   // an xdg-popup only receives keys once the compositor happens to route focus
   // through its parent surface.
@@ -1833,7 +1911,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: card.fittedContentWidth(Style.space(360))
-    contentHeight: card.fittedContentHeight(content.implicitHeight, Style.space(600))
+    contentHeight: card.fittedContentHeight(root.shownContentHeight, Style.space(600))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -1879,14 +1957,56 @@ Panel {
               NumberAnimation { to: 0.35; duration: 850; easing.type: Easing.InOutSine }
               NumberAnimation { to: 1; duration: 850; easing.type: Easing.InOutSine }
             }
+            // Idle but connected: a slow, shallow breath, so it looks awake.
+            property real idle: 1
+            SequentialAnimation on idle {
+              running: root.connected && !root.heating && root.opened
+              loops: Animation.Infinite
+              alwaysRunToEnd: true
+              NumberAnimation { to: 0.78; duration: 2300; easing.type: Easing.InOutSine }
+              NumberAnimation { to: 1; duration: 2300; easing.type: Easing.InOutSine }
+            }
+
+            // Opening: the Peak powers up (its light climbing from dark) and
+            // the lines beside it slide in one after another while the
+            // temperature rolls into place.
+            property real power: 1
+            NumberAnimation { id: powerAnim; target: hero; property: "power"; from: 0; to: 1; duration: 900; easing.type: Easing.Linear }
+            function powerUp() {
+              powerAnim.restart()
+              heroTemp.intro()
+            }
+            function stage(i) {
+              var k = Math.max(0, Math.min(1, (power - i * 0.085) / 0.5))
+              return 1 - Math.pow(1 - k, 3)
+            }
+            readonly property real litGlow: glow * breath * idle * (0.15 + 0.85 * Math.min(1, power * 1.4))
+
+            // Ready: a hop, a glint up the glass, confetti, and the numbers
+            // flaring white for a moment.
+            property real flare: 0
+            function celebrate() {
+              heroBurst.fire()
+              heroArt.glint()
+              heroHop.restart()
+              flareAnim.restart()
+            }
+            NumberAnimation { id: flareAnim; target: hero; property: "flare"; from: 1; to: 0; duration: 1100; easing.type: Easing.OutCubic }
+            SequentialAnimation {
+              id: heroHop
+              NumberAnimation { target: heroArt; property: "scale"; to: 1.08; duration: 130; easing.type: Easing.OutQuad }
+              NumberAnimation { target: heroArt; property: "scale"; to: 1.0; duration: 560; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
+            }
 
             // The stage: a soft wash of the profile's light from below.
+            property color wash: root.connected ? root.profileTint : root.dim
+            Behavior on wash { ColorAnimation { duration: 480; easing.type: Easing.OutCubic } }
             Rectangle {
               anchors.fill: parent
               radius: Style.cornerRadius
               gradient: Gradient {
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Util.alpha(root.connected ? root.profileTint : root.dim, 0.05 + 0.1 * hero.glow * hero.breath) }
+                GradientStop { position: 1.0; color: Util.alpha(hero.wash, 0.05 + 0.1 * hero.litGlow + 0.12 * hero.flare) }
               }
             }
 
@@ -1899,18 +2019,24 @@ Panel {
               anchors.bottomMargin: Style.space(2)
               width: Style.space(62)
               height: width * 2
+              transformOrigin: Item.Bottom
+              opacity: 0.35 + 0.65 * hero.stage(0)
               colorway: root.statusData.product ? String(root.statusData.product.marketing_name || "") : ""
               tint: root.connected ? root.profileTint : root.dim
-              glow: hero.glow * hero.breath
+              glow: hero.litGlow
               vapor: root.atTemp
               asleep: !root.connected
+              progress: root.preheating ? root.heatProgress : -1
+              searching: !root.needsSetup && (root.connecting || root.resting)
+              dozing: !root.connected && !root.needsSetup && !root.connecting && !root.resting && !root.handedOff
             }
 
             Burst {
               panel: root
               id: heroBurst
-              anchors.centerIn: heroArt
-              width: heroArt.width * 1.6
+              anchors.horizontalCenter: heroArt.horizontalCenter
+              y: heroArt.y + heroArt.height * 0.5 - height / 2
+              width: heroArt.width * 2.3
               height: width
             }
 
@@ -1926,6 +2052,8 @@ Panel {
               Item {
                 width: parent.width
                 height: nameText.implicitHeight
+                opacity: hero.stage(0)
+                transform: Translate { x: (1 - hero.stage(0)) * Style.space(18) }
 
                 Text {
                   id: nameText
@@ -1955,6 +2083,8 @@ Panel {
               Row {
                 width: parent.width
                 spacing: Style.space(6)
+                opacity: hero.stage(1)
+                transform: Translate { x: (1 - hero.stage(1)) * Style.space(18) }
 
                 Rectangle {
                   id: stateDot
@@ -1983,51 +2113,74 @@ Panel {
                       NumberAnimation { from: 1.0; to: 0.5; duration: 900; easing.type: Easing.InSine }
                     }
                   }
+
+                  // A ring pings out of the dot whenever the state changes.
+                  Rectangle {
+                    id: statePing
+                    anchors.centerIn: parent
+                    width: parent.width
+                    height: width
+                    radius: width / 2
+                    color: "transparent"
+                    border.width: 1.5
+                    border.color: root.stateColor
+                    opacity: 0
+                  }
+                  ParallelAnimation {
+                    id: pingAnim
+                    NumberAnimation { target: statePing; property: "scale"; from: 1; to: 3.6; duration: 700; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: statePing; property: "opacity"; from: 0.9; to: 0; duration: 700; easing.type: Easing.InQuad }
+                  }
+                  Connections {
+                    target: root
+                    function onStateIdChanged() { if (root.opened) pingAnim.restart() }
+                    function onConnectedChanged() { if (root.opened) pingAnim.restart() }
+                  }
                 }
 
-                Text {
+                SwapText {
+                  panel: root
                   anchors.verticalCenter: parent.verticalCenter
                   width: parent.width - stateDot.width - parent.spacing
-                  textFormat: Text.PlainText
                   text: root.metaLabel.toUpperCase()
                   color: root.connected ? root.stateColor : root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
                   font.letterSpacing: 1.2
-                  elide: Text.ElideRight
 
                   Behavior on color { ColorAnimation { duration: 260 } }
                 }
               }
 
               // The chamber, big, as the Puffco app's session screen shows it.
-              // Counts toward each new reading instead of snapping to it; once
-              // it lands it shows the daemon's own label, so the two agree.
+              // Its digits roll to each new reading (the daemon's own label,
+              // so the two agree); the colour warms through the climb.
               Row {
                 id: heroTempRow
                 spacing: Style.space(2)
+                opacity: hero.stage(2)
+                transform: Translate { x: (1 - hero.stage(2)) * Style.space(18) }
 
                 property real rawF: Number(root.statusData.heater_temp_f)
                 property real shownF: isFinite(rawF) ? rawF : 0
-                Behavior on shownF { NumberAnimation { id: tempCount; duration: 700; easing.type: Easing.OutCubic } }
-                readonly property string label: !root.connected ? ""
-                  : !isFinite(rawF) || !tempCount.running ? root.tempLabel : root.formatTemp(shownF, undefined)
-                readonly property color tone: !root.connected ? root.dim
+                Behavior on shownF { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+                readonly property string label: root.connected ? root.tempLabel : ""
+                readonly property color baseTone: !root.connected ? root.dim
                   : shownF > 120 ? Qt.tint(root.foreground,
                       Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
                   : root.heating ? Qt.lighter(root.urgent, 1.15)
                   : root.foreground
+                readonly property color tone: Qt.tint(baseTone, Util.alpha("#ffffff", 0.7 * hero.flare))
 
-                Text {
+                RollingNumber {
                   id: heroTemp
-                  textFormat: Text.PlainText
+                  panel: root
                   text: heroTempRow.label === "" ? "—" : heroTempRow.label.replace(/°[CF]$/, "")
                   color: heroTempRow.tone
                   font.family: root.displayFamily
                   font.pixelSize: Math.round(Style.font.display * root.displayScale * 1.55)
                   font.weight: Font.DemiBold
-                  Behavior on color { ColorAnimation { duration: 300 } }
                 }
                 Text {
                   y: heroTemp.height * 0.16
@@ -2041,26 +2194,54 @@ Panel {
                 }
               }
 
-              // Climb toward the target while heating.
+              // Climb toward the target while heating, a sheen running along it.
               Rectangle {
                 width: parent.width
                 height: Style.space(4)
                 radius: height / 2
                 visible: root.connected && (root.preheating || root.atTemp)
                 color: Util.alpha(root.foreground, 0.1)
+                opacity: hero.stage(2.5)
 
                 Rectangle {
+                  id: climbFill
                   height: parent.height
                   radius: parent.radius
                   width: parent.width * root.heatProgress
                   color: root.profileTint
+                  clip: true
                   Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
+
+                  Rectangle {
+                    id: climbSheen
+                    visible: root.preheating
+                    width: Math.max(Style.space(30), climbFill.width * 0.4)
+                    height: parent.height
+                    property real k: 0
+                    x: -width + (climbFill.width + width) * k
+                    gradient: Gradient {
+                      orientation: Gradient.Horizontal
+                      GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+                      GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.55) }
+                      GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+                    }
+                    NumberAnimation on k {
+                      running: root.preheating && root.opened
+                      loops: Animation.Infinite
+                      from: 0
+                      to: 1
+                      duration: 1500
+                      easing.type: Easing.InOutQuad
+                    }
+                  }
                 }
               }
 
-              Text {
+              SwapText {
+                panel: root
                 width: parent.width
-                textFormat: Text.PlainText
+                opacity: hero.stage(3)
+                transform: Translate { x: (1 - hero.stage(3)) * Style.space(18) }
                 text: {
                   if (!root.connected || !root.activeProfile) return root.moodLine
                   var name = String(root.cleanName(root.activeProfile.name) || "").toUpperCase()
@@ -2072,19 +2253,19 @@ Panel {
                 font.pixelSize: root.connected ? Math.round(Style.font.caption * root.displayScale) : Style.font.caption
                 font.weight: Font.DemiBold
                 font.letterSpacing: root.connected && root.hasDisplayFont ? 1 : 0
-                elide: Text.ElideRight
               }
 
-              Text {
+              SwapText {
+                panel: root
                 width: parent.width
                 visible: root.connected
-                textFormat: Text.PlainText
+                opacity: hero.stage(4)
+                transform: Translate { x: (1 - hero.stage(4)) * Style.space(18) }
                 text: root.moodLine
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 font.italic: true
-                elide: Text.ElideRight
               }
             }
           }
@@ -2143,9 +2324,13 @@ Panel {
               model: root.scanning || !root.nearbyPeaks ? [] : root.nearbyPeaks
 
               ActionButton {
+                id: peakRow
                 panel: root
                 required property var modelData
+                required property int index
                 width: parent ? parent.width : 0
+                transform: Translate { id: peakShift }
+                ListEnter { target: peakRow; shift: peakShift; index: peakRow.index; fresh: Date.now() - root.peaksFoundAt < 1500 }
                 label: String(modelData.name || "Peak Pro") + "  \u00b7  " + String(modelData.address || "")
                 glyph: "\uf293"
                 tint: Color.accent

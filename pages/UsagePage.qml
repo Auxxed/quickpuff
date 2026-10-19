@@ -14,6 +14,10 @@ Column {
   visible: panel.onUsage && panel.connected
   spacing: Style.spacing.panelGap
 
+  // Slides in from the side of the tab it was switched to from.
+  transform: Translate { id: pageShift }
+  Reveal { panel: usagePages.panel; target: usagePages; shift: pageShift; cascade: false; slide: true }
+
   Segmented {
     panel: usagePages.panel
     width: parent.width
@@ -53,6 +57,9 @@ Column {
     visible: panel.onUsageHistory && panel.connected
     spacing: Style.spacing.controlGap
 
+    transform: Translate { id: historyShift }
+    Reveal { panel: usagePages.panel; target: historyPage; shift: historyShift; cascade: false; slide: true; subTab: true; fromSide: 1 }
+
     Text {
       width: parent.width
       visible: text !== ""
@@ -72,10 +79,14 @@ Column {
       model: panel.sessionList || []
 
       SessionCard {
+        id: sessionRow
         panel: usagePages.panel
         required property var modelData
+        required property int index
         width: parent ? parent.width : 0
         session: modelData
+        transform: Translate { id: sessionShift }
+        ListEnter { target: sessionRow; shift: sessionShift; index: sessionRow.index; fresh: Date.now() - panel.sessionsShownAt < 1500 }
       }
     }
 
@@ -97,6 +108,9 @@ Column {
     width: parent.width
     visible: panel.onUsageStats && panel.connected
     spacing: Style.spacing.panelGap
+
+    transform: Translate { id: statsShift }
+    Reveal { panel: usagePages.panel; target: usagePage; shift: statsShift; cascade: false; slide: true; subTab: true; fromSide: -1 }
 
     Text {
       width: parent.width
@@ -255,13 +269,21 @@ Column {
               model: panel.weekdaySeries
               Rectangle {
                 required property var modelData
+                required property int index
                 width: Style.space(8)
                 height: Style.space(8)
                 radius: width / 2
                 color: Number(modelData.count) > 0 ? panel.profileTint : "transparent"
-                scale: modelData.today ? 1.2 : 1
+                // Pops in, a beat after the dot before it, as the page shows.
+                scale: (panel.onUsageStats ? 1 : 0) * (modelData.today ? 1.2 : 1)
                 border.width: modelData.today ? 1 : (Number(modelData.count) > 0 ? 0 : 1)
                 border.color: modelData.today ? panel.profileTint : Util.alpha(panel.foreground, 0.3)
+                Behavior on scale {
+                  SequentialAnimation {
+                    PauseAnimation { duration: 180 + index * 45 }
+                    NumberAnimation { duration: 380; easing.type: Easing.OutBack; easing.overshoot: 2.2 }
+                  }
+                }
               }
             }
           }
@@ -297,7 +319,14 @@ Column {
                     width: parent.width
                     height: {
                       var c = Number(panel.hourSeries[parent.index]) || 0
-                      return Math.max(Style.space(2), parent.height * (c / panel.hourPeak))
+                      return panel.onUsageStats ? Math.max(Style.space(2), parent.height * (c / panel.hourPeak)) : Style.space(2)
+                    }
+                    // Rises in a sweep from midnight to midnight.
+                    Behavior on height {
+                      SequentialAnimation {
+                        PauseAnimation { duration: 150 + index * 16 }
+                        NumberAnimation { duration: 480; easing.type: Easing.OutCubic }
+                      }
                     }
                     anchors.bottom: parent.bottom
                     radius: 1
@@ -406,7 +435,12 @@ Column {
                 GradientStop { position: 1.0; color: shareBar.tint }
               }
 
-              Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
+              Behavior on width {
+                SequentialAnimation {
+                  PauseAnimation { duration: 120 }
+                  NumberAnimation { duration: 700; easing.type: Easing.OutCubic }
+                }
+              }
             }
           }
         }
@@ -426,12 +460,27 @@ Column {
           model: panel.colorSeries
           Rectangle {
             required property var modelData
+            required property int index
             height: Style.space(12)
             width: Math.max(Style.space(16), (parent.width - parent.spacing * Math.max(0, panel.colorSeries.length - 1)) / Math.max(1, panel.colorSeries.length))
             radius: height / 2
             color: String(modelData)
             border.width: 1
             border.color: Util.alpha(panel.foreground, 0.2)
+            scale: panel.onUsageStats ? 1 : 0.2
+            opacity: panel.onUsageStats ? 1 : 0
+            Behavior on scale {
+              SequentialAnimation {
+                PauseAnimation { duration: 260 + index * 40 }
+                NumberAnimation { duration: 420; easing.type: Easing.OutBack; easing.overshoot: 1.8 }
+              }
+            }
+            Behavior on opacity {
+              SequentialAnimation {
+                PauseAnimation { duration: 260 + index * 40 }
+                NumberAnimation { duration: 200 }
+              }
+            }
           }
         }
       }

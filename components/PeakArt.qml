@@ -28,11 +28,53 @@ Item {
   // Extra light for big, close-up use (Showtime's stage): rim light from the
   // ring, beams up the glass, and a bloom round the ring.
   property bool hero: false
+  // The light ring as a gauge, 0-1: faint end to end, lit up to here, with a
+  // bright head. Below 0 the ring is plain.
+  property real progress: -1
+  // Looking for its computer: Bluetooth waves out of the body and a light
+  // running along the ring.
+  property bool searching: false
+  // Asleep and not being woken: a few z's drift up off the chamber.
+  property bool dozing: false
   readonly property bool live: panel ? panel.opened : false
 
   implicitWidth: Style.space(60)
   implicitHeight: implicitWidth * 2
   readonly property real u: width / 80
+
+  // The ring's colour eases from one profile's light to the next, and the
+  // gauge glides between readings.
+  property color shownTint: tint
+  // Off when the host animates the tint itself (a cycle preview).
+  property bool tintGlides: true
+  Behavior on shownTint {
+    enabled: art.tintGlides
+    ColorAnimation { duration: 480; easing.type: Easing.OutCubic }
+  }
+  property real shownProgress: Math.max(0, progress)
+  Behavior on shownProgress { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+
+  // A flash of the ring (a new colour landing on it), and a glint up the
+  // glass (the chamber reaching temperature).
+  property real flash: 0
+  function pulse() { flashAnim.restart() }
+  SequentialAnimation {
+    id: flashAnim
+    NumberAnimation { target: art; property: "flash"; to: 1; duration: 90; easing.type: Easing.OutQuad }
+    NumberAnimation { target: art; property: "flash"; to: 0; duration: 650; easing.type: Easing.InOutSine }
+  }
+  property real glintY: -1
+  function glint() { glintAnim.restart() }
+  NumberAnimation {
+    id: glintAnim
+    target: art
+    property: "glintY"
+    from: 112
+    to: -14
+    duration: 820
+    easing.type: Easing.InOutCubic
+    onStopped: art.glintY = -1
+  }
 
   // Per colorway: pedestal [light, dark], hood [light, dark], chamber cap.
   readonly property var finishes: ({
@@ -51,8 +93,39 @@ Item {
   })
   readonly property var finish: finishes[String(colorway).toLowerCase()] || finishes["onyx"]
   readonly property bool lightFinish: Qt.color(finish[1][0]).hslLightness > 0.7
-  readonly property color ringColor: asleep ? Util.alpha(panel.foreground, 0.25) : tint
+  readonly property color ringColor: asleep ? Util.alpha(panel.foreground, 0.25) : shownTint
   readonly property color edge: lightFinish ? "#000000" : "#ffffff"
+
+  // The glass horn's left and right edges at height y, on the 80 x 160 grid,
+  // for anything that has to stay inside the glass.
+  function glassLeft(y) { return 12.5 + (9.5 - 12.5) * (y - 1.5) / (108 - 1.5) }
+  function glassRight(y) { return 21.5 + (46 - 21.5) * (y - 0.8) / (93 - 0.8) }
+
+  // Bluetooth waves out of the body while it's being looked for.
+  Repeater {
+    model: art.searching ? 3 : 0
+    Rectangle {
+      id: wave
+      required property int index
+      property real k: 0
+      readonly property real r: art.u * (14 + 58 * k)
+      x: art.u * 38 - r
+      y: art.u * 118 - r
+      width: r * 2
+      height: r * 2
+      radius: r
+      color: "transparent"
+      border.width: Math.max(1.5, art.u * 2.4 * (1 - 0.5 * k))
+      border.color: Util.alpha(Qt.lighter(Color.accent, 1.2), 0.85 * Math.pow(1 - k, 1.3))
+      SequentialAnimation on k {
+        running: art.searching && art.live
+        loops: Animation.Infinite
+        PauseAnimation { duration: wave.index * 620 }
+        NumberAnimation { from: 0; to: 1; duration: 1860; easing.type: Easing.OutCubic }
+        PauseAnimation { duration: (2 - wave.index) * 620 }
+      }
+    }
+  }
 
   // The pool of light on the desk, under everything.
   Shape {
@@ -62,7 +135,7 @@ Item {
     y: art.u * 157.5 - height / 2
     width: art.u * 84
     height: width
-    opacity: art.glow
+    opacity: Math.min(1, art.glow + 0.5 * art.flash)
     transform: Scale { origin.x: pool.width / 2; origin.y: pool.height / 2; yScale: 0.12 }
     preferredRendererType: Shape.CurveRenderer
     ShapePath {
@@ -179,26 +252,28 @@ Item {
     // ---- the logo and the light ring round the foot
     ShapePath {
       strokeColor: "transparent"
-      fillColor: Util.alpha(art.ringColor, 0.35 + 0.65 * art.glow)
+      fillColor: Util.alpha(art.ringColor, Math.min(1, 0.35 + 0.65 * art.glow + 0.3 * art.flash))
       PathSvg { path: "M12,123 L14.6,121.6 L14.6,128.6 L12,130 Z" }
     }
+    // As a gauge the ring burns faint, and the lit part is drawn over it.
     ShapePath {
-      strokeColor: art.ringColor
+      strokeColor: art.progress >= 0 ? Util.alpha(art.ringColor, 0.3) : art.ringColor
       strokeWidth: 1.8
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
       PathSvg { path: "M8.5,157 L61,157" }
     }
-    // Bloom: the ring again, wider and fainter, twice over.
+    // Bloom: the ring again, wider and fainter, twice over. A flash lights
+    // it for a moment on any Peak.
     ShapePath {
-      strokeColor: Util.alpha(art.ringColor, art.hero ? 0.28 * art.glow : 0)
+      strokeColor: Util.alpha(art.ringColor, Math.min(1, (art.hero ? 0.28 * art.glow : 0) + 0.45 * art.flash))
       strokeWidth: 5
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
       PathSvg { path: "M8.5,157 L61,157" }
     }
     ShapePath {
-      strokeColor: Util.alpha(art.ringColor, art.hero ? 0.12 * art.glow : 0)
+      strokeColor: Util.alpha(art.ringColor, Math.min(1, (art.hero ? 0.12 * art.glow : 0) + 0.2 * art.flash))
       strokeWidth: 11
       capStyle: ShapePath.RoundCap
       fillColor: "transparent"
@@ -225,31 +300,156 @@ Item {
     }
   }
 
-  // Vapour rising up the glass.
-  Repeater {
-    model: 3
-    Rectangle {
-      id: puff
-      required property int index
-      width: art.u * 8
-      height: width
-      radius: width / 2
-      color: Util.alpha("#ffffff", 0.55)
-      opacity: 0
-      visible: art.vapor
+  // Overlays drawn on the same 80 x 160 grid.
+  Item {
+    id: grid
+    width: 80
+    height: 160
+    transform: Scale { xScale: art.u; yScale: art.u }
 
-      SequentialAnimation {
-        running: art.vapor && art.live
+    // The gauge: the lit run of the ring and its head.
+    Rectangle {
+      visible: art.progress >= 0
+      x: 8.5 - 0.9
+      y: 157 - 0.9
+      height: 1.8
+      radius: 0.9
+      width: 1.8 + 52.5 * art.shownProgress
+      color: art.ringColor
+    }
+    Rectangle {
+      visible: art.progress >= 0 && art.shownProgress > 0.01 && art.shownProgress < 0.995
+      x: 8.5 + 52.5 * art.shownProgress - width / 2
+      y: 157 - height / 2
+      width: 7
+      height: 7
+      radius: 3.5
+      color: Util.alpha(art.ringColor, 0.32 * art.glow + 0.1)
+      Rectangle {
+        anchors.centerIn: parent
+        width: 2.6
+        height: 2.6
+        radius: 1.3
+        color: Qt.tint(art.ringColor, Util.alpha("#ffffff", 0.6))
+      }
+    }
+
+    // While it's being looked for: a light running back and forth along
+    // the ring.
+    Rectangle {
+      id: chase
+      visible: art.searching
+      property real k: 0
+      x: 8.5 + (52.5 - width) * k
+      y: 157 - height / 2
+      width: 18
+      height: 3.2
+      radius: 1.6
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0.0; color: Util.alpha(Color.accent, 0) }
+        GradientStop { position: 0.5; color: Qt.tint(Color.accent, Util.alpha("#ffffff", 0.5)) }
+        GradientStop { position: 1.0; color: Util.alpha(Color.accent, 0) }
+      }
+      SequentialAnimation on k {
+        running: art.searching && art.live
         loops: Animation.Infinite
-        PauseAnimation { duration: puff.index * 600 }
-        ParallelAnimation {
-          NumberAnimation { target: puff; property: "y"; from: art.u * 96; to: art.u * 8; duration: 2000; easing.type: Easing.OutSine }
-          NumberAnimation { target: puff; property: "x"; from: art.u * (20 + puff.index * 4); to: art.u * (13 + (puff.index % 2 ? 4 : 0)); duration: 2000; easing.type: Easing.InOutSine }
-          NumberAnimation { target: puff; property: "scale"; from: 0.6; to: 1.5; duration: 2000 }
-          SequentialAnimation {
-            NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.45; duration: 300 }
-            NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 1700; easing.type: Easing.InQuad }
+        NumberAnimation { from: 0; to: 1; duration: 900; easing.type: Easing.InOutSine }
+        NumberAnimation { from: 1; to: 0; duration: 900; easing.type: Easing.InOutSine }
+      }
+    }
+
+    // The glint: a band of light sweeping up the inside of the glass.
+    Shape {
+      id: glintBand
+      visible: art.glintY > -14
+      width: 80
+      height: 160
+      preferredRendererType: Shape.CurveRenderer
+      readonly property real bandTop: Math.max(1.5, art.glintY - 9)
+      readonly property real bandBottom: Math.min(92, art.glintY + 9)
+      ShapePath {
+        strokeColor: "transparent"
+        fillGradient: LinearGradient {
+          x1: 0; y1: art.glintY - 9; x2: 0; y2: art.glintY + 9
+          GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+          GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.5) }
+          GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+        }
+        PathSvg {
+          path: {
+            var a = glintBand.bandTop, b = glintBand.bandBottom
+            if (b <= a) return "M0,0 Z"
+            return "M" + art.glassLeft(a) + "," + a + " L" + art.glassRight(a) + "," + a
+              + " L" + art.glassRight(b) + "," + b + " L" + art.glassLeft(b) + "," + b + " Z"
           }
+        }
+      }
+    }
+
+    // Vapour: soft puffs off the bowl, lit from the ring below, curling up
+    // the horn and thinning out past its lip.
+    Repeater {
+      model: art.vapor ? 5 : 0
+      Shape {
+        id: puff
+        required property int index
+        property real k: 0
+        readonly property real sway: Math.sin(k * Math.PI * 2 + index * 1.7) * 2.2
+        readonly property real cx: 25 + (index % 3) * 3 + (15.5 - 25 - (index % 3) * 3) * k + sway
+        readonly property real cy: 96 - 104 * k
+        readonly property real r: 3.4 + 7.5 * k
+        x: cx - 50
+        y: cy - 50
+        width: 100
+        height: 100
+        opacity: Math.min(1, k / 0.12) * Math.pow(1 - k, 1.25) * 0.85
+        transform: Scale { origin.x: 50; origin.y: 50; xScale: puff.r / 50; yScale: puff.r / 50 * 0.85 }
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: 50; centerY: 50; centerRadius: 50
+            focalX: 44; focalY: 56
+            GradientStop { position: 0.0; color: Util.alpha(Qt.tint("#ffffff", Util.alpha(art.ringColor, 0.22)), 0.55) }
+            GradientStop { position: 0.55; color: Util.alpha(Qt.tint("#f2f2f6", Util.alpha(art.ringColor, 0.15)), 0.22) }
+            GradientStop { position: 1.0; color: Util.alpha("#f2f2f6", 0) }
+          }
+          PathSvg { path: "M0,50 A50,50 0 1,0 100,50 A50,50 0 1,0 0,50 Z" }
+        }
+        SequentialAnimation on k {
+          running: art.vapor && art.live
+          loops: Animation.Infinite
+          PauseAnimation { duration: puff.index * 520 }
+          NumberAnimation { from: 0; to: 1; duration: 2600; easing.type: Easing.OutSine }
+          PauseAnimation { duration: (4 - puff.index) * 520 }
+        }
+      }
+    }
+
+    // Dozing: z's floating up off the chamber, each a little bigger.
+    Repeater {
+      model: art.dozing ? 3 : 0
+      Text {
+        id: zed
+        required property int index
+        property real k: 0
+        x: 60 + 20 * k + Math.sin(k * Math.PI * 1.5 + index) * 3
+        y: 72 - 58 * k
+        scale: 0.6 + 0.65 * k
+        opacity: Math.min(1, k / 0.18) * Math.pow(1 - k, 1.1) * 0.95
+        textFormat: Text.PlainText
+        text: "z"
+        color: art.panel ? art.panel.foreground : "white"
+        font.family: art.panel && art.panel.displayFamily ? art.panel.displayFamily : Style.font.family
+        font.pixelSize: 18 + zed.index * 4
+        font.weight: Font.DemiBold
+        SequentialAnimation on k {
+          running: art.dozing && art.live
+          loops: Animation.Infinite
+          PauseAnimation { duration: zed.index * 1100 }
+          NumberAnimation { from: 0; to: 1; duration: 3300; easing.type: Easing.OutSine }
+          PauseAnimation { duration: (2 - zed.index) * 1100 }
         }
       }
     }

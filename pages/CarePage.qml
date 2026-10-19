@@ -14,6 +14,10 @@ Column {
   visible: panel.onCare && panel.connected
   spacing: Style.spacing.panelGap
 
+  // Slides in from the side of the tab it was switched to from.
+  transform: Translate { id: pageShift }
+  Reveal { panel: carePage.panel; target: carePage; shift: pageShift; cascade: false; slide: true }
+
   Section {
     panel: carePage.panel
     title: "BATTERY"
@@ -26,15 +30,16 @@ Column {
       visible: panel.batteryLabel !== ""
       implicitHeight: batteryBig.implicitHeight
 
-      Text {
+      RollingNumber {
         id: batteryBig
+        panel: carePage.panel
         anchors.left: parent.left
-        textFormat: Text.PlainText
         text: Math.round(Number(panel.statusData.battery)) + "%"
         color: panel.batteryColor(Number(panel.statusData.battery) / 100)
         font.family: panel.displayFamily
         font.pixelSize: Math.round(Style.font.subtitle * panel.displayScale)
         font.weight: Font.DemiBold
+        onVisibleChanged: if (visible && panel.opened) intro()
       }
       Text {
         anchors.right: parent.right
@@ -56,7 +61,7 @@ Column {
       value: Number(panel.statusData.battery) / 100
       fill: panel.pluggedIn ? Color.accent : panel.batteryColor(Number(panel.statusData.battery) / 100)
       marker: panel.preserveSupported && panel.preserveOn ? 0.8 : -1
-      throb: panel.pluggedIn && Number(panel.statusData.battery) < 100
+      sheen: panel.pluggedIn && Number(panel.statusData.battery) < 100
     }
 
     Item {

@@ -23,63 +23,84 @@ Section {
     onToggled: panel.setCycleOn(!panel.cycleOn)
   }
 
-  // A strip of LEDs acting out the chosen style at roughly its pace.
+  // A strip of LEDs acting out the chosen style at roughly its pace, frame
+  // by frame: colours glide where the Peak glides them and jump where it
+  // jumps them.
   Item {
     id: ledStrip
     width: parent.width
     height: Style.space(26)
     readonly property int leds: 14
-    readonly property int n: Math.max(1, panel.cycleColors.length)
     opacity: panel.cycleOn ? 1 : 0.55
 
     Behavior on opacity { NumberAnimation { duration: 250 } }
+
+    // Repeatable noise in 0..1.
+    function hash(x) {
+      var v = Math.sin(x * 12.9898 + 78.233) * 43758.5453
+      return v - Math.floor(v)
+    }
+    function dim(c, b) {
+      var q = Qt.color(c)
+      return Qt.rgba(q.r * b, q.g * b, q.b * b, 1)
+    }
+
+    function ledColor(i, phase) {
+      var c = panel.cycleColors, n = c.length, L = leds
+      if (!n) return Color.accent
+      var whole = Math.floor(phase), frac = phase - whole
+      switch (panel.cycleStyle) {
+      // The palette laid round the ring, turning.
+      case "spin": return panel.cycleColorAt(phase + i * n / L)
+      // Each colour swells and sinks to dark before the next.
+      case "breathe": return dim(c[whole % n], 0.1 + 0.9 * Math.pow(Math.sin(Math.PI * frac), 2))
+      // Every LED its own colour, changing hard and fast.
+      case "disco": {
+        var step = Math.floor(phase * 2.5)
+        return dim(c[Math.floor(hash(i * 7.31 + step * 1.17) * n) % n], 0.55 + 0.45 * hash(i * 3.1 + step))
+      }
+      // Two halves, each walking the palette half a turn apart.
+      case "split": return panel.cycleColorAt(phase + (i < L / 2 ? 0 : Math.max(0.5, Math.floor(n / 2))))
+      // The next colour wipes across the strip over the last.
+      case "fill": {
+        var front = frac * (L + 3) - 1.5
+        var k = Math.max(0, Math.min(1, front - i + 0.5))
+        return panel.mixColor(c[whole % n], c[(whole + 1) % n], k)
+      }
+      // Big slow blobs drifting and merging.
+      case "lava": {
+        var v = 0.6 * Math.sin(i * 0.45 + phase * 0.55) + 0.4 * Math.sin(i * 0.23 - phase * 0.31 + 1.3)
+        return panel.cycleColorAt((v + 1) / 2 * n + phase * 0.12)
+      }
+      // A dim bed of colour with sparks popping up and fading out.
+      case "confetti": {
+        var bed = dim(panel.cycleColorAt(phase * 0.25), 0.16)
+        var lane = phase * 3 + hash(i) * 3
+        var slot = Math.floor(lane), age = lane - slot
+        if (hash(i * 3.7 + slot * 9.1) > 0.36) return bed
+        var spark = c[Math.floor(hash(i + slot * 5.3) * n) % n]
+        return panel.mixColor(bed, spark, Math.pow(1 - age, 1.6))
+      }
+      // The whole ring fading from colour to colour.
+      default: return panel.cycleColorAt(phase)
+      }
+    }
 
     Row {
       id: ledRow
       anchors.centerIn: parent
       spacing: Style.space(5)
 
-      SequentialAnimation on opacity {
-        running: panel.cycleStyle === "breathe" && panel.opened && panel.onLights
-        loops: Animation.Infinite
-        alwaysRunToEnd: true
-        NumberAnimation { to: 0.25; duration: panel.cycleStepMs; easing.type: Easing.InOutSine }
-        NumberAnimation { to: 1.0; duration: panel.cycleStepMs; easing.type: Easing.InOutSine }
-      }
-
       Repeater {
         model: ledStrip.leds
 
         Rectangle {
           required property int index
-          readonly property int slot: {
-            var t = panel.cycleTick, i = index, n = ledStrip.n, L = ledStrip.leds
-            switch (panel.cycleStyle) {
-            case "spin": return Math.floor(i * n / L + t) % n
-            case "disco": return (i * 7 + t * 3 + (i % 3) * t) % n
-            // Two halves, each walking the palette.
-            case "split": return (t + (i < L / 2 ? 0 : Math.floor(n / 2))) % n
-            // A slow wave of colour rolling one way.
-            case "fill": return Math.floor(t / 2 + (L - i) * n / L) % n
-            // Big slow blobs drifting.
-            case "lava": return Math.floor((Math.sin(i * 0.5 + t * 0.35) + 1) / 2 * n) % n
-            // Scattered sparkles.
-            case "confetti": return ((i * 13 + t * 7) ^ (t * 3)) % n
-            default: return t % n
-            }
-          }
-          readonly property color led: panel.cycleColors.length ? panel.cycleColors[slot] : Color.accent
+          readonly property color led: ledStrip.ledColor(index, panel.cyclePhase)
           width: (ledStrip.width - ledRow.spacing * (ledStrip.leds - 1)) / ledStrip.leds
           height: Style.space(14)
           radius: height / 2
           color: led
-
-          Behavior on color {
-            ColorAnimation {
-              duration: ["fade", "breathe", "lava", "fill"].indexOf(panel.cycleStyle) >= 0
-                ? panel.cycleStepMs * 0.95 : 140
-            }
-          }
 
           Rectangle {
             z: -1

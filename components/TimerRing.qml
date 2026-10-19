@@ -5,7 +5,9 @@ import qs.Ui
 import qs.Commons
 
 // Circular progress track; children (the countdown) sit in the middle. The
-// arc runs from `startColor` to `fillColor` and carries a glowing head.
+// arc runs from `startColor` to `fillColor`, glows wider toward its head
+// like a comet's tail, and carries a bright head that breathes. It sweeps
+// round to its value when it first shows.
 Item {
   id: ring
 
@@ -18,10 +20,32 @@ Item {
   property color trackColor: Util.alpha(panel.foreground, 0.12)
   property real thickness: Style.space(6)
 
-  onProgressChanged: canvas.requestPaint()
+  // 0 → 1 as it first shows (the arc sweeping out to its value), and the
+  // head's slow breath.
+  property real sweep: 1
+  property real headGlow: 1
+  readonly property real drawn: Math.max(0, Math.min(1, progress)) * sweep
+
+  onDrawnChanged: canvas.requestPaint()
+  onHeadGlowChanged: canvas.requestPaint()
   onFillColorChanged: canvas.requestPaint()
   onStartColorChanged: canvas.requestPaint()
   onTrackColorChanged: canvas.requestPaint()
+
+  function intro() { sweepAnim.restart() }
+  onVisibleChanged: if (visible && panel && panel.opened) intro()
+  Connections {
+    target: ring.panel
+    function onOpenSerialChanged() { if (ring.visible) ring.intro() }
+  }
+  NumberAnimation { id: sweepAnim; target: ring; property: "sweep"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
+
+  SequentialAnimation on headGlow {
+    running: ring.visible && ring.panel && ring.panel.opened
+    loops: Animation.Infinite
+    NumberAnimation { to: 0.55; duration: 900; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
+  }
 
   Canvas {
     id: canvas
@@ -40,24 +64,41 @@ Item {
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.stroke()
-      if (ring.progress <= 0) return
-      var end = -Math.PI / 2 + Math.PI * 2 * ring.progress
+      if (ring.drawn <= 0) return
+      var start = -Math.PI / 2
+      var end = start + Math.PI * 2 * ring.drawn
+
+      // The tail's glow: wider and fainter, building toward the head.
+      var tail = Math.min(ring.drawn, 0.3) * Math.PI * 2
+      var steps = 10
+      for (var i = 0; i < steps; i++) {
+        var a0 = end - tail * (1 - i / steps)
+        var a1 = end - tail * (1 - (i + 1) / steps)
+        ctx.strokeStyle = Util.alpha(ring.fillColor, 0.025 + 0.11 * (i + 1) / steps)
+        ctx.lineWidth = ring.thickness * (1.4 + 1.1 * (i + 1) / steps)
+        ctx.beginPath()
+        ctx.arc(cx, cy, r, a0, a1)
+        ctx.stroke()
+      }
+
       var grad = ctx.createLinearGradient(0, 0, width, height)
       grad.addColorStop(0, ring.startColor)
       grad.addColorStop(1, ring.fillColor)
+      ctx.lineWidth = ring.thickness
       ctx.strokeStyle = grad
       ctx.beginPath()
-      ctx.arc(cx, cy, r, -Math.PI / 2, end)
+      ctx.arc(cx, cy, r, start, end)
       ctx.stroke()
+
       var hx = cx + r * Math.cos(end)
       var hy = cy + r * Math.sin(end)
-      ctx.fillStyle = Util.alpha(ring.fillColor, 0.3)
+      ctx.fillStyle = Util.alpha(ring.fillColor, 0.18 + 0.2 * ring.headGlow)
       ctx.beginPath()
-      ctx.arc(hx, hy, ring.thickness * 1.1, 0, Math.PI * 2)
+      ctx.arc(hx, hy, ring.thickness * (1.05 + 0.35 * ring.headGlow), 0, Math.PI * 2)
       ctx.fill()
-      ctx.fillStyle = ring.fillColor
+      ctx.fillStyle = Qt.tint(ring.fillColor, Util.alpha("#ffffff", 0.45))
       ctx.beginPath()
-      ctx.arc(hx, hy, ring.thickness * 0.6, 0, Math.PI * 2)
+      ctx.arc(hx, hy, ring.thickness * 0.55, 0, Math.PI * 2)
       ctx.fill()
     }
   }

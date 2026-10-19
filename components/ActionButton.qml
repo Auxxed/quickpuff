@@ -25,6 +25,11 @@ BorderSurface {
   // Filled with `tint`, shaded darker toward the foot, like the Puffco app's
   // start button; its ink is whatever reads on the tint.
   property bool solid: false
+  // A task under way (0-1): the chip fills behind its label up to here, its
+  // leading edge lit and a sheen running over the fill. Below 0, none.
+  property real progress: -1
+  property real shownProgress: Math.max(0, progress)
+  Behavior on shownProgress { NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
   readonly property color ink: solid ? panel.inkOn(tint) : (lit || tall ? tint : panel.foreground)
 
   signal activated()
@@ -80,6 +85,56 @@ BorderSurface {
     }
   }
 
+  Item {
+    id: progressFill
+    visible: chip.progress >= 0
+    anchors.fill: parent
+
+    Rectangle {
+      id: fillBody
+      width: parent.width * chip.shownProgress
+      height: parent.height
+      clip: true
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0.0; color: Util.alpha(chip.tint, 0.1) }
+        GradientStop { position: 1.0; color: Util.alpha(chip.tint, 0.32) }
+      }
+
+      Rectangle {
+        property real k: 0
+        visible: chip.shownProgress < 0.999
+        width: Math.max(chip.height, fillBody.width * 0.45)
+        height: parent.height
+        x: -width + (fillBody.width + width) * k
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+          GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.13) }
+          GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+        }
+        NumberAnimation on k {
+          running: progressFill.visible && chip.shownProgress < 0.999 && panel.opened
+          loops: Animation.Infinite
+          from: 0
+          to: 1
+          duration: 1600
+          easing.type: Easing.InOutQuad
+        }
+      }
+    }
+
+    // The leading edge, lit.
+    Rectangle {
+      visible: chip.shownProgress > 0.005 && chip.shownProgress < 0.995
+      x: fillBody.width - width / 2
+      width: Math.max(2, Style.space(2))
+      height: parent.height
+      color: Qt.lighter(chip.tint, 1.3)
+      opacity: 0.85
+    }
+  }
+
   Rectangle {
     id: ripple
     property real cx: 0
@@ -115,8 +170,10 @@ BorderSurface {
       color: chip.ink
       font.family: panel.fontFamily
       font.pixelSize: chip.tall ? Style.font.heading : (chip.label === "" ? Style.font.icon : Style.font.iconSmall)
+      scale: chip.hot && !chipMouse.pressed ? 1.14 : 1
 
       Behavior on color { ColorAnimation { duration: 120 } }
+      Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
 
       RotationAnimation on rotation {
         running: chip.spinning && panel.opened

@@ -34,6 +34,40 @@ Section {
     return hi + 25
   }
 
+  // Draws itself left to right as it comes into view; each new reading
+  // then grows out of the last instead of appearing whole.
+  property real reveal: 1
+  property real grow: 1
+  property int seen: 0
+  function intro() { growAnim.stop(); grow = 1; revealAnim.restart() }
+  onVisibleChanged: if (visible && panel.opened) intro()
+  Connections {
+    target: graph.panel
+    function onOpenSerialChanged() { if (graph.visible) graph.intro() }
+  }
+  onPtsChanged: {
+    var n = pts.length
+    if (n > seen && seen > 0 && n - seen <= 3 && panel.opened && !revealAnim.running) growAnim.restart()
+    seen = n
+  }
+  NumberAnimation { id: revealAnim; target: graph; property: "reveal"; from: 0; to: 1; duration: 950; easing.type: Easing.InOutCubic }
+  NumberAnimation { id: growAnim; target: graph; property: "grow"; from: 0; to: 1; duration: 600; easing.type: Easing.OutCubic }
+  onRevealChanged: curve.requestPaint()
+  onGrowChanged: curve.requestPaint()
+
+  // The points as drawn: the newest one partway out of its predecessor
+  // while it grows.
+  function drawnPoints() {
+    var out = []
+    for (var i = 0; i < pts.length; i++) out.push([Number(pts[i][0]), Number(pts[i][1])])
+    var n = out.length
+    if (n >= 2 && grow < 1) {
+      var a = out[n - 2], b = out[n - 1]
+      out[n - 1] = [a[0] + (b[0] - a[0]) * grow, a[1] + (b[1] - a[1]) * grow]
+    }
+    return out
+  }
+
   Item {
     id: plot
     width: parent.width
@@ -46,6 +80,8 @@ Section {
       var frac = (f - graph.lowF) / Math.max(1, graph.highF - graph.lowF)
       return padTop + (1 - Math.max(0, Math.min(1, frac))) * (height - padTop - padBottom)
     }
+    // A label shows once the line has drawn past it.
+    function shownAt(x) { return Math.max(0, Math.min(1, (graph.reveal * width - x) / Style.space(30))) }
 
     Rectangle {
       anchors.fill: parent
@@ -70,9 +106,36 @@ Section {
       onPaint: {
         var ctx = getContext("2d")
         ctx.reset()
-        var pts = graph.pts
+        var pts = graph.drawnPoints()
         if (pts.length < 2) return
         var bottom = height - plot.padBottom
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(0, 0, width * graph.reveal, height)
+        ctx.clip()
+
+        // The curve as a path, smoothed through the midpoints between
+        // readings so the climb reads as one motion.
+        function trace(withBase) {
+          var x0 = plot.xAt(pts[0][0]), y0 = plot.yAt(pts[0][1])
+          if (withBase) {
+            ctx.moveTo(x0, bottom)
+            ctx.lineTo(x0, y0)
+          } else {
+            ctx.moveTo(x0, y0)
+          }
+          for (var i = 1; i < pts.length - 1; i++) {
+            var x = plot.xAt(pts[i][0]), y = plot.yAt(pts[i][1])
+            var nx = plot.xAt(pts[i + 1][0]), ny = plot.yAt(pts[i + 1][1])
+            ctx.quadraticCurveTo(x, y, (x + nx) / 2, (y + ny) / 2)
+          }
+          var last = pts[pts.length - 1]
+          ctx.lineTo(plot.xAt(last[0]), plot.yAt(last[1]))
+          if (withBase) {
+            ctx.lineTo(plot.xAt(last[0]), bottom)
+            ctx.closePath()
+          }
+        }
 
         // Area under the curve, hot at the top fading to nothing.
         var fill = ctx.createLinearGradient(0, plot.padTop, 0, bottom)
@@ -80,26 +143,25 @@ Section {
         fill.addColorStop(1, Util.alpha(Color.accent, 0.02))
         ctx.fillStyle = fill
         ctx.beginPath()
-        ctx.moveTo(plot.xAt(pts[0][0]), bottom)
-        for (var i = 0; i < pts.length; i++) ctx.lineTo(plot.xAt(pts[i][0]), plot.yAt(pts[i][1]))
-        ctx.lineTo(plot.xAt(pts[pts.length - 1][0]), bottom)
-        ctx.closePath()
+        trace(true)
         ctx.fill()
 
-        // The curve itself, cool accent climbing into the urgent heat colour.
+        // The curve itself, cool accent climbing into the urgent heat
+        // colour, over a soft glow of itself.
         var stroke = ctx.createLinearGradient(0, bottom, 0, plot.padTop)
         stroke.addColorStop(0, Color.accent)
         stroke.addColorStop(1, panel.urgent)
-        ctx.strokeStyle = stroke
-        ctx.lineWidth = 2
         ctx.lineJoin = "round"
         ctx.lineCap = "round"
+        ctx.strokeStyle = Util.alpha(panel.urgent, 0.16)
+        ctx.lineWidth = 6
         ctx.beginPath()
-        for (var j = 0; j < pts.length; j++) {
-          var x = plot.xAt(pts[j][0]), y = plot.yAt(pts[j][1])
-          if (j === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
+        trace(false)
+        ctx.stroke()
+        ctx.strokeStyle = stroke
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        trace(false)
         ctx.stroke()
 
         // Target temperature, dashed.
@@ -128,6 +190,7 @@ Section {
         }
         marker(graph.readyAt, Util.alpha(Color.accent, 0.8))
         marker(graph.fadeAt, Util.alpha(panel.foreground, 0.35))
+        ctx.restore()
       }
     }
 
@@ -135,6 +198,7 @@ Section {
       visible: isFinite(graph.targetF)
       x: Style.space(6)
       y: plot.yAt(graph.targetF) - implicitHeight - 1
+      opacity: plot.shownAt(x + implicitWidth)
       textFormat: Text.PlainText
       text: panel.formatTemp(graph.targetF, undefined)
       color: panel.dim
@@ -146,6 +210,7 @@ Section {
       visible: isFinite(graph.readyAt) && plot.xAt(graph.readyAt) < plot.width - implicitWidth - Style.space(4)
       x: plot.xAt(graph.readyAt) + Style.space(3)
       y: plot.height - implicitHeight - Style.space(3)
+      opacity: plot.shownAt(x)
       textFormat: Text.PlainText
       text: "Ready"
       color: Color.accent
@@ -158,6 +223,7 @@ Section {
       visible: isFinite(graph.fadeAt) && plot.xAt(graph.fadeAt) < plot.width - implicitWidth - Style.space(4)
       x: plot.xAt(graph.fadeAt) + Style.space(3)
       y: plot.height - implicitHeight - Style.space(3)
+      opacity: plot.shownAt(x)
       textFormat: Text.PlainText
       text: "Cooling"
       color: panel.dim
@@ -165,16 +231,22 @@ Section {
       font.pixelSize: Style.font.caption
     }
 
-    // Newest reading, pulsing while live.
+    // Newest reading, pulsing while live; it rides the end of the line as
+    // the line grows.
     Rectangle {
       id: headDot
       visible: graph.pts.length > 0
-      readonly property var last: graph.pts.length ? graph.pts[graph.pts.length - 1] : [0, 0]
+      readonly property var last: {
+        graph.grow
+        var d = graph.drawnPoints()
+        return d.length ? d[d.length - 1] : [0, 0]
+      }
       width: Style.space(7)
       height: width
       radius: width / 2
       x: plot.xAt(last[0]) - width / 2
       y: plot.yAt(last[1]) - height / 2
+      opacity: plot.shownAt(x)
       color: panel.heatTraceLive ? Qt.lighter(panel.urgent, 1.2) : panel.dim
 
       Rectangle {

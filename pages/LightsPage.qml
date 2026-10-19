@@ -14,6 +14,10 @@ Column {
   visible: panel.onLights && panel.connected
   spacing: Style.spacing.panelGap
 
+  // Slides in from the side of the tab it was switched to from.
+  transform: Translate { id: pageShift }
+  Reveal { panel: lightsPage.panel; target: lightsPage; shift: pageShift; cascade: false; slide: true }
+
   Section {
     panel: lightsPage.panel
     title: "LEDS"
@@ -34,6 +38,7 @@ Column {
         height: width * 2
         colorway: panel.statusData.product ? String(panel.statusData.product.marketing_name || "") : ""
         tint: panel.cycleOn ? panel.cycleNow : panel.profileTint
+        tintGlides: !panel.cycleOn
         glow: panel.lanternOn ? 0.3 + 0.7 * panel.brightnessLevel / 255 : 0.1
         Behavior on glow { NumberAnimation { duration: 300 } }
       }
@@ -186,12 +191,32 @@ Column {
             font.pixelSize: Style.font.caption
           }
 
+          // Picking it sends a ring of its colour out, and lights the Peak.
+          Rectangle {
+            id: swatchRipple
+            anchors.centerIn: parent
+            width: parent.width
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.width: 2
+            border.color: String(swatchChip.modelData)
+            opacity: 0
+          }
+          ParallelAnimation {
+            id: swatchRippleAnim
+            NumberAnimation { target: swatchRipple; property: "scale"; from: 1; to: 2.4; duration: 620; easing.type: Easing.OutCubic }
+            NumberAnimation { target: swatchRipple; property: "opacity"; from: 0.9; to: 0; duration: 620; easing.type: Easing.InQuad }
+          }
+
           MouseArea {
             id: swatchMouse
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
+              swatchRippleAnim.restart()
+              lanternArt.pulse()
               panel.applyLightColor(String(swatchChip.modelData))
               if (panel.pickerOpen) panel.seedPicker(String(swatchChip.modelData))
             }
@@ -254,18 +279,42 @@ Column {
       }
     }
 
-    Loader {
+    // The colour wheel opens by unfolding (and folds away again), and the
+    // panel glides down just far enough to show all of it.
+    Item {
+      id: pickerHolder
       width: parent.width
-      active: panel.pickerOpen && panel.onLights
-      visible: active
-      sourceComponent: ColorPicker { panel: lightsPage.panel }
-      // Scroll just far enough to bring the whole picker into view.
-      onLoaded: Qt.callLater(function() {
-        var bottom = pickerLoader.mapToItem(panel.contentColumn, 0, pickerLoader.height).y
-        panel.scrollView.contentY = Math.max(panel.scrollView.contentY,
-          Math.min(bottom - panel.scrollView.height, panel.scrollView.contentHeight - panel.scrollView.height))
-      })
-      id: pickerLoader
+      readonly property bool wanted: panel.pickerOpen && panel.onLights
+      property real openK: wanted ? 1 : 0
+      Behavior on openK { NumberAnimation { duration: 340; easing.type: Easing.OutCubic } }
+      height: pickerLoader.item ? pickerLoader.item.implicitHeight * openK : 0
+      visible: openK > 0.002
+      clip: true
+
+      Loader {
+        id: pickerLoader
+        width: parent.width
+        active: pickerHolder.wanted || pickerHolder.openK > 0.002
+        opacity: pickerHolder.openK
+        sourceComponent: ColorPicker { panel: lightsPage.panel }
+        onLoaded: Qt.callLater(function() {
+          if (!pickerLoader.item) return
+          var view = panel.scrollView
+          var bottom = pickerHolder.mapToItem(panel.contentColumn, 0, pickerLoader.item.implicitHeight).y
+          var want = Math.max(view.contentY, bottom - view.height)
+          if (want > view.contentY + 1) {
+            pickerScroll.to = want
+            pickerScroll.restart()
+          }
+        })
+      }
+    }
+    NumberAnimation {
+      id: pickerScroll
+      target: panel.scrollView
+      property: "contentY"
+      duration: 420
+      easing.type: Easing.OutCubic
     }
 
   }

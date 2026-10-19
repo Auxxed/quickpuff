@@ -21,6 +21,10 @@ Column {
   width: parent ? parent.width : 0
   spacing: Style.space(8)
 
+  // Cascades in as the panel opens; rises in when it turns up later.
+  transform: Translate { id: sectionShift }
+  Reveal { panel: section.panel; target: section; shift: sectionShift; appear: true }
+
   Item {
     width: parent.width
     implicitHeight: Math.max(sectionHeader.implicitHeight, sectionGlyph.implicitHeight)

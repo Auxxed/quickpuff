@@ -39,18 +39,49 @@ Item {
     border.color: Util.alpha(panel.foreground, 0.12)
   }
 
+  // The pill's two edges travel separately: the edge heading for the new
+  // choice leads and the other catches up, so the pill stretches toward it
+  // and settles in. Placed directly (no animation) on first show and when
+  // the row is resized.
+  property real pillLeft: 0
+  property real pillRight: 0
+  property bool pillGlides: false
+  property bool pillToRight: true
+  property int pillFrom: -1
+
+  function placePill(glide) {
+    if (selectedIndex < 0) return
+    pillGlides = glide && pillFrom >= 0 && pillFrom !== selectedIndex && panel && panel.opened
+    pillToRight = selectedIndex > pillFrom
+    pillFrom = selectedIndex
+    // From a local: with a Behavior on it, pillLeft still reads its old
+    // value straight after being set.
+    var left = selectedIndex * (cellWidth + gap)
+    pillLeft = left
+    pillRight = left + cellWidth
+  }
+  onSelectedIndexChanged: placePill(true)
+  onCellWidthChanged: placePill(false)
+  Component.onCompleted: placePill(false)
+
+  Behavior on pillLeft {
+    enabled: seg.pillGlides
+    NumberAnimation { duration: seg.pillToRight ? 380 : 230; easing.type: Easing.OutCubic }
+  }
+  Behavior on pillRight {
+    enabled: seg.pillGlides
+    NumberAnimation { duration: seg.pillToRight ? 230 : 380; easing.type: Easing.OutCubic }
+  }
+
   Rectangle {
     visible: seg.selectedIndex >= 0
-    x: seg.selectedIndex * (seg.cellWidth + seg.gap)
-    width: seg.cellWidth
+    x: seg.pillLeft
+    width: Math.max(height * 0.6, seg.pillRight - seg.pillLeft)
     height: parent.height
     radius: Style.cornerRadius
     color: Util.alpha(Color.accent, 0.2)
     border.width: 1
     border.color: Color.accent
-
-    Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
-    Behavior on width { NumberAnimation { duration: 200 } }
   }
 
   Repeater {
@@ -68,6 +99,15 @@ Item {
       width: seg.cellWidth
       height: seg.height
 
+      // The glyph of a newly picked option hops as the pill arrives.
+      onSelectedChanged: if (selected && panel && panel.opened) glyphHop.restart()
+      SequentialAnimation {
+        id: glyphHop
+        PauseAnimation { duration: 110 }
+        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.22; duration: 110; easing.type: Easing.OutQuad }
+        NumberAnimation { target: cellGlyph; property: "scale"; to: 1.0; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 2.6 }
+      }
+
       Grid {
         anchors.centerIn: parent
         columns: seg.stacked ? 1 : 2
@@ -79,6 +119,7 @@ Item {
         Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack } }
 
         Text {
+          id: cellGlyph
           visible: cell.modelData.glyph !== undefined
           textFormat: Text.PlainText
           text: String(cell.modelData.glyph || "")

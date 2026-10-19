@@ -19,10 +19,30 @@ BorderSurface {
   // Optional colour bar along the bottom (the factory heat presets).
   property string stripe: ""
 
-  // Plain counts tick up to their value; anything else shows as given.
+  // Plain counts tick up to their value (from zero again whenever the
+  // panel opens on them or their page comes into view); anything else
+  // rolls in, odometer-style.
   readonly property bool numeric: /^\d+$/.test(value)
-  property real shown: numeric ? Number(value) : 0
-  Behavior on shown { NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
+  readonly property real target: numeric ? Number(value) : 0
+  property real shown: target
+  property bool counting: true
+  onTargetChanged: shown = target
+  Behavior on shown {
+    enabled: cell.counting
+    NumberAnimation { duration: 900; easing.type: Easing.OutCubic }
+  }
+  function replay() {
+    if (!numeric) { rolled.intro(); return }
+    counting = false
+    shown = 0
+    counting = true
+    shown = target
+  }
+  onVisibleChanged: if (visible && panel.opened) replay()
+  Connections {
+    target: cell.panel
+    function onOpenSerialChanged() { if (cell.visible) cell.replay() }
+  }
 
   radius: Style.cornerRadius
   color: highlight ? Util.alpha(tint, 0.06) : Style.normalFillFor(panel.foreground, Color.accent)
@@ -60,8 +80,20 @@ BorderSurface {
     }
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
+      visible: cell.numeric
       textFormat: Text.PlainText
-      text: cell.numeric ? String(Math.round(cell.shown)) : cell.value
+      text: String(Math.round(cell.shown))
+      color: cell.highlight ? cell.tint : panel.foreground
+      font.family: panel.displayFamily
+      font.pixelSize: Math.round(Style.font.title * panel.displayScale)
+      font.weight: Font.DemiBold
+    }
+    RollingNumber {
+      id: rolled
+      panel: cell.panel
+      anchors.horizontalCenter: parent.horizontalCenter
+      visible: !cell.numeric
+      text: cell.numeric ? "" : cell.value
       color: cell.highlight ? cell.tint : panel.foreground
       font.family: panel.displayFamily
       font.pixelSize: Math.round(Style.font.title * panel.displayScale)

@@ -37,15 +37,31 @@ Row {
         radius: 1
         color: pill.fill
 
+        clip: true
         Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
 
-        // Shimmers while it's taking a charge.
-        SequentialAnimation on opacity {
-          running: panel.pluggedIn && pill.level < 1 && panel.opened
-          loops: Animation.Infinite
-          alwaysRunToEnd: true
-          NumberAnimation { to: 0.45; duration: 800; easing.type: Easing.InOutSine }
-          NumberAnimation { to: 1.0; duration: 800; easing.type: Easing.InOutSine }
+        // A light runs through it while it's taking a charge.
+        Rectangle {
+          id: chargeSheen
+          visible: panel.pluggedIn && pill.level < 1
+          property real k: 0
+          width: parent.width * 0.6 + 4
+          height: parent.height
+          x: -width + (parent.width + width) * k
+          gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+            GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.6) }
+            GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+          }
+          NumberAnimation on k {
+            running: chargeSheen.visible && panel.opened
+            loops: Animation.Infinite
+            from: 0
+            to: 1
+            duration: 1400
+            easing.type: Easing.InOutQuad
+          }
         }
       }
     }
