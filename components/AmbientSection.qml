@@ -6,7 +6,7 @@ import qs.Commons
 Section {
   id: ambientSection
 
-  glyph: ""
+  glyph: "\uf1fc"
   title: "LANTERN COLORS"
   trailing: panel.ambientNow
     ? (panel.ambientNow.source === "visualizer" ? "Dancing · " + panel.ambientNow.bpm + " BPM"

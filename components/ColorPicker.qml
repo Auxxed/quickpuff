@@ -195,7 +195,9 @@ BorderSurface {
           Text {
             id: valueLabel
             textFormat: Text.PlainText
-            text: "Brightness"
+            // Not the lantern's brightness (that's its own slider): how
+            // light or dark this colour is.
+            text: "Shade"
             color: panel.dim
             font.family: panel.fontFamily
             font.pixelSize: Style.font.caption

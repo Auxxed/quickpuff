@@ -405,7 +405,7 @@ Section {
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
     text: panel.cycleOn
-      ? "The Peak runs the animation itself, even when this computer is away. Turn the LED on above to see it."
+      ? "The Peak runs the animation itself, even when this computer is away. Turn the lantern on above to see it."
       : "Pick a style and colours, then switch it on."
     color: panel.dim
     font.family: panel.fontFamily

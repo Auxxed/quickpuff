@@ -179,8 +179,9 @@ Column {
           readonly property var cycleColors: profileIndex === panel.currentProfile
             ? (panel.cycleOn ? panel.cycleColors : [])
             : (modelData.cycle && modelData.cycle.colors ? modelData.cycle.colors : [])
+          // Stepping through its colours, or holding the first in Calm motion.
           readonly property string dotColor: cycleColors.length
-            ? cycleColors[panel.cycleTick % cycleColors.length] : swatch
+            ? cycleColors[panel.calm ? 0 : panel.cycleTick % cycleColors.length] : swatch
           readonly property real tempF: panel.profileTempF(profileIndex, modelData.temp_f)
           readonly property real timeS: panel.profileTime(profileIndex, modelData.time)
           readonly property string name: {
@@ -299,10 +300,7 @@ Column {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-              if (tile.profileIndex < 0) return
-              panel.runArgv(["quickpuff", "profile", String(tile.profileIndex)])
-            }
+            onClicked: panel.selectProfile(tile.profileIndex)
           }
 
           Column {
@@ -375,8 +373,10 @@ Column {
                     id: nameTap
                     anchors.fill: parent
                     hoverEnabled: true
-                    cursorShape: Qt.IBeamCursor
-                    onClicked: panel.startEdit(tile.profileIndex, "name")
+                    cursorShape: tile.active ? Qt.IBeamCursor : Qt.PointingHandCursor
+                    // On another profile the first tap picks it; on the
+                    // active one it edits.
+                    onClicked: tile.active ? panel.startEdit(tile.profileIndex, "name") : panel.selectProfile(tile.profileIndex)
                   }
                 }
 
@@ -457,8 +457,8 @@ Column {
                   id: tempTapMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  cursorShape: Qt.IBeamCursor
-                  onClicked: panel.startEdit(tile.profileIndex, "temp")
+                  cursorShape: tile.active ? Qt.IBeamCursor : Qt.PointingHandCursor
+                  onClicked: tile.active ? panel.startEdit(tile.profileIndex, "temp") : panel.selectProfile(tile.profileIndex)
                 }
               }
 
@@ -539,8 +539,8 @@ Column {
                   id: timeTapMouse
                   anchors.fill: parent
                   hoverEnabled: true
-                  cursorShape: Qt.IBeamCursor
-                  onClicked: panel.startEdit(tile.profileIndex, "time")
+                  cursorShape: tile.active ? Qt.IBeamCursor : Qt.PointingHandCursor
+                  onClicked: tile.active ? panel.startEdit(tile.profileIndex, "time") : panel.selectProfile(tile.profileIndex)
                 }
               }
 

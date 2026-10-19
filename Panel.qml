@@ -185,10 +185,21 @@ Panel {
   readonly property var profiles: statusData.profiles || []
   readonly property bool hasProfiles: connected && profiles.length > 0
 
+  // The profile just picked shows as current at once, while the Peak
+  // confirms it (cleared when the status agrees, or after 4 s).
+  property int pendingProfile: -1
   readonly property int currentProfile: {
+    if (pendingProfile >= 0) return pendingProfile
     var n = Number(statusData.current_profile)
     return isFinite(n) ? n : -1
   }
+  function selectProfile(index) {
+    if (index < 0) return
+    pendingProfile = index
+    pendingProfileTimer.restart()
+    runArgv(["quickpuff", "profile", String(index)])
+  }
+  Timer { id: pendingProfileTimer; interval: 4000; onTriggered: root.pendingProfile = -1 }
   readonly property var activeProfile: {
     for (var i = 0; i < profiles.length; i++) {
       if (Number(profiles[i].index) === root.currentProfile) return profiles[i]
@@ -260,7 +271,10 @@ Panel {
   // every 0.7 s; the big number holds until it moves 3°F, so a session
   // reads steady (every other moment it's the live reading).
   property real heldTempF: NaN
-  onStatusDataChanged: holdTemp()
+  onStatusDataChanged: {
+    holdTemp()
+    if (pendingProfile >= 0 && Number(statusData.current_profile) === pendingProfile) pendingProfile = -1
+  }
   function holdTemp() {
     var f = Number(statusData.heater_temp_f)
     if (!isFinite(f)) { heldTempF = NaN; return }
