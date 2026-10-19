@@ -2286,6 +2286,22 @@ PanelWindow {
       source: swarm
       opacity: ff.dark
     }
+
+    // READY, in the shows' common lockup.
+    Text {
+      readonly property real e: Math.max(0, Math.min(1, (ff.now - ff.holdAt) / 0.3)) * Math.max(0, Math.min(1, (ff.scatterAt + 0.6 - ff.now) / 0.5))
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: ff.oy + 160 * ff.k + 22 * ff.s + (1 - Math.min(1, Math.max(0, (ff.now - ff.holdAt) / 0.3))) * 12 * ff.s
+      opacity: 0.92 * e
+      visible: e > 0
+      textFormat: Text.PlainText
+      text: "READY"
+      color: Qt.tint("#ffffff", Util.alpha("#ffe9a0", 0.35))
+      font.family: overlay.displayFamily
+      font.pixelSize: 64 * ff.s
+      font.weight: Font.DemiBold
+      font.letterSpacing: 15 * ff.s
+    }
   }
 
   // ============================================================== Deep sea
@@ -2547,6 +2563,22 @@ PanelWindow {
       anchors.fill: deep
       source: deep
       opacity: sea.dark
+    }
+
+    // READY, in the shows' common lockup.
+    Text {
+      readonly property real e: Math.max(0, Math.min(1, (sea.now - 1.4) / 0.3)) * Math.max(0, Math.min(1, (sea.dur - 0.9 - sea.now) / 0.5))
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: sea.height * 0.6 + (1 - Math.min(1, Math.max(0, (sea.now - 1.4) / 0.3))) * 12 * sea.s
+      opacity: 0.92 * e
+      visible: e > 0
+      textFormat: Text.PlainText
+      text: "READY"
+      color: Qt.tint("#ffffff", Util.alpha("#9ff4ff", 0.3))
+      font.family: overlay.displayFamily
+      font.pixelSize: 64 * sea.s
+      font.weight: Font.DemiBold
+      font.letterSpacing: 15 * sea.s
     }
   }
 
