@@ -44,6 +44,27 @@ PanelWindow {
   readonly property string body: textFont.status === FontLoader.Ready ? textFont.name : Style.font.family
   readonly property real u: Math.max(1, Math.min(width, height * 16 / 9) / 1536)
   readonly property color tint: w.color || "#ff4fa3"
+  // Each slide's own light (the hottest session in the heat's colour, prime
+  // time at dusk...), easing from one to the next; the card is the
+  // favourite profile's colour.
+  property color mood: tint
+  Behavior on mood { ColorAnimation { duration: 900; easing.type: Easing.InOutSine } }
+  function heatColor(f) {
+    var stops = [[400, "#ffd27a"], [480, "#ffa03c"], [540, "#ff6a3a"], [600, "#ffe9e0"]]
+    var v = Number(f)
+    if (!isFinite(v) || v <= stops[0][0]) return stops[0][1]
+    for (var i = 1; i < stops.length; i++) {
+      if (v <= stops[i][0]) {
+        var k = (v - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0])
+        return Qt.tint(stops[i - 1][1], Util.alpha(stops[i][1], k))
+      }
+    }
+    return stops[stops.length - 1][1]
+  }
+  function dateText(iso) {
+    var d = new Date(String(iso || "") + "T12:00:00")
+    return isNaN(d.getTime()) ? String(iso || "") : Qt.formatDate(d, "dddd, MMM d")
+  }
   readonly property bool onCard: slide >= 0 && slide === slides.length - 1
 
   // ------------------------------------------------------------ the data
@@ -95,20 +116,20 @@ PanelWindow {
         change = (pct >= 0 ? "+" : "") + pct + "% on the same days last " + periodWord
       }
       s.push({ "kicker": "SESSIONS", "count": w.sessions, "small": (w.days ? "over " + w.days + " days" : "") + (change ? "  ·  " + change : "") })
-      if (w.streak) s.push({ "kicker": "LONGEST STREAK", "count": w.streak, "unit": w.streak === 1 ? " DAY" : " DAYS",
-        "small": w.busiest ? "Busiest day: " + w.busiestDate + ", " + w.busiest + " sessions" : "" })
+      if (w.streak) s.push({ "kicker": "LONGEST STREAK", "count": w.streak, "unit": w.streak === 1 ? "DAY" : "DAYS", "tint": "#ffb547",
+        "small": w.busiest ? "Busiest day: " + dateText(w.busiestDate) + " · " + w.busiest + " sessions" : "" })
       if (w.topName) s.push({ "kicker": "YOUR FAVOURITE PROFILE", "big": w.topName.toUpperCase(),
         "small": w.topShare !== null ? Math.round(w.topShare * 100) + "% of your sessions" : "" })
-      if (w.hottest) s.push({ "kicker": "HOTTEST SESSION", "count": w.hottest, "unit": "°F",
+      if (w.hottest) s.push({ "kicker": "HOTTEST SESSION", "count": w.hottest, "unit": "°F", "tint": String(heatColor(w.hottest)),
         "small": w.heatup ? "Average heat-up: " + w.heatup + " s" : "" })
-      if (w.weekday) s.push({ "kicker": "PRIME TIME", "big": w.weekday.toUpperCase() + "S",
+      if (w.weekday) s.push({ "kicker": "PRIME TIME", "big": w.weekday.toUpperCase() + "S", "tint": "#8a6dff",
         "small": w.hour !== null ? "around " + hourText(w.hour) : "" })
-      if (w.title) s.push({ "kicker": "YOU'RE A", "big": w.title.toUpperCase(), "small": w.line })
+      if (w.title) s.push({ "kicker": "YOU'RE A", "big": w.title.toUpperCase(), "small": w.line, "hold": 4800 })
     }
     s.push({ "card": true })
     slides = s
     slide = 0
-    cue("ready")
+    cue("shimmer")
     advance.restart()
   }
 
@@ -123,13 +144,21 @@ PanelWindow {
 
   // 0 → 1 through the slide on screen, for its story bar; full on the card.
   property real slideT: 0
+  // How long the slide on screen holds (the payoff slide longer).
+  readonly property int holdMs: slide >= 0 && slide < slides.length && slides[slide].hold ? slides[slide].hold : 3300
   onSlideChanged: {
     slideTAnim.stop()
     slideT = 0
+    var spec = slide >= 0 && slide < slides.length ? slides[slide] : null
+    mood = spec && spec.tint ? spec.tint : tint
     if (onCard) slideT = 1
-    else slideTAnim.start()
+    else {
+      advance.interval = holdMs
+      advance.restart()
+      slideTAnim.start()
+    }
   }
-  NumberAnimation { id: slideTAnim; target: wrap; property: "slideT"; from: 0; to: 1; duration: 3300 }
+  NumberAnimation { id: slideTAnim; target: wrap; property: "slideT"; from: 0; to: 1; duration: wrap.holdMs }
 
   function next() {
     if (slide < slides.length - 1) {
@@ -195,19 +224,19 @@ PanelWindow {
       anchors.fill: parent
       gradient: Gradient {
         GradientStop { position: 0.0; color: "#f20b0710" }
-        GradientStop { position: 1.0; color: Qt.rgba(wrap.tint.r * 0.25, wrap.tint.g * 0.12, wrap.tint.b * 0.2, 0.96) }
+        GradientStop { position: 1.0; color: Qt.rgba(wrap.mood.r * 0.25, wrap.mood.g * 0.12, wrap.mood.b * 0.2, 0.96) }
       }
     }
 
     // Two slow glows drifting behind everything, in your profile's colour.
     Glow {
-      hue: Util.alpha(wrap.tint, 0.55)
+      hue: Util.alpha(wrap.mood, 0.55)
       width: wrap.width * 0.7; height: width
       x: wrap.width * (0.05 + 0.08 * Math.sin(drift.t * 2 * Math.PI)) - width * 0.2
       y: wrap.height * 0.15 - height * 0.3
     }
     Glow {
-      hue: Util.alpha(Qt.lighter(wrap.tint, 1.4), 0.35)
+      hue: Util.alpha(Qt.lighter(wrap.mood, 1.4), 0.35)
       width: wrap.width * 0.55; height: width
       x: wrap.width * (0.62 - 0.06 * Math.cos(drift.t * 2 * Math.PI))
       y: wrap.height * 0.55 - height * 0.25
@@ -231,7 +260,7 @@ PanelWindow {
         readonly property real k: (base + seedB) % 1
         width: (40 + 120 * seedA) * wrap.u
         height: width
-        hue: Util.alpha(index % 3 ? wrap.tint : Qt.lighter(wrap.tint, 1.5), 0.18 + 0.2 * seedB)
+        hue: Util.alpha(index % 3 ? wrap.mood : Qt.lighter(wrap.mood, 1.5), 0.18 + 0.2 * seedB)
         x: wrap.width * (0.04 + 0.92 * seedB) + Math.sin(k * Math.PI * 2 + index) * 40 * wrap.u - width / 2
         y: wrap.height * (1.1 - 1.3 * k) - height / 2
         opacity: Math.min(1, k / 0.15, (1 - k) / 0.25)
@@ -268,20 +297,20 @@ PanelWindow {
             x: -height / 4
             height: parent.height * 3.5
             radius: height / 2
-            color: Util.alpha(wrap.tint, 0.28)
+            color: Util.alpha(wrap.mood, 0.28)
             visible: parent.fill > 0
           }
           Rectangle {
             height: parent.height
             radius: parent.radius
-            color: Qt.tint("#ffffff", Util.alpha(wrap.tint, 0.18))
+            color: Qt.tint("#ffffff", Util.alpha(wrap.mood, 0.18))
             opacity: 0.9
             width: parent.width * parent.fill
           }
           // The playing bar's head: a spark riding the edge of the fill.
           Glow {
             visible: index === wrap.slide && !wrap.onCard
-            hue: Util.alpha(Qt.lighter(wrap.tint, 1.4), 0.9)
+            hue: Util.alpha(Qt.lighter(wrap.mood, 1.4), 0.9)
             width: parent.height * 6
             height: width
             x: parent.width * parent.fill - width / 2
@@ -376,7 +405,7 @@ PanelWindow {
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
             text: page.spec.kicker || ""
-            color: Qt.lighter(wrap.tint, 1.35)
+            color: Qt.lighter(wrap.mood, 1.35)
             opacity: page.beat(0)
             font.family: wrap.display
             font.pixelSize: 30 * wrap.u
@@ -388,9 +417,22 @@ PanelWindow {
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
             wrapMode: Text.WordWrap
-            text: page.spec.count !== undefined ? Math.round(page.shown) + (page.spec.unit || "") : (page.spec.big || "")
-            color: Qt.tint("white", Util.alpha(Qt.lighter(wrap.tint, 1.5), 0.6 * bigLine.zap))
+            text: page.spec.count !== undefined ? String(Math.round(page.shown)) : (page.spec.big || "")
+            color: Qt.tint("white", Util.alpha(Qt.lighter(wrap.mood, 1.5), 0.6 * bigLine.zap))
             opacity: page.beat(1)
+
+            // The unit (DAYS, °F) beside the number, smaller, on its baseline.
+            Text {
+              visible: page.spec.count !== undefined && (page.spec.unit || "") !== ""
+              x: (bigLine.width + Math.min(bigLine.width, bigLine.contentWidth)) / 2 + 14 * wrap.u
+              y: bigLine.baselineOffset - baselineOffset
+              textFormat: Text.PlainText
+              text: page.spec.unit || ""
+              color: Util.alpha("#ffffff", 0.85)
+              font.family: wrap.display
+              font.pixelSize: bigLine.font.pixelSize * 0.32
+              font.letterSpacing: 4 * wrap.u
+            }
 
             // 1 → 0 through a strike: the digits flash white as they land
             // and a ring the shape of the line spreads out from them.
@@ -417,7 +459,7 @@ PanelWindow {
               radius: height / 2
               color: "transparent"
               border.width: Math.max(1, (5 - 4 * k) * wrap.u)
-              border.color: Qt.lighter(wrap.tint, 1.4)
+              border.color: Qt.lighter(wrap.mood, 1.4)
               opacity: (1 - k) * 0.8
               visible: k < 1
               NumberAnimation { id: shockAnim; target: shock; property: "k"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
@@ -427,7 +469,7 @@ PanelWindow {
             font.pixelSize: (page.spec.count !== undefined ? 220 : 120) * wrap.u
             font.letterSpacing: 6 * wrap.u
             style: Text.Outline
-            styleColor: Util.alpha(Qt.lighter(wrap.tint, 1.0 + 0.4 * bigLine.zap), 0.35 + 0.5 * bigLine.zap)
+            styleColor: Util.alpha(Qt.lighter(wrap.mood, 1.0 + 0.4 * bigLine.zap), 0.35 + 0.5 * bigLine.zap)
           }
           Text {
             width: parent.width
