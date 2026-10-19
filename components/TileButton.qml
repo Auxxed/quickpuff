@@ -49,8 +49,8 @@ Item {
   // A press pops it and sends a ring of light out from it.
   property real popT: 1
   NumberAnimation { id: popAnim; target: tap; property: "popT"; from: 0; to: 1; duration: 420; easing.type: Easing.OutCubic }
-  scale: tapMouse.pressed ? 0.85 : 1
-  Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack; easing.overshoot: 2.5 } }
+  scale: tapMouse.pressed ? 0.9 : 1
+  Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
   Rectangle {
     anchors.centerIn: parent
     width: parent.width * (1 + 0.9 * tap.popT)

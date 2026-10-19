@@ -723,7 +723,8 @@ Column {
           width: animGrid.cellWidth
           label: modelData.label
           glyph: modelData.glyph
-          tint: modelData.value === "off" ? panel.foreground : panel.profileTint
+          // Picked in the accent, like every other choice in the panel.
+          tint: modelData.value === "off" ? panel.foreground : Color.accent
           emphasized: panel.readyAnimation === modelData.value
           onActivated: panel.setReadyAnimation(modelData.value)
         }
@@ -789,9 +790,8 @@ Column {
   // Everyday comfort: the flourishes off, the information kept.
   Section {
     panel: controlPage.panel
-    glyph: "\uf186"
+    glyph: "\uf0e4"
     title: "MOTION"
-    trailing: panel.calm ? "Calm" : "Full"
 
     SwitchRow {
       panel: controlPage.panel
@@ -806,8 +806,8 @@ Column {
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       text: panel.calm
-        ? "Progress, readings and state changes still move; the sparks, glows, slides and celebrations are off. The ready show still plays."
-        : "Calm motion keeps the panel and bar to what tells you something, without the sparks, glows, slides and celebrations."
+        ? "Progress, readings and state changes still move; the sparks, breathing, slides and celebrations are off, here and in the bar. The ready show still plays."
+        : "Calm motion keeps the panel and bar to what tells you something, without the sparks, breathing, slides and celebrations."
       color: panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption

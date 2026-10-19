@@ -1249,12 +1249,12 @@ Panel {
     { "value": "smoke", "label": "Smoke Rings", "glyph": "\uf0c2" },
     { "value": "neon", "label": "Neon", "glyph": "\uf0eb" },
     { "value": "supernova", "label": "Supernova", "glyph": "\uf185" },
-    { "value": "constellation", "label": "Star Chart", "glyph": "\uf006" },
-    { "value": "fireflies", "label": "Fireflies", "glyph": "\uf192" },
+    { "value": "constellation", "label": "Star Chart", "glyph": "\uf1e0" },
+    { "value": "fireflies", "label": "Fireflies", "glyph": "\uf188" },
     { "value": "deepsea", "label": "Deep Sea", "glyph": "\uf043" },
-    { "value": "warp", "label": "Warp", "glyph": "\uf1ce" },
-    { "value": "plasma", "label": "Plasma", "glyph": "\uf1db" },
-    { "value": "storm", "label": "Storm", "glyph": "\uf0e7" }
+    { "value": "warp", "label": "Warp", "glyph": "\uf1d8" },
+    { "value": "plasma", "label": "Plasma", "glyph": "\uf1e6" },
+    { "value": "storm", "label": "Storm", "glyph": "\uf0e9" }
   ]
   property string configReadyAnimation: "rocket"
   property string pendingReadyAnimation: ""
@@ -1981,7 +1981,7 @@ Panel {
             Behavior on glow { NumberAnimation { duration: 500 } }
             property real breath: 1
             SequentialAnimation on breath {
-              running: root.preheating && root.opened
+              running: root.preheating && root.opened && !root.calm
               loops: Animation.Infinite
               alwaysRunToEnd: true
               NumberAnimation { to: 0.35; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
@@ -2196,7 +2196,7 @@ Panel {
                   }
                   Connections {
                     target: root
-                    function onStateIdChanged() { if (root.opened) pingAnim.restart() }
+                    function onStateIdChanged() { if (root.opened && !root.calm) pingAnim.restart() }
                     function onConnectedChanged() { if (root.opened) pingAnim.restart() }
                   }
                 }

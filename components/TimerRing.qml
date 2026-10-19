@@ -41,7 +41,7 @@ Item {
   NumberAnimation { id: sweepAnim; target: ring; property: "sweep"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
 
   SequentialAnimation on headGlow {
-    running: ring.visible && ring.panel && ring.panel.opened
+    running: ring.visible && ring.panel && ring.panel.opened && !ring.panel.calm
     loops: Animation.Infinite
     NumberAnimation { to: 0.55; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
     NumberAnimation { to: 1; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
