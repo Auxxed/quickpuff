@@ -1515,8 +1515,11 @@ PanelWindow {
     readonly property real dark: Math.min(1, now / 0.7) * Math.max(0, Math.min(1, (dur - now) / 1.0))
     // How far the remnant has spread: fast at first, then drifting.
     readonly property real spread: since <= 0 ? 0 : 1 - Math.exp(-since / 1.1)
-    readonly property var cloud: [overlay.tint, overlay.hueTurn(0.07, 0.95, 0.62), overlay.hueTurn(-0.09, 0.9, 0.55),
-      overlay.hueTurn(0.5, 0.85, 0.6), overlay.hueTurn(0.42, 0.8, 0.5), overlay.hueTurn(0.15, 0.9, 0.65)]
+    // The remnant's gas: the profile's colour and its neighbours, with the
+    // pale blue-white of the hottest filaments (like the Crab's), not a
+    // rainbow.
+    readonly property var cloud: [overlay.tint, overlay.hueTurn(0.06, 0.85, 0.6), overlay.hueTurn(-0.07, 0.8, 0.55),
+      "#c4d8ff", overlay.hueTurn(0.1, 0.55, 0.72), "#9fb8ff"]
     property bool blown: false
 
     NumberAnimation on t { from: 0; to: 1; duration: 6400; running: true; onFinished: overlay.finished() }
@@ -1618,19 +1621,19 @@ PanelWindow {
       // front, stretched along it and overlapping, with a second, fainter
       // layer just inside in other colours.
       Repeater {
-        model: 44
+        model: 60
         SoftGlow {
           required property int index
           readonly property bool inner: index % 3 === 2
           readonly property real a: overlay.hash(index * 2.9) * 6.283
           readonly property real r: nova.height * (0.07 + 0.3 * nova.spread) * (inner ? 0.72 : 1) * (0.78 + 0.44 * overlay.hash(index * 5.3))
           readonly property real len: nova.height * (0.1 + 0.18 * overlay.hash(index * 1.7)) * (0.3 + 0.7 * nova.spread)
-          hue: Util.alpha(nova.cloud[(index * 5 + (inner ? 3 : 0)) % nova.cloud.length], inner ? 0.35 : 0.55)
+          hue: Util.alpha(nova.cloud[(index * 5 + (inner ? 3 : 0)) % nova.cloud.length], inner ? 0.3 : 0.5)
           x: nova.cx + Math.cos(a) * r - 50
           y: nova.cy + Math.sin(a) * r * 0.84 - 50
           opacity: 0.6
           transform: [
-            Scale { origin.x: 50; origin.y: 50; xScale: len / 100; yScale: len * (0.28 + 0.2 * overlay.hash(index * 8.1)) / 100 },
+            Scale { origin.x: 50; origin.y: 50; xScale: len / 100; yScale: len * (0.1 + 0.1 * overlay.hash(index * 8.1)) / 100 },
             Rotation { origin.x: 50; origin.y: 50; angle: a * 180 / Math.PI + 90 + (overlay.hash(index * 4.4) - 0.5) * 30 }
           ]
         }
@@ -1694,9 +1697,9 @@ PanelWindow {
       opacity: nova.since >= 0 ? nova.dark : 0
     }
 
-    // The shockwave: a bright thin ring and a soft wide one.
+    // The shockwave: one ring, a bright thin line in a soft wide glow.
     Repeater {
-      model: [{ "w": 0.008, "a": 0.6, "sp": 1.0 }, { "w": 0.05, "a": 0.18, "sp": 0.88 }]
+      model: [{ "w": 0.008, "a": 0.6, "sp": 1.0 }, { "w": 0.03, "a": 0.14, "sp": 1.0 }]
       Rectangle {
         required property var modelData
         readonly property real p: Math.max(0, Math.min(1, nova.since / 1.5))
@@ -1800,17 +1803,22 @@ PanelWindow {
       height: readyWord.implicitHeight
       opacity: nova.since > 0.6 ? e * nova.dark : 0
 
-      SoftGlow {
-        hue: Util.alpha(overlay.tint, 0.28)
-        anchors.centerIn: parent
-        transform: Scale { origin.x: 50; origin.y: 50; xScale: readyWord.implicitWidth * 1.3 / 100; yScale: readyWord.implicitHeight * 1.3 / 100 }
-      }
       Text {
         id: readyWord
         anchors.centerIn: parent
         textFormat: Text.PlainText
         text: "READY"
         color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.2))
+        // Glowing in the profile's colour (a blob behind it read as a smear).
+        layer.enabled: true
+        layer.effect: MultiEffect {
+          shadowEnabled: true
+          shadowHorizontalOffset: 0
+          shadowVerticalOffset: 0
+          blurMax: 24
+          shadowBlur: 0.6
+          shadowColor: Util.alpha(Qt.lighter(overlay.tint, 1.2), 0.7)
+        }
         font.family: overlay.displayFamily
         font.pixelSize: 56 * nova.s
         font.weight: Font.DemiBold
