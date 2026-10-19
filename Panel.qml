@@ -1238,7 +1238,9 @@ Panel {
     { "value": "constellation", "label": "Star Chart", "glyph": "\uf006" },
     { "value": "fireflies", "label": "Fireflies", "glyph": "\uf192" },
     { "value": "deepsea", "label": "Deep Sea", "glyph": "\uf043" },
-    { "value": "warp", "label": "Warp", "glyph": "\uf1ce" }
+    { "value": "warp", "label": "Warp", "glyph": "\uf1ce" },
+    { "value": "plasma", "label": "Plasma", "glyph": "\uf1db" },
+    { "value": "storm", "label": "Storm", "glyph": "\uf0e7" }
   ]
   property string configReadyAnimation: "rocket"
   property string pendingReadyAnimation: ""

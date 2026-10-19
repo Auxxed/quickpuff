@@ -31,7 +31,7 @@ BarWidget {
   QuickpuffCli { id: cli }
 
   readonly property var readyAnimations: ["rocket", "confetti", "lava", "aurora", "fireworks", "smoke", "neon",
-    "supernova", "constellation", "fireflies", "deepsea", "warp"]
+    "supernova", "constellation", "fireflies", "deepsea", "warp", "plasma", "storm"]
   readonly property var pages: ["control", "lights", "usage", "care", "device"]
 
   function injectPanel() {
@@ -340,7 +340,7 @@ BarWidget {
   // How long Showtime's stage waits after Ready, so the ready animation
   // plays out on it before the card takes over (seconds; 6.2 otherwise).
   readonly property var readyHold: ({ "off": 2.2, "rocket": 7.4, "supernova": 6.6, "constellation": 6.8,
-    "fireflies": 7.0, "deepsea": 7.0, "warp": 7.0 })
+    "fireflies": 7.0, "deepsea": 7.0, "warp": 7.0, "plasma": 6.6, "storm": 6.8 })
   // Showtime (SessionOverlay.qml): off, corner or stage.
   property string showtimeMode: "corner"
   property bool soundsOn: true
