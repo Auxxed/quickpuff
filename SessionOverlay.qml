@@ -79,10 +79,25 @@ PanelWindow {
     onStatus: function(d) {
       // The lists drawn here, no longer than the daemon ever sends them.
       var trace = d.heat_trace && typeof d.heat_trace === "object" ? d.heat_trace.points : undefined
-      if (trace !== undefined && trace !== null && (!Array.isArray(trace) || trace.length > 360)) return
-      if (d.profiles !== undefined && d.profiles !== null && (!Array.isArray(d.profiles) || d.profiles.length > 8)) return
+      if (trace !== undefined && trace !== null && (!show.isList(trace) || trace.length > 360)) return
+      if (d.profiles !== undefined && d.profiles !== null && (!show.isList(d.profiles) || d.profiles.length > 8)) return
       show.ingest(d)
     }
+  }
+
+  // A list as it arrives through the feed's signal. Since Qt 6.12 it's a
+  // converted sequence that Array.isArray says no to (which turned every
+  // status away, so the show never started), but it still has a length and
+  // indexes like one.
+  function isList(v) {
+    return v !== null && typeof v === "object" && typeof v.length === "number" && v.length >= 0
+  }
+
+  // Never left waiting: with no status it can use, it bows out.
+  Timer {
+    interval: 15000
+    running: show.armed && show.phase === "waiting"
+    onTriggered: show.closeSoon(0)
   }
 
   Timer {

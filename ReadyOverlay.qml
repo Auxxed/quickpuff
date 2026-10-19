@@ -807,10 +807,13 @@ PanelWindow {
     Component.onCompleted: overlay.cue("bubbles")
     NumberAnimation on t { from: 0; to: 1; duration: 6000; running: true; onFinished: overlay.finished() }
 
+    // Hidden by opacity, not `visible`: a hidden layer source whose blobs
+    // all start transparent never renders into its layer on Qt 6.12, and
+    // the lamp stayed blank.
     Item {
       id: wax
       anchors.fill: parent
-      visible: false
+      opacity: 0
       layer.enabled: true
 
       Repeater {
