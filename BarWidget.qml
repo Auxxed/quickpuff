@@ -172,17 +172,56 @@ BarWidget {
     if (["off", "corner", "stage"].indexOf(ui.showtime) >= 0) root.showtimeMode = ui.showtime
     if (typeof ui.sounds === "boolean") root.soundsOn = ui.sounds
     if (ui.motion === "full" || ui.motion === "calm") root.calm = ui.motion === "calm"
+    if (ui.units === "C" || ui.units === "F") root.units = ui.units
     if (typeof ui.sound_volume === "number" && ui.sound_volume >= 0 && ui.sound_volume <= 100) root.soundVolume = ui.sound_volume / 100
     if (typeof ui.overlay_screen === "string" && /^(focused|[A-Za-z0-9][A-Za-z0-9._-]{0,31})$/.test(ui.overlay_screen)) root.overlayScreen = ui.overlay_screen
   }
 
-  // Faster while preheating, so the ready animation lands close to the
-  // moment the Peak gets there.
+  // The label's poll. With the daemon's feed connected, a state change
+  // refreshes it straight away and the heating label is built from the
+  // feed (below), so the poll only keeps the battery and a cooling chamber
+  // current. Without the feed it polls faster while preheating, so the
+  // ready animation lands close to the moment the Peak gets there.
   Timer {
-    interval: root.outputClass === "preheat" ? 1000 : 5000
+    interval: live.connected
+      ? (root.liveState === 9 ? 2000 : root.heatingNow ? 5000 : 30000)
+      : (root.outputClass === "preheat" ? 1000 : 5000)
     running: true
     repeat: true
     onTriggered: root.refresh()
+  }
+
+  // While it heats, the label comes from the feed (pushed several times a
+  // second) rather than the poll: the countdown ticks every second, the
+  // temperature holds like the panel's (until it moves 3°F at temperature)
+  // and the seconds keep a fixed width so the bar doesn't shuffle.
+  property string units: "F"
+  property real liveHeldF: NaN
+  property real liveEndsAt: NaN
+  property real nowMs: Date.now()
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.liveState === 7 || root.liveState === 8
+    onTriggered: root.nowMs = Date.now()
+  }
+  readonly property string liveLabel: {
+    if (!live.connected || (liveState !== 7 && liveState !== 8) || !isFinite(liveHeldF)) return ""
+    var t = units === "C" ? Math.round((liveHeldF - 32) * 5 / 9) + "°C" : Math.round(liveHeldF) + "°F"
+    var s = t + (liveState === 7 ? " ↑" : " ●")
+    if (isFinite(liveEndsAt)) {
+      var left = Math.max(0, Math.round((liveEndsAt - nowMs) / 1000))
+      s += " " + (left < 10 ? "\u2007" : "") + left + "s"
+    }
+    return s
+  }
+  function takeLabel(d, s) {
+    var tot = Number(d.state_total_s), el = Number(d.state_elapsed_s)
+    root.liveEndsAt = isFinite(tot) && tot > 0 && isFinite(el) ? Date.now() + Math.max(0, tot - el) * 1000 : NaN
+    root.nowMs = Date.now()
+    var f = Number(d.heater_temp_f)
+    if (!isFinite(f)) root.liveHeldF = NaN
+    else if (s !== 8 || !isFinite(root.liveHeldF) || Math.abs(f - root.liveHeldF) >= 3) root.liveHeldF = f
   }
 
   // The daemon also pushes every status it takes (several a second while
@@ -195,6 +234,7 @@ BarWidget {
     onStatus: function(d) {
       var s = d.connected === false ? -1 : Number(d.operating_state_id)
       root.takeHeat(d)
+      root.takeLabel(d, s)
       if (!isFinite(s) || s === root.liveState) return
       var was = root.liveState
       root.liveState = s
@@ -269,7 +309,7 @@ BarWidget {
     // A flame joins the label while the Peak is heating. The shell draws
     // both strings itself, so they're plain()ed where they're set.
     text: root.flashText !== "" ? root.flashText
-      : root.heatingNow ? "\uf06d " + root.outputText : root.outputText
+      : root.heatingNow ? "\uf06d " + (root.liveLabel !== "" ? root.liveLabel : root.outputText) : root.outputText
     tooltipText: root.outputTooltip
     active: root.outputActive || root.opened
     // Recede while there's no device to report on, the same way the shell's
