@@ -35,6 +35,45 @@ Item {
     checked: switchRow.checked
     cursorRing: false
     foreground: panel.foreground
-    onToggled: switchRow.toggled()
+    onToggled: {
+      if (!switchRow.checked) switchSparks.restart()
+      switchRow.toggled()
+    }
+  }
+
+  // Turning on throws a ring of sparks off the knob's new place, and a
+  // flash of glow round it.
+  property real sparkT: 0
+  NumberAnimation { id: switchSparks; target: switchRow; property: "sparkT"; from: 0; to: 1; duration: 560; easing.type: Easing.OutCubic }
+  Item {
+    x: switchControl.x + switchControl.width - switchControl.height / 2
+    y: switchControl.y + switchControl.height / 2
+    visible: switchSparks.running
+
+    Rectangle {
+      width: switchControl.height * (1 + 1.3 * switchRow.sparkT)
+      height: width
+      radius: width / 2
+      x: -width / 2
+      y: -height / 2
+      color: "transparent"
+      border.width: Math.max(1, Style.space(1.5))
+      border.color: Util.alpha(Color.accent, 0.8 * (1 - switchRow.sparkT))
+    }
+    Repeater {
+      model: 8
+      Rectangle {
+        required property int index
+        readonly property real ang: index / 8 * Math.PI * 2 + 0.3
+        readonly property real reach: switchControl.height * (0.5 + 0.9 * switchRow.sparkT)
+        width: Style.space(index % 2 ? 3 : 4)
+        height: width
+        radius: width / 2
+        x: Math.cos(ang) * reach - width / 2
+        y: Math.sin(ang) * reach - height / 2
+        color: index % 3 === 0 ? "#ffffff" : Qt.lighter(Color.accent, 1.3)
+        opacity: 1 - switchRow.sparkT
+      }
+    }
   }
 }

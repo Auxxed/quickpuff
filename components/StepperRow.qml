@@ -44,15 +44,22 @@ Item {
       onActivated: stepper.lower()
     }
 
-    Text {
+    Item {
       anchors.verticalCenter: parent.verticalCenter
-      width: Style.space(52)
-      horizontalAlignment: Text.AlignHCenter
-      textFormat: Text.PlainText
-      text: stepper.valueText
-      color: panel.foreground
-      font.family: panel.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      width: Math.max(Style.space(52), stepValue.implicitWidth + Style.space(6))
+      height: stepValue.implicitHeight
+
+      RollingNumber {
+        id: stepValue
+        panel: stepper.panel
+        anchors.centerIn: parent
+        duration: 380
+        stagger: 30
+        text: stepper.valueText
+        color: panel.foreground
+        font.family: panel.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
     }
 
     TileButton {

@@ -46,11 +46,27 @@ Item {
     font.pixelSize: Style.font.bodySmall
   }
 
+  // A press pops it and sends a ring of light out from it.
+  property real popT: 1
+  NumberAnimation { id: popAnim; target: tap; property: "popT"; from: 0; to: 1; duration: 420; easing.type: Easing.OutCubic }
+  scale: tapMouse.pressed ? 0.85 : 1
+  Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutBack; easing.overshoot: 2.5 } }
+  Rectangle {
+    anchors.centerIn: parent
+    width: parent.width * (1 + 0.9 * tap.popT)
+    height: width
+    radius: width / 2
+    color: "transparent"
+    border.width: Math.max(1, Style.space(1.5))
+    border.color: Util.alpha(Color.accent, 0.7 * (1 - tap.popT))
+    visible: tap.popT < 1
+  }
+
   MouseArea {
     id: tapMouse
     anchors.fill: parent
     hoverEnabled: true
     cursorShape: tap.canTap ? Qt.PointingHandCursor : Qt.ArrowCursor
-    onClicked: if (tap.canTap) tap.activated()
+    onClicked: if (tap.canTap) { popAnim.restart(); tap.activated() }
   }
 }

@@ -233,6 +233,38 @@ Column {
             NumberAnimation { target: tile; property: "scale"; to: 1.0; duration: 260; easing.type: Easing.OutBack }
           }
           clip: true
+
+          // While this profile heats, energy circles its edge like the
+          // Heat button's.
+          property real orbit: 0
+          NumberAnimation on orbit {
+            running: tile.active && panel.heating && panel.opened
+            loops: Animation.Infinite
+            from: 0
+            to: 1
+            duration: 2600
+          }
+          function edgePoint(t) {
+            var w = width, h = height, d = (((t % 1) + 1) % 1) * 2 * (w + h)
+            if (d < w) return Qt.point(d, 0)
+            if (d < w + h) return Qt.point(w, d - w)
+            if (d < 2 * w + h) return Qt.point(w - (d - w - h), h)
+            return Qt.point(0, h - (d - 2 * w - h))
+          }
+          Repeater {
+            model: tile.active && panel.heating ? 8 : 0
+            Rectangle {
+              required property int index
+              readonly property point p: tile.edgePoint(tile.orbit - index * 0.01)
+              width: Style.space(7) * (1 - index * 0.09)
+              height: width
+              radius: width / 2
+              x: p.x - width / 2
+              y: p.y - height / 2
+              color: index === 0 ? Qt.tint(tile.tint, Util.alpha("#ffffff", 0.55)) : Util.alpha(Qt.lighter(tile.tint, 1.3), 0.4 * (1 - index / 8))
+            }
+          }
+
           Rectangle {
             id: sweepBand
             property real k: -1
