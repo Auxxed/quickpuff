@@ -93,6 +93,31 @@ Rectangle {
     }
   }
 
+  // Taking a charge, it crackles: sparks jump off the fill's leading edge.
+  Repeater {
+    model: meter.sheen && meter.clamped < 1 ? 6 : 0
+    Rectangle {
+      id: crackle
+      required property int index
+      property real k: 0
+      readonly property real side: index % 2 ? 1 : -1
+      width: Style.space(index % 3 ? 2.5 : 3.5)
+      height: width
+      radius: width / 2
+      x: bar.width - width / 2 + Style.space(6) * k * (0.5 + 0.5 * ((index * 37) % 10) / 10)
+      y: meter.height / 2 - height / 2 + side * Style.space(9) * k * (0.4 + 0.6 * ((index * 53) % 10) / 10)
+      color: index % 3 === 0 ? "#ffffff" : Qt.lighter(meter.fill, 1.4)
+      opacity: (1 - k) * 0.9
+      SequentialAnimation on k {
+        running: meter.sheen && meter.panel.opened
+        loops: Animation.Infinite
+        PauseAnimation { duration: (crackle.index * 230) % 900 }
+        NumberAnimation { from: 0; to: 1; duration: 420 + (crackle.index % 3) * 80; easing.type: Easing.OutQuad }
+        PauseAnimation { duration: 300 + (crackle.index * 170) % 500 }
+      }
+    }
+  }
+
   Rectangle {
     visible: meter.marker >= 0 && meter.marker <= 1
     x: Math.round(parent.width * meter.marker) - width / 2

@@ -108,7 +108,16 @@ Section {
             width: parent.width + Style.space(6)
             height: parent.height + Style.space(6)
             radius: height / 2
-            color: Util.alpha(parent.led, 0.3)
+            color: Util.alpha(parent.led, 0.32)
+          }
+          // A wider haze, so the strip glows like real LEDs behind glass.
+          Rectangle {
+            z: -2
+            anchors.centerIn: parent
+            width: parent.width + Style.space(14)
+            height: parent.height + Style.space(16)
+            radius: height / 2
+            color: Util.alpha(parent.led, 0.12)
           }
         }
       }

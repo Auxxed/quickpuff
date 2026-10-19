@@ -198,6 +198,23 @@ Column {
                     NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
                   }
                 }
+
+                // A bright cap on every day with dabs; today's glows.
+                Rectangle {
+                  visible: dayBar.parent.count > 0
+                  width: parent.width
+                  height: Math.max(2, Style.space(2))
+                  radius: height / 2
+                  color: Qt.lighter(dayBar.barTop, 1.35)
+                }
+              }
+              Glow {
+                visible: parent.isToday && parent.count > 0
+                hue: Util.alpha(panel.profileTint, 0.5)
+                x: dayBar.width / 2 - 50
+                y: dayBar.y - 50
+                scale: Math.max(dayBar.width * 3, Style.space(20)) / 100
+                z: -1
               }
 
               MouseArea {

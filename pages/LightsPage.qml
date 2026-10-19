@@ -29,6 +29,17 @@ Column {
       width: parent.width
       height: lanternArt.height + Style.space(10)
 
+      // The lantern's light blooming round the drawing, as bright as the
+      // brightness setting (and in the cycle's colour as it plays).
+      Glow {
+        hue: Util.alpha(lanternArt.shownTint, 0.4)
+        x: lanternArt.x + lanternArt.width * 0.45 - 50
+        y: lanternArt.y + lanternArt.height * 0.62 - 50
+        opacity: panel.lanternOn ? 0.25 + 0.75 * panel.brightnessLevel / 255 : 0
+        scale: lanternArt.width * 3.2 / 100
+        Behavior on opacity { NumberAnimation { duration: 400 } }
+      }
+
       PeakArt {
         id: lanternArt
         panel: lightsPage.panel
@@ -49,7 +60,10 @@ Column {
         anchors.verticalCenter: lanternArt.verticalCenter
         textFormat: Text.PlainText
         text: panel.lanternOn ? "LANTERN ON" : "LANTERN OFF"
-        color: panel.lanternOn ? panel.foreground : panel.dim
+        // Neon while it's on: the light's own colour, lit from behind.
+        color: panel.lanternOn ? Qt.tint(panel.foreground, Util.alpha(lanternArt.shownTint, 0.6)) : panel.dim
+        style: panel.lanternOn ? Text.Outline : Text.Normal
+        styleColor: Util.alpha(lanternArt.shownTint, 0.35)
         font.family: panel.displayFamily
         font.pixelSize: Math.round(Style.font.caption * panel.displayScale)
         font.weight: Font.DemiBold
