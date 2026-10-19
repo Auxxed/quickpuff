@@ -2380,6 +2380,7 @@ Panel {
                 label: String(modelData.name || "Peak Pro") + "  \u00b7  " + String(modelData.address || "")
                 glyph: "\uf293"
                 tint: Color.accent
+                leading: true
                 onActivated: root.connectDevice(modelData.address)
 
                 // Signal strength, four bars from the scan's RSSI, lighting

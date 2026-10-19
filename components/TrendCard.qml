@@ -65,6 +65,7 @@ StatCard {
           height: monthChart.height
 
           Rectangle {
+            id: monthBar
             width: parent.width
             // Bars start a third of the way up so a few percent of change
             // still reads, without pretending the low end is zero. They rise
@@ -80,10 +81,14 @@ StatCard {
               }
             }
             anchors.bottom: parent.bottom
-            radius: 1
-            color: parent.index === trendCard.months.length - 1
-              ? (trendCard.rising ? panel.urgent : trendCard.tint)
-              : Util.alpha(panel.foreground, 0.3)
+            radius: Math.min(width / 2, Style.space(3))
+            readonly property bool latest: index === trendCard.months.length - 1
+            readonly property color tone: trendCard.rising ? panel.urgent : trendCard.tint
+            // This month lit from the top down; earlier months quiet.
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: monthBar.latest ? monthBar.tone : Util.alpha(trendCard.panel.foreground, 0.32) }
+              GradientStop { position: 1.0; color: monthBar.latest ? Util.alpha(monthBar.tone, 0.45) : Util.alpha(trendCard.panel.foreground, 0.18) }
+            }
           }
         }
       }

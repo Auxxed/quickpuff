@@ -21,6 +21,8 @@ BorderSurface {
   property color tint: panel.foreground
   property bool emphasized: false
   property bool tall: false
+  // Glyph and label at the left instead of centred (rows in a list).
+  property bool leading: false
   property bool pulse: false
   property bool spinning: false
   // Filled with `tint`, shaded darker toward the foot, like the Puffco app's
@@ -178,7 +180,10 @@ BorderSurface {
 
   Grid {
     id: chipBody
-    anchors.centerIn: parent
+    anchors.centerIn: chip.leading ? undefined : parent
+    anchors.left: chip.leading ? parent.left : undefined
+    anchors.leftMargin: Style.space(12)
+    anchors.verticalCenter: chip.leading ? parent.verticalCenter : undefined
     columns: chip.tall ? 1 : 2
     spacing: chip.tall ? Style.space(3) : Style.spacing.md
     horizontalItemAlignment: Grid.AlignHCenter
