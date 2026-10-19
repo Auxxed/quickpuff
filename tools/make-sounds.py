@@ -799,6 +799,47 @@ def warp(rng):
     return reverb(soft(mix, -3), rng, seconds=2.8, wet=0.35, predelay=0.03)
 
 
+@cue(6.8, -21.0, fade=0.8)
+def night(rng):
+    """Fireflies: a summer night (two crickets trading chirps over a warm pad),
+    then a run of soft chimes rising as the swarm draws the Peak (2.6 s in)
+    and a glowing chord while it holds (3.8 s), out with the dark over the
+    last 0.8 s."""
+    t = clock(6.8)
+    n = len(t)
+    dark = smooth(np.minimum(1, np.minimum(t / 0.6, (6.8 - t) / 0.8)))
+    crickets = np.zeros((2, n))
+    for f0, period, start, side in ((4600, 0.62, 0.2, -0.6), (4150, 0.71, 0.45, 0.55)):
+        m = n_of(0.022)
+        x = np.arange(m) / SR
+        pulse = np.sin(TAU * f0 * x) * np.sin(np.pi * x / x[-1]) ** 2
+        when = start
+        while when < 6.4:
+            for k in range(3):
+                place(crickets, pan(pulse * rng.uniform(0.7, 1.0), side), when + k * 0.038)
+            when += period * rng.uniform(0.9, 1.1)
+    pad = np.zeros((2, n))
+    for name in ("D3", "A3", "F#4", "A4"):
+        for ch in range(2):
+            for cents in (-7, 0, 6):
+                pad[ch] += saw(hz(name) * 2 ** ((cents + rng.uniform(-2, 2)) / 1200), n, rng.uniform(), top=3000)
+    pad = filtered(pad / 12, lowpass(900, 2)) * smooth(np.clip((t - 0.3) / 1.5, 0, 1))
+    chimes = np.zeros((2, n))
+    m = n_of(1.8)
+    x = np.arange(m) / SR
+    for k, name in enumerate(("D6", "F#6", "A6", "C#7", "E7")):
+        f = hz(name)
+        bell = np.sin(TAU * f * x + 1.0 * np.exp(-x / 0.1) * np.sin(TAU * 2.0 * f * x)) * np.clip(x / 0.005, 0, 1) * np.exp(-x / 0.6)
+        place(chimes, pan(bell * (0.6 + 0.1 * k), -0.5 + 0.25 * k), 2.6 + k * 0.22)
+    hold = np.zeros((2, n))
+    for name in ("D5", "A5", "F#6"):
+        f = hz(name)
+        tone = np.sin(TAU * f * t) * hit(t, 3.8, 0.25, 1.4)
+        hold += stereo(tone)
+    mix = (scaled(crickets, -34) + scaled(pad, -30, 1.0, 5.5) + scaled(chimes, -26, 2.6, 4.2) + scaled(hold, -31, 3.8, 5.0)) * dark
+    return reverb(mix, rng, seconds=2.4, wet=0.35, predelay=0.025)
+
+
 # -------------------------------------------------------------------- output
 
 

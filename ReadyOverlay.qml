@@ -2219,7 +2219,7 @@ PanelWindow {
     }
 
     NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("shimmer")
+    Component.onCompleted: overlay.cue("night")
 
     Rectangle { anchors.fill: parent; color: "#02060a"; opacity: 0.7 * ff.dark }
 
