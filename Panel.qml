@@ -74,9 +74,15 @@ Panel {
   }
 
   // ---------------------------------------------------------------- motion
-  // Bumped on every open: the sections cascade in and the hero powers up.
+  // Bumped on an open that plays the intros: the sections cascade in, the
+  // hero powers up, meters regrow and counts roll in. That's the first open
+  // in a while (introGapMs); a glance in between opens straight onto the
+  // settled panel, so the 20th look of the day isn't a show.
   property int openSerial: 0
   property real openedAt: 0
+  readonly property int introGapMs: 10 * 60 * 1000
+  property real lastIntroAt: -introGapMs
+  property bool introNow: false
   // The last tab switch: which way it went (1 rightward, -1 leftward) and
   // when, so the page it brings in slides from that side.
   property int pageDir: 0
@@ -106,7 +112,11 @@ Panel {
     if (opened) {
       refresh()
       openedAt = Date.now()
-      openSerial++
+      introNow = openedAt - lastIntroAt >= introGapMs
+      if (introNow) {
+        lastIntroAt = openedAt
+        openSerial++
+      }
       hero.powerUp()
     } else {
       cancelEdit()
@@ -2006,7 +2016,7 @@ Panel {
             NumberAnimation { id: powerAnim; target: hero; property: "power"; from: 0; to: 1; duration: 900; easing.type: Easing.Linear }
             function powerUp() {
               breathe()
-              if (root.calm) { powerAnim.stop(); power = 1; return }
+              if (root.calm || !root.introNow) { powerAnim.stop(); power = 1; return }
               powerAnim.restart()
               heroTemp.intro()
             }
