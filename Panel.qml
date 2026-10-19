@@ -2371,6 +2371,7 @@ Panel {
               label: root.scanning ? "Searching\u2026" : "Find nearby Peaks"
               glyph: root.scanning ? "\uf110" : "\uf002"
               spinning: root.scanning
+              charging: root.scanning && !root.calm
               onActivated: root.findPeaks()
             }
 
@@ -2389,6 +2390,39 @@ Panel {
                 glyph: "\uf293"
                 tint: Color.accent
                 onActivated: root.connectDevice(modelData.address)
+
+                // Signal strength, four bars from the scan's RSSI, lighting
+                // up one by one as the row arrives.
+                readonly property real rssi: Number(modelData.rssi)
+                readonly property int bars: modelData.rssi === "" || !isFinite(rssi) ? 0
+                  : rssi > -60 ? 4 : rssi > -70 ? 3 : rssi > -80 ? 2 : 1
+                property real barsShown: Date.now() - root.peaksFoundAt < 1500 && !root.calm ? 0 : bars
+                Component.onCompleted: if (barsShown < bars) barsAnim.start()
+                SequentialAnimation {
+                  id: barsAnim
+                  PauseAnimation { duration: 260 + peakRow.index * 90 }
+                  NumberAnimation { target: peakRow; property: "barsShown"; to: peakRow.bars; duration: 120 * peakRow.bars }
+                }
+                Row {
+                  visible: peakRow.bars > 0
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+                  Repeater {
+                    model: 4
+                    Rectangle {
+                      required property int index
+                      readonly property bool on: index < Math.round(peakRow.barsShown)
+                      anchors.bottom: parent.bottom
+                      width: Style.space(3)
+                      height: Style.space(4 + index * 3)
+                      radius: width / 2
+                      color: on ? Color.accent : Util.alpha(root.foreground, 0.18)
+                      Behavior on color { ColorAnimation { duration: 160 } }
+                    }
+                  }
+                }
               }
             }
 
