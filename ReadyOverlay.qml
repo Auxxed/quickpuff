@@ -67,7 +67,7 @@ PanelWindow {
   // fire-and-forget, stopped after ten seconds at most. Nothing when sounds
   // are off.
   // How many versions each cue has in sounds/: firework, firework-2, ...
-  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2, "thunder": 2 })
+  readonly property var cueVersions: ({ "firework": 3, "pop": 2, "smoke": 2, "liftoff": 2 })
 
   function cue(name) {
     if (!overlay.soundsOn || !/^[a-z]+$/.test(name)) return
@@ -1856,7 +1856,6 @@ PanelWindow {
     property bool shot: false
 
     NumberAnimation on t { from: 0; to: 1; duration: 6600; running: true; onFinished: overlay.finished() }
-    Component.onCompleted: overlay.cue("shimmer")
     onRingKChanged: if (ringK > 0 && !shot) { shot = true; overlay.cue("shimmer"); ringSparks.fire() }
 
     // Night.
@@ -3013,7 +3012,9 @@ PanelWindow {
         made.push({ "at": sp.at, "x": sp.x, "big": sp.big === true, "main": main, "forks": forksFor(main, sp.big === true) })
         bolts = made
         fired++
-        overlay.cue("thunder")
+        // The big one cracks overhead; the others roll in from further off.
+        if (sp.big === true) overlay.cue("thunder")
+        else overlay.cue("rumble")
       }
     }
 
@@ -3060,7 +3061,7 @@ PanelWindow {
       }
       return out
     }
-    // Light from the latest strike: a flicker, a second flash, then fading.
+    // A bolt itself: a flicker, a second flash, then fading.
     function flashOf(age) {
       if (age < 0) return 0
       if (age < 0.06) return 1
@@ -3068,8 +3069,15 @@ PanelWindow {
       if (age < 0.2) return 0.85
       return Math.max(0, 1 - (age - 0.2) / 0.5)
     }
+    // The light it throws on the sky and the screen: one soft flash per
+    // strike (a quick rise, a slow fade), never a strobe.
+    function glowOf(age) {
+      if (age < 0) return 0
+      if (age < 0.04) return age / 0.04
+      return Math.max(0, 1 - (age - 0.04) / 0.45)
+    }
     readonly property real lastAge: fired > 0 ? now - strikes[fired - 1].at : -1
-    readonly property real flash: flashOf(lastAge)
+    readonly property real flash: glowOf(lastAge)
 
     // The sky darkening.
     Rectangle {
@@ -3116,7 +3124,7 @@ PanelWindow {
     Rectangle {
       anchors.fill: parent
       color: Qt.tint("#dfe8ff", Util.alpha(overlay.tint, 0.2))
-      opacity: 0.14 * storm.flash * storm.dark
+      opacity: 0.08 * storm.flash * storm.dark
     }
 
     // The bolts, drawn through a bloom.
@@ -3169,7 +3177,7 @@ PanelWindow {
         readonly property real e: Math.max(0, Math.min(1, (storm.now - storm.readyAt) / 0.3))
         anchors.horizontalCenter: parent.horizontalCenter
         y: storm.height * 0.52
-        opacity: storm.now > storm.readyAt ? e * (0.85 + 0.15 * Math.sin(storm.now * 30)) : 0
+        opacity: storm.now > storm.readyAt ? e : 0
         textFormat: Text.PlainText
         text: "READY"
         color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.35))
@@ -3197,7 +3205,7 @@ PanelWindow {
     // Little arcs jumping between READY's letters while it crackles.
     property var wordArcs: []
     Timer {
-      interval: 110
+      interval: 300
       repeat: true
       running: storm.now > storm.readyAt + 0.2 && storm.now < storm.dur - 1.0
       onTriggered: {

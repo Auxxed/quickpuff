@@ -618,8 +618,8 @@ def neon(rng):
 
 
 @cue(4.0, -18.0, fade=0.8)
-def thunder(rng, crack_db=-3, roll_db=-16):
-    """Lightning (Storm, one per strike): the bolt's tearing crack on the beat,
+def thunder(rng, crack_db=-9, roll_db=-16, far=None):
+    """Lightning (Storm's last strike, the big one): the bolt's tearing crack on the beat,
     a falling sub boom under it, then thunder rolling away: brown noise
     swelling in a few waves, darker the further it travels."""
     t = clock(4.0)
@@ -644,14 +644,18 @@ def thunder(rng, crack_db=-3, roll_db=-16):
     rumble = np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)])
     rumble = swept(rumble, lambda f, tt: lp_gain(f, np.interp(tt, [0, 0.3, 4.0], [1500, 520, 150]), 2))
     rumble = rumble * swell * flutter
-    mix = soft(crack, -3) + stereo(peaked(boom, -5)) + scaled(rumble, roll_db, 0.1, 2.0)
-    return reverb(soft(mix, -2), rng, seconds=2.6, wet=0.22, predelay=0.03, bright=4500.0, dark=600.0)
+    mix = soft(crack, -9) + stereo(peaked(boom, -5)) + scaled(rumble, roll_db, 0.1, 2.0)
+    if far:
+        mix = filtered(mix, lowpass(far, 2))
+    return reverb(soft(mix, -6), rng, seconds=2.6, wet=0.22, predelay=0.03, bright=4500.0, dark=600.0)
 
 
-@cue(4.0, -18.0, fade=0.8, name="thunder-2")
-def thunder_2(rng):
-    """A strike further off: less crack, more roll."""
-    return thunder(rng, crack_db=-9, roll_db=-14)
+@cue(4.0, -25.0, fade=0.8)
+def rumble(rng):
+    """Storm's other strikes, further off: the same thunder heard through
+    distance, its crack dulled and the whole of it darker and quieter, so
+    four strikes in three seconds don't pile up."""
+    return thunder(rng, crack_db=-16, roll_db=-13, far=900)
 
 
 @cue(6.6, -22.0, fade=1.0)
@@ -663,14 +667,16 @@ def rain(rng):
     sky = smooth(np.minimum(1, np.minimum(t / 0.8, (6.6 - t) / 1.0)))
     drops = np.zeros((2, n))
     for when in events(rng, 6.6, lambda x: 480, 480):
-        g = grain(rng, rng.uniform(0.002, 0.008), rng.uniform(2200, 9500), rng.uniform(1.5, 5.0))
+        g = grain(rng, rng.uniform(0.002, 0.008), rng.uniform(1500, 6500), rng.uniform(1.5, 5.0))
         place(drops, pan(g * rng.lognormal(0, 0.35), rng.uniform(-0.9, 0.9)), when)
     drops = soft(scaled(drops, -26), -19)
-    hiss = filtered(np.vstack([tilted(rng, n, -3), tilted(rng, n, -3)]), bandpass(5200, 0.6))
+    hiss = filtered(np.vstack([tilted(rng, n, -3), tilted(rng, n, -3)]), bandpass(3500, 0.6))
     wind = np.vstack([tilted(rng, n, -6), tilted(rng, n, -6)])
     wind = swept(wind, lambda f, tt: bp_gain(f, 420 + 240 * np.sin(TAU * tt / 4.4), 1.4))
     gust = 0.6 + 0.4 * np.sin(TAU * t / 5.5 + 1.0)
     mix = (drops + scaled(hiss, -33) + scaled(wind * gust, -28)) * sky
+    # Down 9 dB above 7 kHz, so it's rain on a roof and not static.
+    mix = filtered(mix, lambda f: 1 - (1 - db(-9)) * hp_gain(f, 7000, 2))
     return reverb(mix, rng, seconds=1.2, wet=0.18, predelay=0.012)
 
 
@@ -740,7 +746,16 @@ def deep(rng):
         voice = filtered(voice, bandpass(620, 0.7)) * smooth(np.minimum(1, np.minimum(x / 0.35, (1.9 - x) / 0.6)))
         place(calls, pan(voice, side), at)
     calls = filtered(calls, lowpass(1600, 2))
-    mix = (scaled(hush, -27) + scaled(pops, -30, 0.5, 6.0) + scaled(calls, -26, 1.3, 5.8)) * water
+    # Glints of light from the jellyfish: soft high bells, so the deep is
+    # still there on small speakers.
+    glints = np.zeros((2, n))
+    m = n_of(1.6)
+    x = np.arange(m) / SR
+    for when, name, side in ((1.0, "E6", 0.5), (2.6, "B6", -0.6), (4.3, "G#6", 0.3)):
+        bell = np.sin(TAU * hz(name) * x + 0.8 * np.exp(-x / 0.08) * np.sin(TAU * 2.0 * hz(name) * x))
+        bell *= np.clip(x / 0.006, 0, 1) * np.exp(-x / 0.55)
+        place(glints, pan(bell, side), when)
+    mix = (scaled(hush, -27) + scaled(pops, -30, 0.5, 6.0) + scaled(calls, -26, 1.3, 5.8) + scaled(glints, -33, 1.0, 5.5)) * water
     return reverb(mix, rng, seconds=3.6, wet=0.45, predelay=0.04, bright=3000.0, dark=700.0)
 
 
@@ -777,7 +792,7 @@ def warp(rng):
     x = np.arange(m) / SR
     for when in np.sort(rng.uniform(drop + 0.3, 5.4, 11)):
         f = scale[rng.integers(len(scale))]
-        bell = np.sin(TAU * f * x + 1.4 * np.exp(-x / 0.1) * np.sin(TAU * 3.5 * f * x)) * np.exp(-x / 0.4)
+        bell = np.sin(TAU * f * x + 1.4 * np.exp(-x / 0.1) * np.sin(TAU * 3.5 * f * x)) * np.clip(x / 0.004, 0, 1) * np.exp(-x / 0.4)
         place(stars, pan(bell * rng.uniform(0.08, 0.16) * np.interp(when, t, galaxy), rng.uniform(-0.85, 0.85)), when)
     mix = (scaled(rush, -20, 0.8, drop) + scaled(whine, -27, 1.0, drop) + stereo(peaked(boom, -6))
            + stereo(peaked(crack, -14)) + scaled(pad, -25, 3.0, 5.0) + stars)
