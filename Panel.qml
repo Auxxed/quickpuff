@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -2061,17 +2062,6 @@ Panel {
               }
             }
 
-            // Neon on the numbers: a glow behind them in the heat's colour,
-            // stronger the hotter the chamber (and flaring white at Ready).
-            Glow {
-              readonly property real hot: root.connected ? Math.max(0, Math.min(1, (heroTempRow.shownF - 140) / 380)) : 0
-              hue: Util.alpha(Qt.tint(heroTempRow.baseTone, Util.alpha("#ffffff", 0.5 * hero.flare)), 0.42)
-              x: heroLabels.x + heroTempRow.x + heroTemp.width * 0.5 - 50
-              y: heroLabels.y + heroTempRow.y + heroTemp.height * 0.56 - 50
-              opacity: Math.min(1, (0.12 + 0.88 * hot) * hero.stage(2) + 0.8 * hero.flare)
-              transform: Scale { origin.x: 50; origin.y: 50; xScale: heroTemp.width * 1.8 / 100; yScale: heroTemp.height * 1.25 / 100 }
-            }
-
             PeakArt {
               id: heroArt
               panel: root
@@ -2235,6 +2225,19 @@ Panel {
                   : root.heating ? Qt.lighter(root.urgent, 1.15)
                   : root.foreground
                 readonly property color tone: Qt.tint(baseTone, Util.alpha("#ffffff", 0.7 * hero.flare))
+
+                // Neon on the numbers once the chamber is properly hot (from
+                // 400°F), glowing in the heat's own colour and flaring at Ready.
+                readonly property real neon: root.connected ? Math.max(0, Math.min(1, (shownF - 400) / 120)) : 0
+                layer.enabled: neon > 0.01 || hero.flare > 0.01
+                layer.effect: MultiEffect {
+                  shadowEnabled: true
+                  shadowHorizontalOffset: 0
+                  shadowVerticalOffset: 0
+                  blurMax: 24
+                  shadowBlur: 0.55
+                  shadowColor: Util.alpha(heroTempRow.baseTone, Math.min(0.9, 0.55 * heroTempRow.neon + 0.5 * hero.flare))
+                }
 
                 RollingNumber {
                   id: heroTemp

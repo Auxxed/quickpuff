@@ -435,9 +435,11 @@ Item {
         height: 160
         opacity: art.arcFlash
         preferredRendererType: Shape.CurveRenderer
+        // Sized on screen, not in the drawing's units, so an arc reads as a
+        // line of light at any size (about 1.6 px with a 4.5 px glow).
         ShapePath {
           strokeColor: Util.alpha(Qt.lighter(art.ringColor, 1.4), 0.35)
-          strokeWidth: 3.2
+          strokeWidth: Math.max(3.2, 4.5 / art.u)
           fillColor: "transparent"
           joinStyle: ShapePath.RoundJoin
           capStyle: ShapePath.RoundCap
@@ -445,7 +447,7 @@ Item {
         }
         ShapePath {
           strokeColor: Qt.tint(art.ringColor, Util.alpha("#ffffff", 0.85))
-          strokeWidth: 0.9
+          strokeWidth: Math.max(0.9, 1.6 / art.u)
           fillColor: "transparent"
           joinStyle: ShapePath.MiterJoin
           capStyle: ShapePath.RoundCap

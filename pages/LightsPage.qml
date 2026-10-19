@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -60,10 +61,17 @@ Column {
         anchors.verticalCenter: lanternArt.verticalCenter
         textFormat: Text.PlainText
         text: panel.lanternOn ? "LANTERN ON" : "LANTERN OFF"
-        // Neon while it's on: the light's own colour, lit from behind.
+        // Neon while it's on: the light's own colour, glowing.
         color: panel.lanternOn ? Qt.tint(panel.foreground, Util.alpha(lanternArt.shownTint, 0.6)) : panel.dim
-        style: panel.lanternOn ? Text.Outline : Text.Normal
-        styleColor: Util.alpha(lanternArt.shownTint, 0.35)
+        layer.enabled: panel.lanternOn
+        layer.effect: MultiEffect {
+          shadowEnabled: true
+          shadowHorizontalOffset: 0
+          shadowVerticalOffset: 0
+          blurMax: 20
+          shadowBlur: 0.5
+          shadowColor: Util.alpha(lanternArt.shownTint, 0.6)
+        }
         font.family: panel.displayFamily
         font.pixelSize: Math.round(Style.font.caption * panel.displayScale)
         font.weight: Font.DemiBold
