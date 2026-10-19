@@ -259,12 +259,41 @@ PanelWindow {
           height: 4 * wrap.u
           radius: height / 2
           color: Util.alpha("#ffffff", 0.18)
+          readonly property real fill: index < wrap.slide ? 1 : index > wrap.slide ? 0 : wrap.slideT
+          // A tinted glow under the filled part, so the bars read as lit.
+          Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width * parent.fill + height / 2
+            x: -height / 4
+            height: parent.height * 3.5
+            radius: height / 2
+            color: Util.alpha(wrap.tint, 0.28)
+            visible: parent.fill > 0
+          }
           Rectangle {
             height: parent.height
             radius: parent.radius
+            color: Qt.tint("#ffffff", Util.alpha(wrap.tint, 0.18))
+            opacity: 0.9
+            width: parent.width * parent.fill
+          }
+          // The playing bar's head: a spark riding the edge of the fill.
+          Glow {
+            visible: index === wrap.slide && !wrap.onCard
+            hue: Util.alpha(Qt.lighter(wrap.tint, 1.4), 0.9)
+            width: parent.height * 6
+            height: width
+            x: parent.width * parent.fill - width / 2
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Rectangle {
+            visible: index === wrap.slide && !wrap.onCard
+            width: parent.height * 1.6
+            height: width
+            radius: width / 2
+            x: parent.width * parent.fill - width / 2
+            anchors.verticalCenter: parent.verticalCenter
             color: "#ffffff"
-            opacity: 0.85
-            width: parent.width * (index < wrap.slide ? 1 : index > wrap.slide ? 0 : wrap.slideT)
           }
         }
       }
@@ -321,8 +350,11 @@ PanelWindow {
           onTriggered: {
             if (page.spec.count !== undefined) countUp.restart()
             arriveAnim.restart()
+            strikeSoon.restart()
           }
         }
+        // As the big line lands: a word as it settles, a count as it arrives.
+        Timer { id: strikeSoon; interval: page.spec.count !== undefined ? 1250 : 640; onTriggered: bigLine.strike() }
         NumberAnimation { id: countUp; target: page; property: "shown"; to: page.spec.count || 0; duration: 1500; easing.type: Easing.OutCubic }
         NumberAnimation { id: arriveAnim; target: page; property: "arrive"; from: 0; to: 1; duration: 1100; easing.type: Easing.Linear }
         NumberAnimation { id: pushAnim; target: page; property: "push"; from: 0; to: 1; duration: 3600; easing.type: Easing.OutSine }
@@ -350,13 +382,91 @@ PanelWindow {
             font.letterSpacing: (10 + 22 * (1 - page.beat(0))) * wrap.u
           }
           Text {
+            id: bigLine
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.PlainText
             wrapMode: Text.WordWrap
             text: page.spec.count !== undefined ? Math.round(page.shown) + (page.spec.unit || "") : (page.spec.big || "")
-            color: "white"
+            color: Qt.tint("white", Util.alpha(Qt.lighter(wrap.tint, 1.5), 0.6 * bigLine.zap))
             opacity: page.beat(1)
+
+            // 1 → 0 through a strike, flickering on the way out.
+            property real zap: 0
+            property var forks: []
+            function bolt(x0, y0, dir, len, segs, jag) {
+              var pts = [Qt.point(x0, y0)]
+              for (var i = 1; i <= segs; i++) {
+                var f = i / segs
+                pts.push(Qt.point(x0 + dir * len * f, y0 + (i === segs ? 0.4 : 1) * (Math.random() - 0.5) * 2 * jag * (0.4 + f)))
+              }
+              return pts
+            }
+            function strike() {
+              var u = wrap.u
+              var cx = width / 2, cy = height / 2
+              var half = Math.min(width / 2, contentWidth / 2) + 26 * u
+              var f = []
+              for (var side = -1; side <= 1; side += 2) {
+                var main = bolt(cx + side * half, cy + (Math.random() - 0.5) * contentHeight * 0.3, side, (200 + Math.random() * 120) * u, 9, 22 * u)
+                f.push(main)
+                // A branch off the main bolt's middle, angling away.
+                var at = main[3 + Math.floor(Math.random() * 3)]
+                var b = bolt(at.x, at.y, side, (70 + Math.random() * 60) * u, 4, 16 * u)
+                var tilt = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 40) * u
+                for (var k = 1; k < b.length; k++) b[k] = Qt.point(b[k].x, b[k].y + tilt * k / (b.length - 1))
+                f.push(b)
+              }
+              forks = f
+              zapAnim.restart()
+              shockAnim.restart()
+            }
+            SequentialAnimation {
+              id: zapAnim
+              NumberAnimation { target: bigLine; property: "zap"; from: 0; to: 1; duration: 50 }
+              NumberAnimation { target: bigLine; property: "zap"; to: 0.25; duration: 70 }
+              NumberAnimation { target: bigLine; property: "zap"; to: 0.9; duration: 50 }
+              NumberAnimation { target: bigLine; property: "zap"; to: 0; duration: 520; easing.type: Easing.OutCubic }
+            }
+
+            // The shockwave: a ring the shape of the line, spreading out.
+            Rectangle {
+              id: shock
+              z: -1
+              property real k: 1
+              anchors.centerIn: parent
+              width: Math.min(bigLine.width, bigLine.contentWidth) + (24 + 220 * k) * wrap.u
+              height: bigLine.contentHeight * 0.8 + (12 + 140 * k) * wrap.u
+              radius: height / 2
+              color: "transparent"
+              border.width: Math.max(1, (5 - 4 * k) * wrap.u)
+              border.color: Qt.lighter(wrap.tint, 1.4)
+              opacity: (1 - k) * 0.8
+              visible: k < 1
+              NumberAnimation { id: shockAnim; target: shock; property: "k"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
+            }
+            Shape {
+              anchors.fill: parent
+              visible: bigLine.zap > 0.01
+              opacity: bigLine.zap
+              preferredRendererType: Shape.CurveRenderer
+              ShapePath {
+                strokeColor: Util.alpha(wrap.tint, 0.35)
+                strokeWidth: 12 * wrap.u
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathMultiline { paths: bigLine.forks }
+              }
+              ShapePath {
+                strokeColor: Qt.tint(wrap.tint, Util.alpha("#ffffff", 0.7))
+                strokeWidth: 3 * wrap.u
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathMultiline { paths: bigLine.forks }
+              }
+            }
             scale: 0.86 + 0.14 * page.beat(1) + 0.04 * Math.sin(Math.PI * page.beat(1))
             font.family: wrap.display
             font.pixelSize: (page.spec.count !== undefined ? 220 : 120) * wrap.u
@@ -415,6 +525,27 @@ PanelWindow {
       }
 
       Glow { hue: Util.alpha(wrap.tint, 0.35); width: card.width * 0.6; height: width; x: card.width * 0.55; y: -height * 0.35 }
+
+      Item {
+        anchors.fill: parent
+        anchors.margins: card.radius * 0.3
+        clip: true
+        visible: card.build > 0.05 && card.build < 0.9
+        Rectangle {
+          readonly property real k: Math.max(0, Math.min(1, (card.build - 0.05) / 0.8))
+          width: card.width * 0.22
+          height: card.height * 2
+          x: -width + (card.width + 2 * width) * k - width / 2
+          y: -card.height * 0.5
+          rotation: 18
+          gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+            GradientStop { position: 0.5; color: Util.alpha(Qt.lighter(wrap.tint, 1.6), 0.16) }
+            GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+          }
+        }
+      }
 
       Column {
         x: 70 * card.k
@@ -502,6 +633,96 @@ PanelWindow {
         color: Util.alpha("#e8d8e4", 0.6)
         font.family: wrap.body
         font.pixelSize: 22 * card.k
+      }
+    }
+
+    Item {
+      id: cardEdge
+      anchors.centerIn: card
+      width: card.width
+      height: card.height
+      scale: card.scale
+      opacity: card.opacity
+      visible: card.visible
+
+      property real orbit: 0
+      property real flash: 0
+      NumberAnimation on orbit {
+        running: wrap.onCard && !wrap.closing
+        loops: Animation.Infinite
+        from: 0
+        to: 1
+        duration: 5200
+      }
+      Connections {
+        target: wrap
+        function onOnCardChanged() { if (wrap.onCard) edgeFlash.restart() }
+      }
+      SequentialAnimation {
+        id: edgeFlash
+        PauseAnimation { duration: 180 }
+        NumberAnimation { target: cardEdge; property: "flash"; from: 0; to: 1; duration: 90 }
+        NumberAnimation { target: cardEdge; property: "flash"; to: 0; duration: 900; easing.type: Easing.OutCubic }
+      }
+
+      // The card's rounded outline, walked by t (0 → 1, clockwise from the top left).
+      function edgePoint(t) {
+        var w = width, h = height, r = Math.min(card.radius, w / 2, h / 2)
+        var sw = w - 2 * r, sh = h - 2 * r, arc = Math.PI * r / 2
+        var d = (((t % 1) + 1) % 1) * (2 * sw + 2 * sh + 4 * arc)
+        function corner(cx, cy, a0, f) { var a = a0 + f * Math.PI / 2; return Qt.point(cx + Math.cos(a) * r, cy + Math.sin(a) * r) }
+        if (d < sw) return Qt.point(r + d, 0)
+        d -= sw
+        if (d < arc) return corner(w - r, r, -Math.PI / 2, d / arc)
+        d -= arc
+        if (d < sh) return Qt.point(w, r + d)
+        d -= sh
+        if (d < arc) return corner(w - r, h - r, 0, d / arc)
+        d -= arc
+        if (d < sw) return Qt.point(w - r - d, h)
+        d -= sw
+        if (d < arc) return corner(r, h - r, Math.PI / 2, d / arc)
+        d -= arc
+        if (d < sh) return Qt.point(0, h - r - d)
+        d -= sh
+        return corner(r, r, Math.PI, d / arc)
+      }
+
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: -6 * wrap.u * (1 - cardEdge.flash)
+        radius: card.radius + 6 * wrap.u * (1 - cardEdge.flash)
+        color: "transparent"
+        border.width: 3 * wrap.u
+        border.color: Qt.tint(wrap.tint, Util.alpha("#ffffff", 0.6))
+        opacity: cardEdge.flash
+        visible: cardEdge.flash > 0.01
+      }
+      Repeater {
+        model: wrap.onCard ? 28 : 0
+        Rectangle {
+          required property int index
+          readonly property int tailStep: index % 14
+          readonly property point p: cardEdge.edgePoint(cardEdge.orbit + (index >= 14 ? 0.5 : 0) - tailStep * 0.004)
+          width: 10 * wrap.u * (1 - tailStep * 0.055)
+          height: width
+          radius: width / 2
+          x: p.x - width / 2
+          y: p.y - height / 2
+          color: tailStep === 0 ? Qt.tint(wrap.tint, Util.alpha("#ffffff", 0.65)) : Util.alpha(Qt.lighter(wrap.tint, 1.3), 0.5 * (1 - tailStep / 14))
+        }
+      }
+      Repeater {
+        model: wrap.onCard ? 2 : 0
+        Glow {
+          required property int index
+          readonly property point p: cardEdge.edgePoint(cardEdge.orbit + index * 0.5)
+          hue: Util.alpha(Qt.lighter(wrap.tint, 1.3), 0.55)
+          width: 60 * wrap.u
+          height: width
+          x: p.x - width / 2
+          y: p.y - height / 2
+        }
       }
     }
 
