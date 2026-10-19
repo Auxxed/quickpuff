@@ -268,16 +268,14 @@ PanelWindow {
   }
 
   property real summaryDur: 0
-  property real summaryHeatup: NaN
   property real summaryBattery: NaN
   function complete() {
     if (phase === "done" || phase === "summary") return
     var wasStage = stageT > 0.01
     phase = "summary"
-    // The session is the time at temperature; the climb before it is heat-up.
+    // The session is the time at temperature.
     var end = sessionEnded > 0 ? sessionEnded : Date.now()
     summaryDur = readyAt > 0 ? Math.max(0, Math.round((end - readyAt) / 1000)) : 0
-    summaryHeatup = readyAt > 0 ? Math.round((readyAt - sessionStarted) / 1000) : NaN
     summaryBattery = isFinite(batteryStart) && isFinite(Number(st.battery)) ? batteryStart - Number(st.battery) : NaN
     if (wasStage) { stageHold.stop(); stageOut.start() }
     if (cardT < 0.99) cardIn.start()
@@ -1117,9 +1115,10 @@ PanelWindow {
           if (p === "cooling") return "cooling  ·  from " + Math.round(show.peakF) + "°F"
           // The big number here is the time spent at temperature.
           var bits = ["at temp"]
-          if (isFinite(show.summaryHeatup)) bits.push("Heat-up " + show.fmtTime(show.summaryHeatup))
-          bits.push("Peak " + Math.round(show.peakF) + "°F")
-          if (isFinite(show.summaryBattery) && show.summaryBattery > 0) bits.push("−" + Math.round(show.summaryBattery) + "% battery")
+          // Heat-up is on the panel's Last session card; the line keeps to
+          // what fits beside the time.
+          bits.push("peak " + Math.round(show.peakF) + "°F")
+          if (isFinite(show.summaryBattery) && show.summaryBattery > 0) bits.push("\uf241 −" + Math.round(show.summaryBattery) + "%")
           return bits.join(" · ")
         }
         color: Util.alpha("#f4eef6", 0.6)
