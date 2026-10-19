@@ -196,11 +196,12 @@ BarWidget {
   // temperature holds like the panel's (until it moves 3°F at temperature)
   // and the seconds keep a fixed width so the bar doesn't shuffle.
   property string units: "F"
+  property string lastPower: ""
   property real liveHeldF: NaN
   property real liveEndsAt: NaN
   property real nowMs: Date.now()
   Timer {
-    interval: 1000
+    interval: 250
     repeat: true
     running: root.liveState === 7 || root.liveState === 8
     onTriggered: root.nowMs = Date.now()
@@ -210,7 +211,7 @@ BarWidget {
     var t = units === "C" ? Math.round((liveHeldF - 32) * 5 / 9) + "°C" : Math.round(liveHeldF) + "°F"
     var s = t + (liveState === 7 ? " ↑" : " ●")
     if (isFinite(liveEndsAt)) {
-      var left = Math.max(0, Math.round((liveEndsAt - nowMs) / 1000))
+      var left = Math.max(0, Math.ceil((liveEndsAt - nowMs) / 1000))
       s += " " + (left < 10 ? "\u2007" : "") + left + "s"
     }
     return s
@@ -235,6 +236,14 @@ BarWidget {
       var s = d.connected === false ? -1 : Number(d.operating_state_id)
       root.takeHeat(d)
       root.takeLabel(d, s)
+      // At rest the poll is slow; a plug-in or a battery step refreshes the
+      // label straight away.
+      var power = String(d.battery) + "|" + String(d.charge_source)
+      if (power !== root.lastPower) {
+        var first = root.lastPower === ""
+        root.lastPower = power
+        if (!first) root.refresh()
+      }
       if (!isFinite(s) || s === root.liveState) return
       var was = root.liveState
       root.liveState = s

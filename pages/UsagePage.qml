@@ -130,7 +130,7 @@ Column {
       spacing: Style.spacing.controlGap
       readonly property real cellWidth: (width - spacing * 3) / 4
 
-      SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Today"; glyph: "\uf185"; highlight: panel.dailyLimit > 0 && (Number(panel.telemetry.today) || 0) >= panel.dailyLimit; value: panel.countLabel(panel.telemetry.today) }
+      SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Today"; glyph: "\uf185"; tint: panel.urgent; highlight: panel.dailyLimit > 0 && (Number(panel.telemetry.today) || 0) >= panel.dailyLimit; value: panel.countLabel(panel.telemetry.today) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Week"; glyph: "\uf073"; value: panel.countLabel(panel.telemetry.this_week) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Month"; glyph: "\uf274"; value: panel.countLabel(panel.telemetry.this_month) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Lifetime"; glyph: "\uf091"; value: panel.countLabel(panel.statusData.total_dabs) }
@@ -185,8 +185,10 @@ Column {
                 // Today in the profile's colour; earlier days quiet, unless
                 // they went over your daily limit.
                 readonly property bool over: panel.dailyLimit > 0 && parent.count > panel.dailyLimit
-                readonly property color barTop: parent.hovered ? Qt.lighter(panel.profileTint, 1.35)
-                  : parent.isToday ? panel.profileTint
+                readonly property color todayTone: over ? panel.urgent : Color.accent
+                readonly property color barTop: parent.hovered
+                    ? (parent.isToday ? Qt.lighter(todayTone, 1.2) : over ? Util.alpha(panel.urgent, 0.8) : Util.alpha(panel.foreground, 0.5))
+                  : parent.isToday ? todayTone
                   : over ? Util.alpha(panel.urgent, 0.55)
                   : parent.count > 0 ? Util.alpha(panel.foreground, 0.28)
                   : Util.alpha(panel.foreground, 0.1)
@@ -215,7 +217,7 @@ Column {
               }
               Glow {
                 visible: parent.isToday && parent.count > 0
-                hue: Util.alpha(panel.profileTint, 0.5)
+                hue: Util.alpha(dayBar.over ? panel.urgent : Color.accent, 0.5)
                 x: dayBar.width / 2 - 50
                 y: dayBar.y - 50
                 scale: Math.max(dayBar.width * 3, Style.space(20)) / 100

@@ -144,21 +144,25 @@ PanelWindow {
 
   // 0 → 1 through the slide on screen, for its story bar; full on the card.
   property real slideT: 0
-  // How long the slide on screen holds (the payoff slide longer).
-  readonly property int holdMs: slide >= 0 && slide < slides.length && slides[slide].hold ? slides[slide].hold : 3300
+  // Each slide's hold (the payoff slide longer), worked out here from
+  // `slide`: bindings on it haven't updated yet inside this handler.
   onSlideChanged: {
     slideTAnim.stop()
     slideT = 0
     var spec = slide >= 0 && slide < slides.length ? slides[slide] : null
+    var card = slide >= 0 && slide === slides.length - 1
+    var hold = spec && spec.hold ? spec.hold : 3300
     mood = spec && spec.tint ? spec.tint : tint
-    if (onCard) slideT = 1
-    else {
-      advance.interval = holdMs
+    if (card) {
+      slideT = 1
+    } else {
+      advance.interval = hold
       advance.restart()
+      slideTAnim.duration = hold
       slideTAnim.start()
     }
   }
-  NumberAnimation { id: slideTAnim; target: wrap; property: "slideT"; from: 0; to: 1; duration: wrap.holdMs }
+  NumberAnimation { id: slideTAnim; target: wrap; property: "slideT"; from: 0; to: 1; duration: 3300 }
 
   function next() {
     if (slide < slides.length - 1) {
@@ -418,14 +422,20 @@ PanelWindow {
             textFormat: Text.PlainText
             wrapMode: Text.WordWrap
             text: page.spec.count !== undefined ? String(Math.round(page.shown)) : (page.spec.big || "")
+            // Room for the unit, so number and unit centre as one.
+            rightPadding: unitText.visible ? unitText.implicitWidth + 14 * wrap.u : 0
             color: Qt.tint("white", Util.alpha(Qt.lighter(wrap.mood, 1.5), 0.6 * bigLine.zap))
             opacity: page.beat(1)
 
             // The unit (DAYS, °F) beside the number, smaller, on its baseline.
             Text {
+              id: unitText
+              readonly property bool degrees: (page.spec.unit || "").charAt(0) === "°"
               visible: page.spec.count !== undefined && (page.spec.unit || "") !== ""
-              x: (bigLine.width + Math.min(bigLine.width, bigLine.contentWidth)) / 2 + 14 * wrap.u
-              y: bigLine.baselineOffset - baselineOffset
+              x: (bigLine.width - bigLine.rightPadding + Math.min(bigLine.width, bigLine.contentWidth)) / 2 + 14 * wrap.u
+              // °F rides high beside the digits, as on the panel and stage;
+              // DAYS sits on the baseline.
+              y: degrees ? bigLine.baselineOffset - bigLine.font.pixelSize * 0.7 : bigLine.baselineOffset - baselineOffset
               textFormat: Text.PlainText
               text: page.spec.unit || ""
               color: Util.alpha("#ffffff", 0.85)
