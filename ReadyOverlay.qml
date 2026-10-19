@@ -2810,7 +2810,9 @@ PanelWindow {
     // Where tendril `i` leaves the glass now, and its points out from the
     // core: a wandering angle, a fast jitter along its length.
     function angleOf(i) {
-      var a = overlay.hash(i * 3.7) * 6.283
+      // Spread round the core, each a little off its slot, so they never
+      // bunch up on one side.
+      var a = (i + 0.6 * overlay.hash(i * 3.7)) / count * 6.283
       return a + 0.7 * Math.sin(now * (0.5 + 0.4 * overlay.hash(i * 1.3)) + i) + 0.25 * Math.sin(now * 1.7 + i * 2.3)
     }
     function tendril(i, from, to, n) {
@@ -2889,15 +2891,26 @@ PanelWindow {
       border.width: Math.max(1, 1.5 * globe.s)
       border.color: Util.alpha("#e8deff", 0.3)
     }
-    SoftGlow {
-      hue: Util.alpha("#ffffff", 0.22)
-      x: globe.cx - globe.r * 0.42 - 50
-      y: globe.cy - globe.r * 0.55 - 50
+    // The glass catching the light: a soft sweep along its upper left
+    // rim, brightest in the middle.
+    Shape {
+      anchors.fill: parent
       opacity: globe.dark
-      transform: [
-        Scale { origin.x: 50; origin.y: 50; xScale: globe.r * 0.6 / 100; yScale: globe.r * 0.28 / 100 },
-        Rotation { origin.x: 50; origin.y: 50; angle: -38 }
-      ]
+      preferredRendererType: Shape.CurveRenderer
+      ShapePath {
+        strokeColor: Util.alpha("#ffffff", 0.08)
+        strokeWidth: 9 * globe.s
+        fillColor: "transparent"
+        capStyle: ShapePath.RoundCap
+        PathAngleArc { centerX: globe.cx; centerY: globe.cy; radiusX: globe.r * 0.86; radiusY: globe.r * 0.86; startAngle: 196; sweepAngle: 62 }
+      }
+      ShapePath {
+        strokeColor: Util.alpha("#ffffff", 0.26)
+        strokeWidth: 3 * globe.s
+        fillColor: "transparent"
+        capStyle: ShapePath.RoundCap
+        PathAngleArc { centerX: globe.cx; centerY: globe.cy; radiusX: globe.r * 0.86; radiusY: globe.r * 0.86; startAngle: 208; sweepAngle: 38 }
+      }
     }
 
     // The tendrils and the core, drawn through a bloom.
