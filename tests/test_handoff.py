@@ -304,7 +304,7 @@ def test_bar_shows_the_last_battery_when_another_computer_has_the_peak(capsys):
     )
     out = json.loads(capsys.readouterr().out)
     assert out["class"] == "resting"
-    assert out["text"] == "84%"
+    assert out["text"] == "\uf241 84%"
     assert out["tooltip"].startswith("Another computer has the Peak")
 
 

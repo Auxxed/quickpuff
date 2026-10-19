@@ -265,5 +265,15 @@ def test_bar_shows_the_last_battery_while_resting(capsys):
     )
     out = json.loads(capsys.readouterr().out)
     assert out["class"] == "resting"
-    assert out["text"] == "84%"
+    assert out["text"] == "\uf241 84%"
     assert out["tooltip"].startswith("Resting to save battery")
+
+
+def test_bar_battery_carries_a_glyph_and_a_due_clean_is_a_wrench_not_a_word(capsys):
+    print_waybar({"connected": True, "battery": 30, "operating_state": "Idle", "operating_state_id": 5, "clean_due": True})
+    out = json.loads(capsys.readouterr().out)
+    assert out["class"] == "clean"
+    assert out["text"] == " 30% "
+    assert "clean" not in out["text"]
+    print_waybar({"connected": True, "battery": 30, "charge_source": "USB", "operating_state": "Idle", "operating_state_id": 5})
+    assert json.loads(capsys.readouterr().out)["text"] == " 30%"

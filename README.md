@@ -127,10 +127,14 @@ and `~/.local/share/quickpuff/venv`.
 
 ## Using it
 
-- **Bar** — chamber temperature and battery, with ⚡ while plugged in. While
-  battery saver rests the Peak, it keeps showing the last battery reading.
-  Left-click opens the panel, right-click starts a heat cycle, middle-click
-  refreshes.
+- **Bar** — chamber temperature while it heats, otherwise the battery with a
+  battery glyph (⚡ while plugged in) and a wrench when the chamber is due
+  for a clean. While battery saver rests the Peak, it keeps showing the last
+  battery reading. Left-click opens the panel. **Hold** right-click for about
+  a second to start a heat cycle: a line fills under the label and heat
+  starts when it's full, so a stray click never heats the Peak. Middle-click
+  refreshes, scrolling steps through the heat profiles, and the forward side
+  button boosts a cycle that's already running.
 - **Panel header** — a drawing of your Peak Pro, traced from Puffco's own
   renders, in its colorway (Onyx, OG, Pearl, Opal, Desert, Flourish, Storm,
   Daybreak, Plasma, Glacier, Indiglow or Guardian; any other draws as Onyx).

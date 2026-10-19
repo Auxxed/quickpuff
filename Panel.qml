@@ -366,7 +366,7 @@ Panel {
   // The Peak refuses to heat near 5%; warn a little before that.
   readonly property bool lowHeatBattery: connected && !pluggedIn && Number(statusData.battery) <= 10
   readonly property string metaLabel: {
-    if (!connected) return needsSetup ? "Setup needed" : (resting ? "Resting · waking…" : (handedOff ? "On another computer" : (connecting ? "Connecting…" : "Disconnected")))
+    if (!connected) return needsSetup ? "Setup needed" : (resting ? "Resting" : (handedOff ? "On another computer" : (connecting ? "Connecting…" : "Disconnected")))
     // The target is on the profile line below while it heats; this line
     // keeps to the state.
     var s = String(statusData.operating_state || "Connected")
@@ -1487,7 +1487,8 @@ Panel {
   readonly property string moodLine: {
     if (needsSetup) return "Needs a one-time setup"
     if (!connected) {
-      if (resting) return opened ? "Waking it up…" : "Catching a few z's to save battery"
+      // The button below says it's waking; this line says why it was away.
+      if (resting) return "Napped to save battery"
       if (handedOff) return "Hanging out with another computer"
       if (connecting) return "Reaching out to your Peak…"
       return "Asleep. Wake it up to say hi"
@@ -2506,13 +2507,16 @@ Panel {
 
             Text {
               width: parent.width
+              // Resting needs no footnote: the header says why and the
+              // button says it's waking.
+              visible: text !== ""
               textFormat: Text.PlainText
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
               text: root.needsSetup
                 ? "QuickPuff's background service isn't set up yet. Setup opens a terminal and installs it for your user; no root access is needed."
                 : root.resting
-                  ? "Battery saver let the Peak rest to save its battery. Reconnecting now…"
+                  ? ""
                   : root.handedOff
                     ? "Another computer running QuickPuff has the Peak. Take it back to use it here; that computer will let go and pick it up again when you return to it."
                     : "Wake the Peak and keep it close to this computer. Disconnect the phone app first; the device accepts one connection at a time."

@@ -158,7 +158,9 @@ BarWidget {
     root.outputText = Plain.plain(data.text, 48).replace(/\s+/g, " ").trim()
     root.outputTooltip = Plain.plain(data.tooltip, 1024, true)
     root.outputClass = cls
-    root.outputActive = cls === "preheat" || cls === "ready" || cls === "clean"
+    // Heat is the only alarm. A due clean is a reminder, not an emergency, so
+    // it keeps the normal colour and shows as a wrench in the label.
+    root.outputActive = cls === "preheat" || cls === "ready"
     root.outputOffline = cls === "disconnected"
     root.applyUi(data.ui)
   }
@@ -320,7 +322,7 @@ BarWidget {
     text: root.flashText !== "" ? root.flashText
       : root.heatingNow ? "\uf06d " + (root.liveLabel !== "" ? root.liveLabel : root.outputText) : root.outputText
     tooltipText: root.outputTooltip
-    active: root.outputActive || root.opened
+    active: root.outputActive
     // Recede while there's no device to report on, the same way the shell's
     // own widgets dim when their subject is idle. Never while the panel is
     // open, so the label stays legible next to its own popup.
@@ -332,14 +334,76 @@ BarWidget {
     // Scroll down for the next heat profile, up for the previous one.
     onWheelMoved: function(delta) { root.wheelStep(delta) }
 
+    // Right-click is the hold-to-heat area below, which sits on top of this.
     onPressed: function(b) {
-      if (b === Qt.RightButton) {
-        cli.fire(["heat", "start"])
-      } else if (b === Qt.MiddleButton) {
-        root.broadcast("refresh")
-      } else {
-        root.togglePanel()
-      }
+      if (b === Qt.MiddleButton) root.broadcast("refresh")
+      else if (b === Qt.LeftButton) root.togglePanel()
+    }
+  }
+
+  // ------------------------------------------------------- hold to heat
+  // Right-click starts a heat cycle only after a deliberate hold: a line
+  // fills under the label and the cycle starts once it's full. A tap, or
+  // letting go early, says how instead. The label sits beside the tray, and
+  // a misclick shouldn't heat a 500°F chamber that may be in another room.
+  property real holdProgress: 0
+  NumberAnimation {
+    id: holdAnim
+    target: root
+    property: "holdProgress"
+    from: 0
+    to: 1
+    duration: 900
+    // Only a natural finish counts; stop() on release doesn't emit this.
+    onFinished: if (root.holdProgress >= 1) root.holdDone()
+  }
+  NumberAnimation { id: holdFade; target: root; property: "holdProgress"; to: 0; duration: 220; easing.type: Easing.OutCubic }
+
+  function holdStart() {
+    if (root.outputOffline) {
+      flash("\uf293 Peak not connected")
+      return
+    }
+    if (root.heatingNow) {
+      flash("\uf06d Already heating")
+      return
+    }
+    flashTimer.stop()
+    flashText = "\uf06d Keep holding"
+    holdFade.stop()
+    holdAnim.restart()
+  }
+
+  function holdEnd() {
+    if (!holdAnim.running) return
+    holdAnim.stop()
+    holdFade.restart()
+    flash("\uf06d Hold to heat")
+  }
+
+  function holdDone() {
+    holdFade.restart()
+    flash("\uf06d Heating")
+    cli.fire(["heat", "start"])
+  }
+
+  Item {
+    anchors.horizontalCenter: button.horizontalCenter
+    anchors.bottom: button.bottom
+    anchors.bottomMargin: Math.max(2, Style.space(3))
+    width: Math.max(Style.space(16), button.labelWidth)
+    height: Math.max(2, Style.space(2))
+    visible: root.holdProgress > 0
+    Rectangle {
+      anchors.fill: parent
+      radius: height / 2
+      color: Util.alpha(root.liveTint, 0.2)
+    }
+    Rectangle {
+      width: parent.width * root.holdProgress
+      height: parent.height
+      radius: height / 2
+      color: root.liveTint
     }
   }
 
@@ -613,12 +677,24 @@ BarWidget {
     NumberAnimation { to: 1.0; duration: 800; easing.type: Easing.InOutSine }
   }
 
-  // WidgetButton only accepts left/right/middle, so catch mouse 5 (forward
-  // side button) on an overlay. Other buttons and hover fall through to it.
+  // Right-click (hold to heat) and mouse 5 (the forward side button, which
+  // WidgetButton doesn't accept) are caught here. Left, middle, the wheel and
+  // hover fall through to the button.
   MouseArea {
     anchors.fill: parent
-    acceptedButtons: Qt.ForwardButton
+    acceptedButtons: Qt.RightButton | Qt.ForwardButton
     hoverEnabled: false
-    onPressed: cli.fire(["heat", "boost"])
+    onPressed: function(mouse) {
+      if (mouse.button === Qt.RightButton) {
+        root.holdStart()
+        return
+      }
+      // Boost only means something during a cycle.
+      if (root.heatingNow) cli.fire(["heat", "boost"])
+    }
+    onReleased: function(mouse) { if (mouse.button === Qt.RightButton) root.holdEnd() }
+    // Dragging off the label, or the press being taken away, cancels too.
+    onExited: root.holdEnd()
+    onCanceled: root.holdEnd()
   }
 }

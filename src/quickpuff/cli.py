@@ -266,6 +266,16 @@ def _seconds_left(data: dict) -> int | None:
     return max(0, int(round(float(total) - float(elapsed))))
 
 
+def _battery_glyph(percent: int, plugged: bool) -> str:
+    """A bolt on the charger, otherwise a battery filled to the nearest quarter."""
+    if plugged:
+        return "\uf0e7"
+    for floor, glyph in ((88, "\uf240"), (63, "\uf241"), (38, "\uf242"), (13, "\uf243")):
+        if percent >= floor:
+            return glyph
+    return "\uf244"
+
+
 def print_waybar(data: dict) -> None:
     # Read here rather than taken from the daemon, for the same reason as in
     # print_status; waybar ignores the extra key.
@@ -276,7 +286,9 @@ def print_waybar(data: dict) -> None:
     state_id = int(data.get("operating_state_id") or -1)
     battery = data.get("battery") or 0
     plugged = (data.get("charge_source") or "Unplugged") != "Unplugged"
-    battery_text = f" {battery}%" if plugged else f"{battery}%"
+    # A bare "65%" beside the bar's other percentages (storage, volume) says
+    # nothing about what it measures; the glyph does.
+    battery_text = f"{_battery_glyph(int(battery), plugged)} {battery}%"
     if units == "C" and data.get("heater_temp_c") is not None:
         temp = f"{int(round(float(data['heater_temp_c'])))}°C"
     elif data.get("heater_temp_f") is not None:
@@ -321,9 +333,10 @@ def print_waybar(data: dict) -> None:
     if connected and data.get("charge_eta_s"):
         tooltip = f"{tooltip} · full in {format_eta(data['charge_eta_s'])}"
     if connected and data.get("clean_due"):
-        tooltip = f"{tooltip} · clean chamber".strip(" ·")
+        tooltip = f"{tooltip} · chamber due for a clean".strip(" ·")
         if css == "idle":
-            css, text = "clean", f"clean  {battery_text}"
+            # A wrench, not the word: "clean 65%" reads as "65% clean".
+            css, text = "clean", f"{battery_text} \uf0ad"
     print(
         json.dumps(
             {

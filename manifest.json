@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "QuickPuff",
-    "description": "Chamber temp, battery, and heat state for a Puffco Peak Pro. Left-click opens the controls, right-click starts heating, middle-click refreshes.",
+    "description": "Chamber temp, battery, and heat state for a Puffco Peak Pro. Left-click opens the controls, hold right-click to start heating, middle-click refreshes.",
     "category": "System",
     "aliases": ["peak", "puffco", "dab"],
     "allowMultiple": false,
