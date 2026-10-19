@@ -364,12 +364,13 @@ class TestConfigRefusals:
 
 
 class TestUiSettings:
-    KEYS = {"ready_animation", "showtime", "sounds", "sound_volume", "overlay_screen", "units"}
+    KEYS = {"ready_animation", "showtime", "motion", "sounds", "sound_volume", "overlay_screen", "units"}
 
     def test_defaults(self):
         assert paths.ui_settings() == {
             "ready_animation": "rocket",
             "showtime": "corner",
+            "motion": "full",
             "sounds": True,
             "sound_volume": 70,
             "overlay_screen": "focused",
@@ -381,6 +382,7 @@ class TestUiSettings:
             {
                 "ready_animation": "lava",
                 "showtime": "stage",
+                "motion": "calm",
                 "sounds": False,
                 "sound_volume": 35,
                 "overlay_screen": "DP-2",
@@ -390,6 +392,7 @@ class TestUiSettings:
         assert paths.ui_settings() == {
             "ready_animation": "lava",
             "showtime": "stage",
+            "motion": "calm",
             "sounds": False,
             "sound_volume": 35,
             "overlay_screen": "DP-2",
@@ -403,6 +406,10 @@ class TestUiSettings:
             ("ready_animation", ["lava"], "rocket"),
             ("showtime", "fullscreen", "corner"),
             ("showtime", None, "corner"),
+            ("motion", "calm", "calm"),
+            ("motion", "Calm", "full"),
+            ("motion", ["calm"], "full"),
+            ("motion", None, "full"),
             ("sounds", "off", False),
             ("sounds", "yes", True),
             ("sound_volume", 150, 100),

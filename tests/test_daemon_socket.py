@@ -408,6 +408,7 @@ def test_status_carries_a_fresh_checked_ui_block(tmp_path, monkeypatch):
     assert ui == {
         "ready_animation": "rocket",
         "showtime": "stage",
+        "motion": "full",
         "sounds": True,
         "sound_volume": 100,
         "overlay_screen": "focused",

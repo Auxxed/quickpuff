@@ -32,6 +32,7 @@ Rectangle {
   property bool collapsed: false
   property bool glide: true
   function regrow() {
+    if (panel.calm) return
     glide = false
     collapsed = true
     Qt.callLater(function() {
@@ -95,7 +96,7 @@ Rectangle {
 
   // Taking a charge, it crackles: sparks jump off the fill's leading edge.
   Repeater {
-    model: meter.sheen && meter.clamped < 1 ? 6 : 0
+    model: meter.sheen && meter.clamped < 1 && !panel.calm ? 6 : 0
     Rectangle {
       id: crackle
       required property int index

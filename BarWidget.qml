@@ -171,6 +171,7 @@ BarWidget {
     if (ui.ready_animation === "off" || root.readyAnimations.indexOf(ui.ready_animation) >= 0) root.readyAnimation = ui.ready_animation
     if (["off", "corner", "stage"].indexOf(ui.showtime) >= 0) root.showtimeMode = ui.showtime
     if (typeof ui.sounds === "boolean") root.soundsOn = ui.sounds
+    if (ui.motion === "full" || ui.motion === "calm") root.calm = ui.motion === "calm"
     if (typeof ui.sound_volume === "number" && ui.sound_volume >= 0 && ui.sound_volume <= 100) root.soundVolume = ui.sound_volume / 100
     if (typeof ui.overlay_screen === "string" && /^(focused|[A-Za-z0-9][A-Za-z0-9._-]{0,31})$/.test(ui.overlay_screen)) root.overlayScreen = ui.overlay_screen
   }
@@ -241,9 +242,12 @@ BarWidget {
   property real flare: 0
   property real lastFlash: 0
   // Ready, seen by the poll or the feed (whichever's first; never twice).
+  // Calm motion (the panel's setting) keeps the charge line, drops the hop.
+  property bool calm: false
   function readyFlash() {
     if (Date.now() - lastFlash < 4000) return
     lastFlash = Date.now()
+    if (root.calm) return
     readyHop.restart()
     flareAnim.restart()
   }

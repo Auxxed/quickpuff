@@ -226,6 +226,11 @@ Showtime exactly as a real one would, without sending anything to the Peak or
 counting a dab. `quickpuff demo --preheat 8 --session 15` sets the timing and
 `quickpuff demo stop` ends it early.
 
+**Calm motion** (Control → Motion, or `quickpuff motion calm`) keeps the panel
+and the bar to the movement that tells you something: progress, readings and
+state changes. The sparks, glows, slides and celebrations stay off. The ready
+show and Showtime still play.
+
 Overlays play on the monitor you're looking at. To keep them on one screen,
 name it: `quickpuff overlay-screen DP-2` (`focused` goes back to following you).
 
@@ -384,6 +389,7 @@ quickpuff ramp                     # which profiles have it; `ramp probe --yes` 
 quickpuff wrapped year --show      # your year in sessions, on screen (month, year or all)
 quickpuff showtime stage           # heat cycles over the desktop: off, corner or stage
 quickpuff sounds on --volume 70    # Showtime and ready-animation sounds
+quickpuff motion calm              # the panel without the flourishes (or: full)
 quickpuff demo                     # a simulated heat cycle (nothing reaches the Peak)
 quickpuff overlay-screen DP-2      # which monitor overlays use (or: focused)
 quickpuff stealth on

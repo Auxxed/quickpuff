@@ -61,6 +61,7 @@ Item {
 
   function runCascade() {
     if (!cascade || !target || !target.visible) return
+    if (panel.calm) { settle(); return }
     var view = panel.scrollView
     var top = viewTop()
     if (view && (top > view.height || top + target.height < 0)) { settle(); return }
@@ -69,6 +70,7 @@ Item {
 
   function runShow() {
     if (!target || !target.visible || !panel || !panel.opened) return
+    if (panel.calm) { settle(); return }
     // The panel's own opening plays the cascade instead.
     if (Date.now() - panel.openedAt < 250) return
     var now = Date.now()

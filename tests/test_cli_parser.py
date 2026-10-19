@@ -35,6 +35,7 @@ def test_help_builds_for_every_command(capsys):
         "saver",
         "demo",
         "showtime",
+        "motion",
         "sounds",
         "overlay-screen",
     ],
@@ -86,6 +87,18 @@ def test_overlay_settings_default_to_what_the_widget_expects(capsys):
 def test_showtime_takes_every_mode(value, capsys):
     asyncio.run(async_main(["showtime", value]))
     assert load_config()["showtime"] == value
+
+
+def test_motion_is_full_or_calm(capsys):
+    asyncio.run(async_main(["motion"]))
+    assert capsys.readouterr().out == "full\n"
+    asyncio.run(async_main(["motion", "calm"]))
+    assert load_config()["motion"] == "calm"
+    asyncio.run(async_main(["motion"]))
+    assert capsys.readouterr().out.splitlines()[-1] == "calm"
+    with pytest.raises(SystemExit):
+        asyncio.run(async_main(["motion", "still"]))
+    assert load_config()["motion"] == "calm"
 
 
 def test_showtime_refuses_anything_else(capsys):

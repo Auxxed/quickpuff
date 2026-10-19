@@ -29,7 +29,10 @@ Column {
   // comes into view.
   property real trace: 1
   property real spark: 0
-  function lightUp() { traceAnim.restart() }
+  function lightUp() {
+    if (panel && panel.calm) { traceAnim.stop(); trace = 1; spark = 0; return }
+    traceAnim.restart()
+  }
   onVisibleChanged: if (visible && panel && panel.opened) lightUp()
   Connections {
     target: section.panel

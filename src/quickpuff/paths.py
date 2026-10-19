@@ -22,7 +22,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from .constants import READY_ANIMATIONS, SHOWTIME_MODES
+from .constants import MOTION_MODES, READY_ANIMATIONS, SHOWTIME_MODES
 
 log = logging.getLogger("quickpuff.paths")
 
@@ -45,6 +45,8 @@ DEFAULTS: dict[str, Any] = {
     "ready_animation": "rocket",
     # The heat-up overlay while the Peak preheats: see SHOWTIME_MODES.
     "showtime": "corner",
+    # How much the panel and bar animate: see MOTION_MODES.
+    "motion": "full",
     # The overlays' sounds, and how loud (0-100).
     "sounds": True,
     "sound_volume": 70,
@@ -463,6 +465,7 @@ def ui_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
       ready_animation  one of READY_ANIMATIONS            (default "rocket")
       showtime         "off", "corner" or "stage"         (default "corner")
+      motion           "full" or "calm"                   (default "full")
       sounds           true or false                      (default true)
       sound_volume     whole number 0-100                 (default 70)
       overlay_screen   "focused" or a monitor name        (default "focused")
@@ -472,10 +475,12 @@ def ui_settings(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         cfg = load_config()
     animation = cfg.get("ready_animation")
     showtime = cfg.get("showtime")
+    motion = cfg.get("motion")
     units = cfg.get("units")
     return {
         "ready_animation": animation if animation in READY_ANIMATIONS else DEFAULTS["ready_animation"],
         "showtime": showtime if showtime in SHOWTIME_MODES else DEFAULTS["showtime"],
+        "motion": motion if motion in MOTION_MODES else DEFAULTS["motion"],
         "sounds": switched_on(cfg.get("sounds", DEFAULTS["sounds"])),
         "sound_volume": clamp_volume(cfg.get("sound_volume", DEFAULTS["sound_volume"])),
         "overlay_screen": overlay_screen_setting(cfg.get("overlay_screen")),

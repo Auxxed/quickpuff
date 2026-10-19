@@ -32,6 +32,7 @@ BorderSurface {
     NumberAnimation { duration: 900; easing.type: Easing.OutCubic }
   }
   function replay() {
+    if (panel.calm) return
     if (!numeric) { rolled.intro(); return }
     counting = false
     shown = 0

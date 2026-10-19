@@ -67,6 +67,6 @@ Item {
     anchors.fill: parent
     hoverEnabled: true
     cursorShape: tap.canTap ? Qt.PointingHandCursor : Qt.ArrowCursor
-    onClicked: if (tap.canTap) { popAnim.restart(); tap.activated() }
+    onClicked: if (tap.canTap) { if (!panel.calm) popAnim.restart(); tap.activated() }
   }
 }

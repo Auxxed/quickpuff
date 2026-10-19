@@ -62,7 +62,7 @@ Item {
   }
   onSelectedIndexChanged: {
     placePill(true)
-    if (panel && panel.opened) landAnim.restart()
+    if (panel && panel.opened && !panel.calm) landAnim.restart()
   }
   onCellWidthChanged: placePill(false)
   Component.onCompleted: placePill(false)
@@ -140,7 +140,7 @@ Item {
       height: seg.height
 
       // The glyph of a newly picked option hops as the pill arrives.
-      onSelectedChanged: if (selected && panel && panel.opened) glyphHop.restart()
+      onSelectedChanged: if (selected && panel && panel.opened && !panel.calm) glyphHop.restart()
       SequentialAnimation {
         id: glyphHop
         PauseAnimation { duration: 110 }

@@ -32,7 +32,7 @@ Item {
   onStartColorChanged: canvas.requestPaint()
   onTrackColorChanged: canvas.requestPaint()
 
-  function intro() { sweepAnim.restart() }
+  function intro() { if (panel && panel.calm) { sweepAnim.stop(); sweep = 1 } else sweepAnim.restart() }
   onVisibleChanged: if (visible && panel && panel.opened) intro()
   Connections {
     target: ring.panel

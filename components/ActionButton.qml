@@ -46,11 +46,11 @@ BorderSurface {
 
   // 0-1 round the edge, clockwise from the top left.
   property real orbit: 0
-  readonly property bool orbiting: charging || orbitOnce.running
-  onHotChanged: if (hot && tall && !charging && panel.opened) orbitOnce.restart()
+  readonly property bool orbiting: (charging && !panel.calm) || orbitOnce.running
+  onHotChanged: if (hot && tall && !charging && panel.opened && !panel.calm) orbitOnce.restart()
   NumberAnimation { id: orbitOnce; target: chip; property: "orbit"; from: 0; to: 1; duration: 820; easing.type: Easing.InOutCubic }
   NumberAnimation on orbit {
-    running: chip.charging && panel.opened
+    running: chip.charging && panel.opened && !panel.calm
     loops: Animation.Infinite
     from: 0
     to: 1
@@ -321,7 +321,7 @@ BorderSurface {
       ripple.cx = mouse.x
       ripple.cy = mouse.y
       rippleAnim.restart()
-      if (chip.zaps) chip.crack()
+      if (chip.zaps && !panel.calm) chip.crack()
       chip.activated()
     }
   }

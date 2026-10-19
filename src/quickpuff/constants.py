@@ -116,6 +116,9 @@ READY_ANIMATIONS = (
 )
 # The heat-up overlay: nothing, a card in the corner, or the whole stage.
 SHOWTIME_MODES = ("off", "corner", "stage")
+# How much the shell animates: everything, or only what carries information
+# (progress, readings, state changes) and none of the flourishes.
+MOTION_MODES = ("full", "calm")
 
 
 class ChamberType(IntEnum):

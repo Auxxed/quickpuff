@@ -1269,6 +1269,19 @@ Panel {
     runArgv(["quickpuff", "showtime", value])
   }
 
+  // How much the panel and bar animate: "full", or "calm" (only what carries
+  // information: progress, readings, state; none of the flourishes).
+  property string configMotion: "full"
+  property string pendingMotion: ""
+  readonly property string motionMode: pendingMotion !== "" ? pendingMotion : configMotion
+  readonly property bool calm: motionMode === "calm"
+  onConfigMotionChanged: pendingMotion = ""
+  function toggleCalm() {
+    var next = calm ? "full" : "calm"
+    pendingMotion = next
+    runArgv(["quickpuff", "motion", next])
+  }
+
   property bool configSounds: true
   property var pendingSounds: undefined
   readonly property bool soundsOn: pendingSounds !== undefined ? pendingSounds === true : configSounds
@@ -1418,7 +1431,7 @@ Panel {
   // up its glass and confetti bursts off it.
   onAtTempChanged: if (atTemp && opened) hero.celebrate()
   // A new profile (or a new colour on this one) lands on the ring with a flash.
-  onProfileTintChanged: if (opened && connected) heroArt.pulse()
+  onProfileTintChanged: if (opened && connected && !calm) heroArt.pulse()
 
   // Profiles carry the LED color the device glows for them; it's how the app's
   // own editor identifies them, so the tiles show the same swatch. Anything
@@ -1710,6 +1723,7 @@ Panel {
       if (readyAnimations[i].value === ui.ready_animation) root.configReadyAnimation = ui.ready_animation
     if (["off", "corner", "stage"].indexOf(ui.showtime) >= 0) root.configShowtime = ui.showtime
     if (typeof ui.sounds === "boolean") root.configSounds = ui.sounds
+    if (ui.motion === "full" || ui.motion === "calm") root.configMotion = ui.motion
   }
 
   Timer {
@@ -1962,7 +1976,7 @@ Panel {
             // Idle but connected: a slow, shallow breath, so it looks awake.
             property real idle: 1
             SequentialAnimation on idle {
-              running: root.connected && !root.heating && root.opened
+              running: root.connected && !root.heating && root.opened && !root.calm
               loops: Animation.Infinite
               alwaysRunToEnd: true
               NumberAnimation { to: 0.78; duration: 2300; easing.type: Easing.InOutSine }
@@ -1975,6 +1989,7 @@ Panel {
             property real power: 1
             NumberAnimation { id: powerAnim; target: hero; property: "power"; from: 0; to: 1; duration: 900; easing.type: Easing.Linear }
             function powerUp() {
+              if (root.calm) { powerAnim.stop(); power = 1; return }
               powerAnim.restart()
               heroTemp.intro()
             }
@@ -1988,10 +2003,11 @@ Panel {
             // flaring white for a moment.
             property real flare: 0
             function celebrate() {
+              flareAnim.restart()
+              if (root.calm) return
               heroBurst.fire()
               heroArt.glint()
               heroHop.restart()
-              flareAnim.restart()
             }
             NumberAnimation { id: flareAnim; target: hero; property: "flare"; from: 1; to: 0; duration: 1100; easing.type: Easing.OutCubic }
             SequentialAnimation {
@@ -2020,7 +2036,7 @@ Panel {
                 required property int index
                 property real drift: 0
                 NumberAnimation on drift {
-                  running: root.heating && root.opened
+                  running: root.heating && root.opened && !root.calm
                   loops: Animation.Infinite
                   from: 0
                   to: 1
@@ -2030,7 +2046,7 @@ Panel {
                 x: heroArt.x + heroArt.width * 0.5 + Math.sin(drift * 6.283 + index * 2.1) * heroArt.width * 0.45 - 50
                 y: heroArt.y + heroArt.height * (0.55 + 0.14 * Math.cos(drift * 6.283 + index)) - 50
                 scale: heroArt.width * (1.7 + 0.5 * index) / 100
-                opacity: root.heating ? 0.55 * Math.min(1, hero.litGlow * 1.2) : 0
+                opacity: root.heating && !root.calm ? 0.55 * Math.min(1, hero.litGlow * 1.2) : 0
                 Behavior on opacity { NumberAnimation { duration: 700 } }
               }
             }
@@ -2064,7 +2080,7 @@ Panel {
               asleep: !root.connected
               progress: root.preheating ? root.heatProgress : -1
               searching: !root.needsSetup && (root.connecting || root.resting)
-              crackle: root.preheating
+              crackle: root.preheating && !root.calm
               dozing: !root.connected && !root.needsSetup && !root.connecting && !root.resting && !root.handedOff
             }
 
@@ -2328,7 +2344,7 @@ Panel {
               label: root.needsSetup ? "Finish setup" : (root.resting ? "Waking…" : (root.handedOff ? "Take it back" : (root.connecting ? "Connecting…" : "Connect")))
               glyph: root.needsSetup ? "\uf0ad" : (root.connecting || root.resting ? "\uf110" : "\uf293")
               spinning: !root.needsSetup && (root.connecting || root.resting)
-              charging: !root.needsSetup && (root.connecting || root.resting)
+              charging: !root.needsSetup && (root.connecting || root.resting) && !root.calm
               tall: true
               pulse: !root.needsSetup && !root.connecting
               tint: Color.accent

@@ -39,7 +39,12 @@ Section {
   property real reveal: 1
   property real grow: 1
   property int seen: 0
-  function intro() { growAnim.stop(); grow = 1; revealAnim.restart() }
+  function intro() {
+    growAnim.stop()
+    grow = 1
+    if (panel.calm) { revealAnim.stop(); reveal = 1; return }
+    revealAnim.restart()
+  }
   onVisibleChanged: if (visible && panel.opened) intro()
   Connections {
     target: graph.panel

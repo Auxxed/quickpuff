@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .constants import READY_ANIMATIONS, SHOWTIME_MODES
+from .constants import MOTION_MODES, READY_ANIMATIONS, SHOWTIME_MODES
 from .paths import DEFAULTS, MONITOR_NAME, clamp_volume, load_config, save_config, ui_settings
 from .paths import switched_on as _switched_on
 from .rpc import DaemonNotRunning, rpc
@@ -563,6 +563,9 @@ async def async_main(argv: list[str] | None = None) -> int:
     showtime = sub.add_parser("showtime", help="The heat-up overlay: off, a card in the corner, or the full stage")
     showtime.add_argument("value", nargs="?", choices=list(SHOWTIME_MODES))
 
+    motion = sub.add_parser("motion", help="How much the panel and bar animate: full, or calm (no flourishes)")
+    motion.add_argument("value", nargs="?", choices=list(MOTION_MODES))
+
     sounds = sub.add_parser("sounds", help="The overlays' sounds on or off, and how loud")
     sounds.add_argument("value", nargs="?", choices=["on", "off"])
     sounds.add_argument("--volume", type=int, metavar="0-100", help="How loud (default 70)")
@@ -877,6 +880,14 @@ async def async_main(argv: list[str] | None = None) -> int:
         cfg["showtime"] = args.value
         _save_settings(cfg)
         print(f"Showtime: {args.value}")
+    elif cmd == "motion":
+        cfg = load_config()
+        if args.value is None:
+            print(cfg.get("motion") if cfg.get("motion") in MOTION_MODES else DEFAULTS["motion"])
+            return 0
+        cfg["motion"] = args.value
+        _save_settings(cfg)
+        print(f"Motion: {args.value}")
     elif cmd == "sounds":
         cfg = load_config()
         if args.value is None and args.volume is None:

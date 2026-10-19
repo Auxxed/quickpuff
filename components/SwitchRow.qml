@@ -36,7 +36,7 @@ Item {
     cursorRing: false
     foreground: panel.foreground
     onToggled: {
-      if (!switchRow.checked) switchSparks.restart()
+      if (!switchRow.checked && !panel.calm) switchSparks.restart()
       switchRow.toggled()
     }
   }

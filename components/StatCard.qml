@@ -32,10 +32,10 @@ BorderSurface {
   implicitHeight: metricCol.implicitHeight + Style.spacing.controlPaddingY * 2
 
   // The value rolls in whenever the panel opens on it or its page shows.
-  onVisibleChanged: if (visible && panel.opened) metricValue.intro()
+  onVisibleChanged: if (visible && panel.opened && !panel.calm) metricValue.intro()
   Connections {
     target: metric.panel
-    function onOpenSerialChanged() { if (metric.visible) metricValue.intro() }
+    function onOpenSerialChanged() { if (metric.visible && !metric.panel.calm) metricValue.intro() }
   }
 
   Rectangle {

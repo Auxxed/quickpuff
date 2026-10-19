@@ -226,7 +226,7 @@ Column {
 
           // A little hop when this becomes the active profile, and a band of
           // its light sweeping across it.
-          onActiveChanged: if (active && panel.opened) { tileHop.restart(); tileSweep.restart() }
+          onActiveChanged: if (active && panel.opened && !panel.calm) { tileHop.restart(); tileSweep.restart() }
           SequentialAnimation {
             id: tileHop
             NumberAnimation { target: tile; property: "scale"; to: 1.045; duration: 110; easing.type: Easing.OutQuad }
@@ -238,7 +238,7 @@ Column {
           // Heat button's.
           property real orbit: 0
           NumberAnimation on orbit {
-            running: tile.active && panel.heating && panel.opened
+            running: tile.active && panel.heating && panel.opened && !panel.calm
             loops: Animation.Infinite
             from: 0
             to: 1
@@ -252,7 +252,7 @@ Column {
             return Qt.point(0, h - (d - 2 * w - h))
           }
           Repeater {
-            model: tile.active && panel.heating ? 8 : 0
+            model: tile.active && panel.heating && !panel.calm ? 8 : 0
             Rectangle {
               required property int index
               readonly property point p: tile.edgePoint(tile.orbit - index * 0.01)
@@ -806,6 +806,34 @@ Column {
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       text: "The demo plays a whole heat cycle on screen, from preheat to the ready show to the session, without heating your Peak."
+      color: panel.dim
+      font.family: panel.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  // Everyday comfort: the flourishes off, the information kept.
+  Section {
+    panel: controlPage.panel
+    glyph: "\uf186"
+    title: "MOTION"
+    trailing: panel.calm ? "Calm" : "Full"
+
+    SwitchRow {
+      panel: controlPage.panel
+      width: parent.width
+      label: "Calm motion"
+      checked: panel.calm
+      onToggled: panel.toggleCalm()
+    }
+
+    Text {
+      width: parent.width
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      text: panel.calm
+        ? "Progress, readings and state changes still move; the sparks, glows, slides and celebrations are off. The ready show still plays."
+        : "Calm motion keeps the panel and bar to what tells you something, without the sparks, glows, slides and celebrations."
       color: panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption
