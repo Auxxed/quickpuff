@@ -35,6 +35,7 @@ TextField {
   placeholderText: digitsOnly ? "" : "Name"
 
   Component.onCompleted: {
+    panel.openEditor = editor
     text = seed
     Qt.callLater(function() {
       editor.selectAll()
@@ -46,6 +47,15 @@ TextField {
   // Set once Enter or Esc has settled it, so losing focus as it closes
   // doesn't save (again).
   property bool settled: false
+  Component.onDestruction: if (panel && panel.openEditor === editor) panel.openEditor = null
+  // Keeps what was typed when the panel moves on without a blur (another
+  // field picked, the panel closed).
+  function flush() {
+    if (settled) return
+    settled = true
+    var typed = String(text).trim()
+    if (typed !== "" && typed !== String(seed).trim()) committed(typed)
+  }
   onAccepted: {
     settled = true
     editor.committed(editor.text)

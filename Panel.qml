@@ -139,6 +139,11 @@ Panel {
       }
       hero.powerUp()
     } else {
+      flushEdit()
+      // Writes still waiting to coalesce (a stepper burst, a typed value) go
+      // now, before the optimistic state below is dropped.
+      if (commitWriteTimer.running) { commitWriteTimer.stop(); commitWrites() }
+      if (commitBrightnessTimer.running) { commitBrightnessTimer.stop(); commitBrightness() }
       cancelEdit()
       pendingTemps = ({})
       pendingTimes = ({})
@@ -1664,8 +1669,18 @@ Panel {
   property string editField: ""
   readonly property bool editing: editField !== ""
 
+  // The field being typed in, so moving to another field (or closing the
+  // panel) keeps what was typed, as clicking away does.
+  property var openEditor: null
+  function flushEdit() {
+    if (!openEditor) return
+    var e = openEditor
+    openEditor = null
+    e.flush()
+  }
   function startEdit(index, field) {
     if (index < 0 && field !== "device") return
+    flushEdit()
     editIndex = index
     editField = field
   }
