@@ -6,7 +6,13 @@ import qs.Commons
 // number grows, down when it shrinks, each digit a beat after the one to its
 // right. Anything that isn't a digit (°F, a colon, a unit) slides over only
 // when it changes. Characters are right-aligned in fixed slots, so 99 → 100
-// grows a digit on the left instead of shifting the rest.
+// grows a digit on the left instead of shifting the rest, and every digit
+// gets the width of the widest one, so nothing beside the number jitters.
+//
+// `live` is for readings that change every moment (the temperature, a
+// countdown, a stepper): each digit steps straight to its new value, quick
+// and all at once, never wheeling through the numbers in between, so the
+// readout never shows a value that wasn't read.
 //
 // Lays out like a Text of the same font: same height and baseline.
 Item {
@@ -20,6 +26,7 @@ Item {
   property font font
   property int duration: 560
   property int stagger: 45
+  property bool live: false
   // The longest text it holds; longer text loses its leftmost characters.
   readonly property int maxSlots: 8
 
@@ -42,6 +49,12 @@ Item {
   FontMetrics {
     id: fontInfo
     font: roll.font
+  }
+  // The widest digit: every digit slot is this wide, its glyph centred.
+  readonly property real digitW: {
+    var w = 0, probe = fontInfo.height
+    for (var d = 0; d < 10; d++) w = Math.max(w, fontInfo.advanceWidth(String(d)))
+    return w
   }
   readonly property real capTop: fontInfo.ascent + line.tightBoundingRect.y
   readonly property real capH: line.tightBoundingRect.height
@@ -120,7 +133,7 @@ Item {
         onChChanged: {
           var prev = lastCh
           lastCh = ch
-          if (isDigit(prev) && isDigit(ch) && wheel) {
+          if (isDigit(prev) && isDigit(ch) && wheel && !roll.live) {
             var base = Math.round(target)
             var n = Number(ch)
             var cur = ((base % 10) + 10) % 10
@@ -142,7 +155,8 @@ Item {
 
         // A slot that empties narrows as its character leaves; one that
         // fills, or changes to a wider digit, eases to the new width.
-        width: ch === "" ? (fromCh !== "" ? leaving.advanceWidth * (1 - t) : 0) : glyph.advanceWidth
+        width: ch === "" ? (fromCh !== "" ? (isDigit(fromCh) ? roll.digitW : leaving.advanceWidth) * (1 - t) : 0)
+          : isDigit(ch) ? roll.digitW : glyph.advanceWidth
         height: roll.height
         Behavior on width {
           enabled: slot.ch !== ""
@@ -183,13 +197,13 @@ Item {
             slot.wheel = slot.isDigit(slot.ch)
           }
           ScriptAction { script: slot.t = 0 }
-          PauseAnimation { duration: slot.fromRight * roll.stagger * 0.5 }
+          PauseAnimation { duration: roll.live ? 0 : slot.fromRight * roll.stagger * 0.5 }
           NumberAnimation {
             target: slot
             property: "t"
             to: 1
-            duration: roll.duration * 0.75
-            easing.type: Easing.OutQuart
+            duration: roll.live ? 140 : roll.duration * 0.75
+            easing.type: roll.live ? Easing.OutCubic : Easing.OutQuart
           }
         }
 
@@ -204,6 +218,7 @@ Item {
           // between them.
           Text {
             visible: slot.wheel
+            x: (parent.width - implicitWidth) / 2
             y: -roll.windowY - slot.frac * roll.windowH
             opacity: 1 - slot.frac
             textFormat: Text.PlainText
@@ -213,6 +228,7 @@ Item {
           }
           Text {
             visible: slot.wheel && slot.frac > 0
+            x: (parent.width - implicitWidth) / 2
             y: -roll.windowY + (1 - slot.frac) * roll.windowH
             opacity: slot.frac
             textFormat: Text.PlainText
@@ -224,8 +240,9 @@ Item {
           // Swap: out one way, in from the other.
           Text {
             visible: !slot.wheel && slot.fromCh !== "" && slot.t < 1
+            x: (parent.width - implicitWidth) / 2
             y: -roll.windowY - slot.swapDir * slot.t * roll.windowH
-            opacity: 1 - slot.t
+            opacity: roll.live ? 1 : 1 - slot.t
             textFormat: Text.PlainText
             text: slot.fromCh
             color: roll.color
@@ -233,8 +250,9 @@ Item {
           }
           Text {
             visible: !slot.wheel && slot.toCh !== ""
+            x: (parent.width - implicitWidth) / 2
             y: -roll.windowY + slot.swapDir * (1 - slot.t) * roll.windowH
-            opacity: slot.t
+            opacity: roll.live ? 1 : slot.t
             textFormat: Text.PlainText
             text: slot.toCh
             color: roll.color

@@ -99,6 +99,7 @@ Column {
       startColor: panel.atTemp ? Qt.lighter(Color.accent, 1.4) : Color.accent
 
       RollingNumber {
+        live: true
         panel: controlPage.panel
         anchors.centerIn: parent
         text: panel.formatDuration(panel.timerSecondsLeft)
@@ -470,6 +471,7 @@ Column {
 
                 RollingNumber {
                   id: tempReadout
+                  live: true
                   panel: controlPage.panel
                   anchors.centerIn: parent
                   duration: 380
@@ -556,6 +558,7 @@ Column {
 
                 RollingNumber {
                   id: timeReadout
+                  live: true
                   panel: controlPage.panel
                   anchors.centerIn: parent
                   duration: 380

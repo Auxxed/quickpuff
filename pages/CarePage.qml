@@ -32,6 +32,7 @@ Column {
 
       RollingNumber {
         id: batteryBig
+        live: true
         panel: carePage.panel
         anchors.left: parent.left
         text: Math.round(Number(panel.statusData.battery)) + "%"

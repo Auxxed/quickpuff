@@ -51,6 +51,7 @@ Item {
 
       RollingNumber {
         id: stepValue
+        live: true
         panel: stepper.panel
         anchors.centerIn: parent
         duration: 380

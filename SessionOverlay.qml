@@ -788,6 +788,7 @@ PanelWindow {
         // launch down the same way).
         RollingNumber {
           id: big
+          live: true
           panel: palette
           duration: 520
           stagger: 60
@@ -1102,6 +1103,7 @@ PanelWindow {
         width: parent.width
       }
       RollingNumber {
+        live: true
         panel: palette
         duration: 460
         stagger: 40

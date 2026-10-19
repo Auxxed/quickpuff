@@ -2245,6 +2245,7 @@ Panel {
 
                 RollingNumber {
                   id: heroTemp
+                  live: true
                   panel: root
                   text: heroTempRow.label === "" ? "—" : heroTempRow.label.replace(/°[CF]$/, "")
                   color: heroTempRow.tone
