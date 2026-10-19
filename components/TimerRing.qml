@@ -27,7 +27,6 @@ Item {
   readonly property real drawn: Math.max(0, Math.min(1, progress)) * sweep
 
   onDrawnChanged: canvas.requestPaint()
-  onHeadGlowChanged: canvas.requestPaint()
   onFillColorChanged: canvas.requestPaint()
   onStartColorChanged: canvas.requestPaint()
   onTrackColorChanged: canvas.requestPaint()
@@ -89,17 +88,31 @@ Item {
       ctx.beginPath()
       ctx.arc(cx, cy, r, start, end)
       ctx.stroke()
-
-      var hx = cx + r * Math.cos(end)
-      var hy = cy + r * Math.sin(end)
-      ctx.fillStyle = Util.alpha(ring.fillColor, 0.18 + 0.2 * ring.headGlow)
-      ctx.beginPath()
-      ctx.arc(hx, hy, ring.thickness * (1.05 + 0.35 * ring.headGlow), 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = Qt.tint(ring.fillColor, Util.alpha("#ffffff", 0.45))
-      ctx.beginPath()
-      ctx.arc(hx, hy, ring.thickness * 0.55, 0, Math.PI * 2)
-      ctx.fill()
     }
+  }
+
+  // The head, drawn over the canvas so its breath doesn't repaint the arc
+  // every frame.
+  readonly property real headAngle: -Math.PI / 2 + Math.PI * 2 * drawn
+  readonly property real headR: Math.min(width, height) / 2 - thickness
+  readonly property real headX: width / 2 + headR * Math.cos(headAngle)
+  readonly property real headY: height / 2 + headR * Math.sin(headAngle)
+  Rectangle {
+    visible: ring.drawn > 0
+    width: ring.thickness * 2 * (1.05 + 0.35 * ring.headGlow)
+    height: width
+    radius: width / 2
+    x: ring.headX - width / 2
+    y: ring.headY - height / 2
+    color: Util.alpha(ring.fillColor, 0.18 + 0.2 * ring.headGlow)
+  }
+  Rectangle {
+    visible: ring.drawn > 0
+    width: ring.thickness * 1.1
+    height: width
+    radius: width / 2
+    x: ring.headX - width / 2
+    y: ring.headY - height / 2
+    color: Qt.tint(ring.fillColor, Util.alpha("#ffffff", 0.45))
   }
 }
