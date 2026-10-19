@@ -1820,7 +1820,7 @@ PanelWindow {
           shadowColor: Util.alpha(Qt.lighter(overlay.tint, 1.2), 0.7)
         }
         font.family: overlay.displayFamily
-        font.pixelSize: 56 * nova.s
+        font.pixelSize: 60 * nova.s
         font.weight: Font.DemiBold
         font.letterSpacing: (14 + 50 * (1 - parent.e)) * nova.s
       }
@@ -2318,6 +2318,16 @@ PanelWindow {
       textFormat: Text.PlainText
       text: "READY"
       color: Qt.tint("#ffffff", Util.alpha("#ffe9a0", 0.35))
+      // A dark halo, so it reads over whatever swims or flies behind it.
+      layer.enabled: true
+      layer.effect: MultiEffect {
+        shadowEnabled: true
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        blurMax: 24
+        shadowBlur: 0.5
+        shadowColor: Util.alpha("#000000", 0.55)
+      }
       font.family: overlay.displayFamily
       font.pixelSize: 64 * ff.s
       font.weight: Font.DemiBold
@@ -2596,6 +2606,16 @@ PanelWindow {
       textFormat: Text.PlainText
       text: "READY"
       color: Qt.tint("#ffffff", Util.alpha("#9ff4ff", 0.3))
+      // A dark halo, so it reads over whatever swims or flies behind it.
+      layer.enabled: true
+      layer.effect: MultiEffect {
+        shadowEnabled: true
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        blurMax: 24
+        shadowBlur: 0.5
+        shadowColor: Util.alpha("#000000", 0.55)
+      }
       font.family: overlay.displayFamily
       font.pixelSize: 64 * sea.s
       font.weight: Font.DemiBold
@@ -2796,9 +2816,9 @@ PanelWindow {
       text: "READY"
       color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.25))
       font.family: overlay.displayFamily
-      font.pixelSize: 50 * warp.s
+      font.pixelSize: 60 * warp.s
       font.weight: Font.DemiBold
-      font.letterSpacing: (14 + 40 * (1 - e)) * warp.s
+      font.letterSpacing: (15 + 40 * (1 - e)) * warp.s
     }
   }
 
@@ -3034,12 +3054,19 @@ PanelWindow {
       textFormat: Text.PlainText
       text: "READY"
       color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.3))
-      style: Text.Outline
-      styleColor: Util.alpha(overlay.tint, 0.4)
+      layer.enabled: true
+      layer.effect: MultiEffect {
+        shadowEnabled: true
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        blurMax: 24
+        shadowBlur: 0.55
+        shadowColor: Util.alpha(globe.hot, 0.6)
+      }
       font.family: overlay.displayFamily
-      font.pixelSize: 50 * globe.s
+      font.pixelSize: 60 * globe.s
       font.weight: Font.DemiBold
-      font.letterSpacing: (14 + 36 * (1 - e)) * globe.s
+      font.letterSpacing: (15 + 36 * (1 - e)) * globe.s
     }
   }
 
