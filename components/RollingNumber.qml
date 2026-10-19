@@ -37,6 +37,8 @@ Item {
   implicitWidth: slots.implicitWidth
   implicitHeight: line.height
   height: implicitHeight
+  // So anchors.baseline lines other text up with the digits.
+  baselineOffset: fontInfo.ascent
 
   // The line box, and the window the digits roll through: the digits'
   // height with a little air, so a rolling digit leaves the window as soon

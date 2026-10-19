@@ -257,7 +257,14 @@ PanelWindow {
   Timer {
     id: stageHold
     interval: show.holdAfterReady * 1000
-    onTriggered: { stageOut.start(); cardIn.start() }
+    // The card comes in once the stage has mostly cleared, so its countdown
+    // never sits on screen with the stage's temperature.
+    onTriggered: { stageOut.start(); cardInLater.restart() }
+  }
+  Timer {
+    id: cardInLater
+    interval: 650
+    onTriggered: cardIn.start()
   }
 
   property real summaryDur: 0
@@ -1106,9 +1113,10 @@ PanelWindow {
         text: {
           var p = show.phase
           if (p === "preheat") return "to " + (isFinite(show.targetF) ? Math.round(show.targetF) + "°F" : "temperature")
-          if (p === "session" || p === "ready") return Math.round(show.shownF) + "°F  ·  left in session"
-          if (p === "cooling") return Math.round(show.shownF) + "°F  ·  cooling down"
-          var bits = []
+          if (p === "session" || p === "ready") return "left in session  ·  " + Math.round(isFinite(show.heldF) ? show.heldF : show.shownF) + "°F"
+          if (p === "cooling") return "cooling  ·  from " + Math.round(show.peakF) + "°F"
+          // The big number here is the time spent at temperature.
+          var bits = ["at temp"]
           if (isFinite(show.summaryHeatup)) bits.push("Heat-up " + show.fmtTime(show.summaryHeatup))
           bits.push("Peak " + Math.round(show.peakF) + "°F")
           if (isFinite(show.summaryBattery) && show.summaryBattery > 0) bits.push("−" + Math.round(show.summaryBattery) + "% battery")

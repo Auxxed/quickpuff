@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -129,7 +130,7 @@ Column {
       spacing: Style.spacing.controlGap
       readonly property real cellWidth: (width - spacing * 3) / 4
 
-      SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Today"; glyph: "\uf185"; highlight: true; value: panel.countLabel(panel.telemetry.today) }
+      SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Today"; glyph: "\uf185"; highlight: panel.dailyLimit > 0 && (Number(panel.telemetry.today) || 0) >= panel.dailyLimit; value: panel.countLabel(panel.telemetry.today) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Week"; glyph: "\uf073"; value: panel.countLabel(panel.telemetry.this_week) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Month"; glyph: "\uf274"; value: panel.countLabel(panel.telemetry.this_month) }
       SummaryCell { panel: usagePages.panel; width: summaryRow.cellWidth; title: "Lifetime"; glyph: "\uf091"; value: panel.countLabel(panel.statusData.total_dabs) }
@@ -181,11 +182,14 @@ Column {
                   : Style.space(2)
                 anchors.bottom: parent.bottom
                 radius: Math.min(2, Style.cornerRadius)
-                // Bars wear the active profile's colour, today's fullest.
+                // Today in the profile's colour; earlier days quiet, unless
+                // they went over your daily limit.
+                readonly property bool over: panel.dailyLimit > 0 && parent.count > panel.dailyLimit
                 readonly property color barTop: parent.hovered ? Qt.lighter(panel.profileTint, 1.35)
                   : parent.isToday ? panel.profileTint
-                  : parent.count > 0 ? Util.alpha(panel.profileTint, 0.7)
-                  : Util.alpha(panel.foreground, 0.12)
+                  : over ? Util.alpha(panel.urgent, 0.55)
+                  : parent.count > 0 ? Util.alpha(panel.foreground, 0.28)
+                  : Util.alpha(panel.foreground, 0.1)
                 gradient: Gradient {
                   GradientStop { position: 0.0; color: dayBar.barTop }
                   GradientStop { position: 1.0; color: Util.alpha(dayBar.barTop, dayBar.barTop.a * 0.45) }
@@ -193,15 +197,16 @@ Column {
 
                 // Bars rise in a left-to-right ripple.
                 Behavior on height {
+                  enabled: !panel.calm
                   SequentialAnimation {
                     PauseAnimation { duration: Math.min(dayBar.parent.index, 40) * 14 }
                     NumberAnimation { duration: 520; easing.type: Easing.OutCubic }
                   }
                 }
 
-                // A bright cap on every day with dabs; today's glows.
+                // A bright cap on today (and the day under the pointer).
                 Rectangle {
-                  visible: dayBar.parent.count > 0
+                  visible: dayBar.parent.count > 0 && (dayBar.parent.isToday || dayBar.parent.hovered)
                   width: parent.width
                   height: Math.max(2, Style.space(2))
                   radius: height / 2
@@ -228,6 +233,38 @@ Column {
             }
           }
         }
+
+        // Your daily limit (Care → Goals), as a dashed line across the days.
+        Item {
+          id: limitLine
+          readonly property bool shown: panel.dailyLimit > 0 && panel.dailyLimit <= panel.chartPeak && panel.onUsageStats
+          visible: shown
+          width: parent.width
+          height: 1
+          y: parent.height * (1 - panel.dailyLimit / Math.max(1, panel.chartPeak))
+          Shape {
+            anchors.fill: parent
+            ShapePath {
+              strokeColor: Util.alpha(panel.foreground, 0.45)
+              strokeWidth: 1
+              strokeStyle: ShapePath.DashLine
+              dashPattern: [3, 3]
+              fillColor: "transparent"
+              startX: 0; startY: 0
+              PathLine { x: limitLine.width; y: 0 }
+            }
+          }
+          Text {
+            anchors.right: parent.right
+            anchors.bottom: parent.top
+            anchors.bottomMargin: Style.space(1)
+            textFormat: Text.PlainText
+            text: panel.dailyLimit + "/day"
+            color: panel.dim
+            font.family: panel.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
       }
 
       Item {
@@ -238,7 +275,12 @@ Column {
           id: firstDay
           anchors.left: parent.left
           textFormat: Text.PlainText
-          text: panel.dailySeries.length ? String(panel.dailySeries[0].day || "") : ""
+          // The first day as a date ("Oct 5"); the last is always today.
+          text: {
+            if (!panel.dailySeries.length) return ""
+            var d = new Date(String(panel.dailySeries[0].date || "") + "T12:00:00")
+            return isNaN(d.getTime()) ? String(panel.dailySeries[0].day || "") : Qt.formatDate(d, "MMM d")
+          }
           color: panel.dim
           font.family: panel.fontFamily
           font.pixelSize: Style.font.caption
@@ -246,7 +288,7 @@ Column {
         Text {
           anchors.right: parent.right
           textFormat: Text.PlainText
-          text: panel.dailySeries.length ? String(panel.dailySeries[panel.dailySeries.length - 1].day || "") : ""
+          text: panel.dailySeries.length ? "Today" : ""
           color: panel.dim
           font.family: panel.fontFamily
           font.pixelSize: Style.font.caption

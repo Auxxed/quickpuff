@@ -64,7 +64,7 @@ Rectangle {
     }
 
     SequentialAnimation on opacity {
-      running: meter.throb && meter.visible && panel.opened
+      running: meter.throb && meter.visible && panel.opened && !panel.calm
       loops: Animation.Infinite
       alwaysRunToEnd: true
       NumberAnimation { to: 0.5; duration: 700; easing.type: Easing.InOutSine }

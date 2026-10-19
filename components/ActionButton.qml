@@ -75,8 +75,8 @@ BorderSurface {
     // blue doesn't glare; full brightness on hover.
     readonly property color rest: Qt.hsla(chip.tint.hslHue, chip.tint.hslSaturation * 0.85, chip.tint.hslLightness * 0.92, 1)
     gradient: Gradient {
-      GradientStop { position: 0.0; color: chip.hot ? Qt.lighter(chip.tint, 1.1) : solidFill.rest }
-      GradientStop { position: 1.0; color: Qt.darker(chip.hot ? chip.tint : solidFill.rest, chip.hot ? 1.25 : 1.4) }
+      GradientStop { position: 0.0; color: chip.hot ? Qt.lighter(solidFill.rest, 1.08) : solidFill.rest }
+      GradientStop { position: 1.0; color: Qt.darker(solidFill.rest, chip.hot ? 1.25 : 1.4) }
     }
   }
 

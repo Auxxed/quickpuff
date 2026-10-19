@@ -82,7 +82,7 @@ Column {
     SwitchRow {
       panel: lightsPage.panel
       width: parent.width
-      label: "LED"
+      label: "Lantern"
       checked: panel.lanternOn
       onToggled: panel.toggleLantern()
     }

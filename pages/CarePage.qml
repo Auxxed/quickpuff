@@ -40,7 +40,7 @@ Column {
         font.family: panel.displayFamily
         font.pixelSize: Math.round(Style.font.subtitle * panel.displayScale)
         font.weight: Font.DemiBold
-        onVisibleChanged: if (visible && panel.opened) intro()
+        onVisibleChanged: if (visible && panel.opened && panel.introNow && !panel.calm) intro()
       }
       Text {
         anchors.right: parent.right
@@ -174,7 +174,7 @@ Column {
       text: panel.cleanDue
         ? "Swab the chamber, then mark it cleaned."
         : panel.cleanRemaining + " dab" + (panel.cleanRemaining === 1 ? "" : "s") + " until the reminder."
-      color: panel.cleanDue ? panel.urgent : panel.dim
+      color: panel.cleanDue ? Qt.tint(panel.dim, Util.alpha(panel.urgent, 0.55)) : panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption
     }
@@ -188,7 +188,9 @@ Column {
         id: cleanButton
         width: parent.width
         label: "Mark cleaned"
-        glyph: "\uf0d0"
+        glyph: "\uf00c"
+        // The thing to do when a clean is due: solid, like Heat at rest.
+        solid: panel.cleanDue
         emphasized: panel.cleanDue
         tint: panel.cleanDue ? panel.urgent : panel.foreground
         onActivated: {
