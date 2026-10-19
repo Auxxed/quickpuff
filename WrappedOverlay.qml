@@ -392,42 +392,17 @@ PanelWindow {
             color: Qt.tint("white", Util.alpha(Qt.lighter(wrap.tint, 1.5), 0.6 * bigLine.zap))
             opacity: page.beat(1)
 
-            // 1 → 0 through a strike, flickering on the way out.
+            // 1 → 0 through a strike: the digits flash white as they land
+            // and a ring the shape of the line spreads out from them.
             property real zap: 0
-            property var forks: []
-            function bolt(x0, y0, dir, len, segs, jag) {
-              var pts = [Qt.point(x0, y0)]
-              for (var i = 1; i <= segs; i++) {
-                var f = i / segs
-                pts.push(Qt.point(x0 + dir * len * f, y0 + (i === segs ? 0.4 : 1) * (Math.random() - 0.5) * 2 * jag * (0.4 + f)))
-              }
-              return pts
-            }
             function strike() {
-              var u = wrap.u
-              var cx = width / 2, cy = height / 2
-              var half = Math.min(width / 2, contentWidth / 2) + 26 * u
-              var f = []
-              for (var side = -1; side <= 1; side += 2) {
-                var main = bolt(cx + side * half, cy + (Math.random() - 0.5) * contentHeight * 0.3, side, (200 + Math.random() * 120) * u, 9, 22 * u)
-                f.push(main)
-                // A branch off the main bolt's middle, angling away.
-                var at = main[3 + Math.floor(Math.random() * 3)]
-                var b = bolt(at.x, at.y, side, (70 + Math.random() * 60) * u, 4, 16 * u)
-                var tilt = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 40) * u
-                for (var k = 1; k < b.length; k++) b[k] = Qt.point(b[k].x, b[k].y + tilt * k / (b.length - 1))
-                f.push(b)
-              }
-              forks = f
               zapAnim.restart()
               shockAnim.restart()
             }
             SequentialAnimation {
               id: zapAnim
-              NumberAnimation { target: bigLine; property: "zap"; from: 0; to: 1; duration: 50 }
-              NumberAnimation { target: bigLine; property: "zap"; to: 0.25; duration: 70 }
-              NumberAnimation { target: bigLine; property: "zap"; to: 0.9; duration: 50 }
-              NumberAnimation { target: bigLine; property: "zap"; to: 0; duration: 520; easing.type: Easing.OutCubic }
+              NumberAnimation { target: bigLine; property: "zap"; from: 0; to: 1; duration: 60; easing.type: Easing.OutQuad }
+              NumberAnimation { target: bigLine; property: "zap"; to: 0; duration: 480; easing.type: Easing.OutCubic }
             }
 
             // The shockwave: a ring the shape of the line, spreading out.
@@ -436,7 +411,8 @@ PanelWindow {
               z: -1
               property real k: 1
               anchors.centerIn: parent
-              width: Math.min(bigLine.width, bigLine.contentWidth) + (24 + 220 * k) * wrap.u
+              // Always a wide pill, even round a two-digit number.
+              width: Math.max(Math.min(bigLine.width, bigLine.contentWidth) + (24 + 220 * k) * wrap.u, height * 2.2)
               height: bigLine.contentHeight * 0.8 + (12 + 140 * k) * wrap.u
               radius: height / 2
               color: "transparent"
@@ -446,34 +422,12 @@ PanelWindow {
               visible: k < 1
               NumberAnimation { id: shockAnim; target: shock; property: "k"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
             }
-            Shape {
-              anchors.fill: parent
-              visible: bigLine.zap > 0.01
-              opacity: bigLine.zap
-              preferredRendererType: Shape.CurveRenderer
-              ShapePath {
-                strokeColor: Util.alpha(wrap.tint, 0.35)
-                strokeWidth: 12 * wrap.u
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                joinStyle: ShapePath.RoundJoin
-                PathMultiline { paths: bigLine.forks }
-              }
-              ShapePath {
-                strokeColor: Qt.tint(wrap.tint, Util.alpha("#ffffff", 0.7))
-                strokeWidth: 3 * wrap.u
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                joinStyle: ShapePath.RoundJoin
-                PathMultiline { paths: bigLine.forks }
-              }
-            }
             scale: 0.86 + 0.14 * page.beat(1) + 0.04 * Math.sin(Math.PI * page.beat(1))
             font.family: wrap.display
             font.pixelSize: (page.spec.count !== undefined ? 220 : 120) * wrap.u
             font.letterSpacing: 6 * wrap.u
             style: Text.Outline
-            styleColor: Util.alpha(wrap.tint, 0.35)
+            styleColor: Util.alpha(Qt.lighter(wrap.tint, 1.0 + 0.4 * bigLine.zap), 0.35 + 0.5 * bigLine.zap)
           }
           Text {
             width: parent.width
