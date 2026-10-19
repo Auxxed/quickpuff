@@ -21,6 +21,9 @@ PanelWindow {
   property bool soundsOn: true
   property real soundVolume: 0.7
   property var w: ({})
+  // Temperatures shown in °C when that's the chosen unit.
+  property bool celsius: false
+  function toUnit(f) { return celsius ? Math.round((f - 32) * 5 / 9) : f }
   property var slides: []
   property int slide: -1
   property string savedTo: ""
@@ -120,7 +123,7 @@ PanelWindow {
         "small": w.busiest ? "Busiest day: " + dateText(w.busiestDate) + " · " + w.busiest + " sessions" : "" })
       if (w.topName) s.push({ "kicker": "YOUR FAVOURITE PROFILE", "big": w.topName.toUpperCase(),
         "small": w.topShare !== null ? Math.round(w.topShare * 100) + "% of your sessions" : "" })
-      if (w.hottest) s.push({ "kicker": "HOTTEST SESSION", "count": w.hottest, "unit": "°F", "tint": String(heatColor(w.hottest)),
+      if (w.hottest) s.push({ "kicker": "HOTTEST SESSION", "count": toUnit(w.hottest), "unit": celsius ? "°C" : "°F", "tint": String(heatColor(w.hottest)),
         "small": w.heatup ? "Average heat-up: " + w.heatup + " s" : "" })
       if (w.weekday) s.push({ "kicker": "PRIME TIME", "big": w.weekday.toUpperCase() + "S", "tint": "#8a6dff",
         "small": w.hour !== null ? "around " + hourText(w.hour) : "" })
@@ -598,7 +601,7 @@ PanelWindow {
             { "label": "SESSIONS", "value": String(wrap.w.sessions || 0) },
             { "label": "LONGEST STREAK", "value": wrap.w.streak ? wrap.w.streak + " days" : "–" },
             { "label": "FAVOURITE", "value": wrap.w.topName || "–" },
-            { "label": "HOTTEST", "value": wrap.w.hottest ? wrap.w.hottest + "°F" : "–" },
+            { "label": "HOTTEST", "value": wrap.w.hottest ? wrap.toUnit(wrap.w.hottest) + (wrap.celsius ? "°C" : "°F") : "–" },
             { "label": "PRIME TIME", "value": wrap.w.weekday ? wrap.w.weekday + " " + wrap.hourText(wrap.w.hour) : "–" },
             { "label": "AVG HEAT-UP", "value": wrap.w.heatup ? wrap.w.heatup + " s" : "–" }
           ]

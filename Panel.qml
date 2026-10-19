@@ -630,6 +630,23 @@ Panel {
   function formatSessionTime(ts) {
     return Qt.formatDateTime(new Date(Number(ts) * 1000), "ddd MMM d, h:mm AP")
   }
+  // History groups its dabs by day under a heading; each card keeps the time.
+  function formatSessionClock(ts) {
+    return Qt.formatDateTime(new Date(Number(ts) * 1000), "h:mm AP")
+  }
+  function sessionDayKey(ts) {
+    var d = new Date(Number(ts) * 1000)
+    return d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate()
+  }
+  function sessionDayHeading(ts) {
+    var d = new Date(Number(ts) * 1000), now = new Date()
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    var day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    var ago = Math.round((today - day) / 86400000)
+    if (ago === 0) return "Today"
+    if (ago === 1) return "Yesterday"
+    return Qt.formatDate(d, ago < 7 ? "dddd" : "ddd MMM d")
+  }
   readonly property bool onDeviceInfo: onDevice && deviceTab === "info"
   readonly property bool onDeviceTips: onDevice && deviceTab === "tips"
   readonly property var deviceTabOptions: [
@@ -1463,9 +1480,9 @@ Panel {
   // One friendly line under the device name; the state itself stays in the
   // small-caps meta line above it.
   readonly property string moodLine: {
-    if (needsSetup) return "Let's get the background service running"
+    if (needsSetup) return "Needs a one-time setup"
     if (!connected) {
-      if (resting) return "Catching a few z's to save battery"
+      if (resting) return opened ? "Waking it up…" : "Catching a few z's to save battery"
       if (handedOff) return "Hanging out with another computer"
       if (connecting) return "Reaching out to your Peak…"
       return "Asleep. Wake it up to say hi"
@@ -1588,10 +1605,17 @@ Panel {
     commitWriteTimer.restart()
   }
 
+  // One step from `currentF`: delta °F, or in °C the nearest whole number
+  // of degrees (5°F → 3°C) from the shown value, so °C steps are even.
+  function stepF(currentF, delta) {
+    if (!celsius) return currentF + delta
+    var stepC = Math.max(1, Math.round(Math.abs(delta) * 5 / 9)) * (delta < 0 ? -1 : 1)
+    return cToF(Math.round(fToC(currentF)) + stepC)
+  }
   function canStepTemp(index, fallback, delta) {
     var current = profileTempF(index, fallback)
     if (index < 0 || !isFinite(current)) return false
-    return clampTempF(current + delta) !== Math.round(current)
+    return clampTempF(stepF(current, delta)) !== Math.round(current)
   }
 
   function canStepTime(index, fallback, delta) {
@@ -1602,7 +1626,7 @@ Panel {
 
   function stepTemp(index, fallback, delta) {
     if (!canStepTemp(index, fallback, delta)) return
-    setPendingTemp(index, clampTempF(profileTempF(index, fallback) + delta))
+    setPendingTemp(index, clampTempF(stepF(profileTempF(index, fallback), delta)))
   }
 
   function stepTime(index, fallback, delta) {

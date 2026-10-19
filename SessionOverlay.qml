@@ -124,6 +124,10 @@ PanelWindow {
   readonly property string profileName: profile && profile.name ? String(profile.name).toUpperCase() : "HEAT"
   readonly property real targetF: profile ? Number(profile.temp_f) : NaN
   readonly property real tempF: Number(st.heater_temp_f)
+  // Readings stay in °F inside; shown in °C when that's the chosen unit.
+  property bool celsius: false
+  function toUnit(f) { return celsius ? (f - 32) * 5 / 9 : f }
+  function fmt(f) { return isFinite(f) ? Math.round(toUnit(f)) + (celsius ? "°C" : "°F") : "" }
   // A temperature as a flame colour, the same ramp as the panel's hero
   // (Panel.heatRamp): pale amber, orange, ember red, white-hot.
   function heatColor(f) {
@@ -816,7 +820,7 @@ PanelWindow {
           duration: 520
           stagger: 60
           text: show.countText !== "" ? show.countText
-            : isFinite(show.heldF) && show.heldF > 0 ? String(Math.round(show.heldF)) : "—"
+            : isFinite(show.heldF) && show.heldF > 0 ? String(Math.round(show.toUnit(show.heldF))) : "—"
           // Plain while the chamber's cold, the heat's colour building in from
           // 200°F, like the panel's number.
           color: Qt.tint("#f4eef6", Util.alpha(show.heatColor(show.heldF), Math.max(0, Math.min(1, (show.heldF - 200) / 300))))
@@ -828,7 +832,7 @@ PanelWindow {
           y: big.height * 0.14
           visible: show.countText === ""
           textFormat: Text.PlainText
-          text: "°F"
+          text: show.celsius ? "°C" : "°F"
           color: Util.alpha("#f4eef6", 0.6)
           font.family: show.display
           font.pixelSize: 64 * show.u
@@ -846,7 +850,7 @@ PanelWindow {
         transform: Translate { x: (1 - show.enter(2)) * 60 * show.u }
         textFormat: Text.PlainText
         text: show.phase === "preheat"
-          ? "→  " + (isFinite(show.targetF) ? Math.round(show.targetF) + "°F" : "") + (show.secondsLeft > 0 ? "   ·   " + show.fmtTime(show.secondsLeft) : "")
+          ? "→  " + show.fmt(show.targetF) + (show.secondsLeft > 0 ? "   ·   " + show.fmtTime(show.secondsLeft) : "")
           : show.phase === "cooling" ? "Session over" : "Slow pull. Big flavor."
         color: Util.alpha("#f4eef6", 0.62)
         font.family: show.display
@@ -1099,7 +1103,7 @@ PanelWindow {
           var p = show.phase
           if (p === "session" || p === "ready") return show.fmtTime(show.secondsLeft)
           if (p === "summary" || p === "done") return show.fmtTime(show.summaryDur)
-          return isFinite(show.tempF) && show.tempF > 0 ? Math.round(show.tempF) + "°" : "—"
+          return isFinite(show.tempF) && show.tempF > 0 ? Math.round(show.toUnit(show.tempF)) + "°" : "—"
         }
         color: "#f4eef6"
         font.family: show.display
@@ -1110,14 +1114,14 @@ PanelWindow {
         textFormat: Text.PlainText
         text: {
           var p = show.phase
-          if (p === "preheat") return "to " + (isFinite(show.targetF) ? Math.round(show.targetF) + "°F" : "temperature")
-          if (p === "session" || p === "ready") return "left in session  ·  " + Math.round(isFinite(show.heldF) ? show.heldF : show.shownF) + "°F"
-          if (p === "cooling") return "cooling  ·  from " + Math.round(show.peakF) + "°F"
+          if (p === "preheat") return "to " + (isFinite(show.targetF) ? show.fmt(show.targetF) : "temperature")
+          if (p === "session" || p === "ready") return "left in session  ·  " + show.fmt(isFinite(show.heldF) ? show.heldF : show.shownF)
+          if (p === "cooling") return "cooling  ·  from " + show.fmt(show.peakF)
           // The big number here is the time spent at temperature.
           var bits = ["at temp"]
           // Heat-up is on the panel's Last session card; the line keeps to
           // what fits beside the time.
-          bits.push("peak " + Math.round(show.peakF) + "°F")
+          bits.push("peak " + show.fmt(show.peakF))
           if (isFinite(show.summaryBattery) && show.summaryBattery > 0) bits.push("\uf241 −" + Math.round(show.summaryBattery) + "%")
           return bits.join(" · ")
         }

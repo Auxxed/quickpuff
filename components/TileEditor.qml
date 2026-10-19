@@ -43,15 +43,30 @@ TextField {
     })
   }
 
-  onAccepted: editor.committed(editor.text)
+  // Set once Enter or Esc has settled it, so losing focus as it closes
+  // doesn't save (again).
+  property bool settled: false
+  onAccepted: {
+    settled = true
+    editor.committed(editor.text)
+  }
   Keys.onEscapePressed: function(event) {
+    settled = true
     panel.cancelEditFor(editor.owningIndex, editor.owningField)
     event.accepted = true
   }
+  // Clicking away keeps what was typed (as notes do); Esc is the way out
+  // without saving. An unchanged or empty field just closes.
   onActiveFocusChanged: {
-    if (!armed || activeFocus) return
+    if (!armed || activeFocus || settled) return
+    settled = true
     var index = editor.owningIndex
     var field = editor.owningField
+    var typed = String(editor.text).trim()
+    if (typed !== "" && typed !== String(editor.seed).trim()) {
+      Qt.callLater(function() { editor.committed(typed) })
+      return
+    }
     Qt.callLater(function() { panel.cancelEditFor(index, field) })
   }
 }

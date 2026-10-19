@@ -69,7 +69,9 @@ Column {
       text: panel.sessionList === null
         ? (panel.sessionsLoading ? "Loading your dabs\u2026" : "")
         : panel.sessionList.length === 0
-          ? "No dabs yet. Each one shows up here, ready for a note."
+          ? (Number(panel.statusData.total_dabs) > 0
+            ? "No sessions recorded on this computer yet. Dabs you take while QuickPuff runs show up here, ready for a note."
+            : "No dabs yet. Each one shows up here, ready for a note.")
           : "Tap a dab to add or edit its note."
       color: panel.dim
       font.family: panel.fontFamily
@@ -79,15 +81,34 @@ Column {
     Repeater {
       model: panel.sessionList || []
 
-      SessionCard {
+      Column {
         id: sessionRow
-        panel: usagePages.panel
         required property var modelData
         required property int index
         width: parent ? parent.width : 0
-        session: modelData
+        spacing: Style.space(6)
         transform: Translate { id: sessionShift }
         ListEnter { target: sessionRow; shift: sessionShift; index: sessionRow.index; fresh: Date.now() - panel.sessionsShownAt < 1500 }
+
+        // A heading where a new day starts (Today, Yesterday, Friday, ...).
+        Text {
+          readonly property var prev: sessionRow.index > 0 && panel.sessionList ? panel.sessionList[sessionRow.index - 1] : null
+          visible: !prev || panel.sessionDayKey(prev.ts) !== panel.sessionDayKey(sessionRow.modelData.ts)
+          topPadding: sessionRow.index > 0 ? Style.space(6) : 0
+          textFormat: Text.PlainText
+          text: panel.sessionDayHeading(sessionRow.modelData.ts).toUpperCase()
+          color: panel.dim
+          font.family: panel.displayFamily
+          font.pixelSize: Math.round(Style.font.caption * panel.displayScale)
+          font.weight: Font.DemiBold
+          font.letterSpacing: panel.hasDisplayFont ? 1.2 : 0
+        }
+
+        SessionCard {
+          panel: usagePages.panel
+          width: parent.width
+          session: sessionRow.modelData
+        }
       }
     }
 

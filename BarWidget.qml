@@ -471,6 +471,7 @@ BarWidget {
     show.originX = p.x
     show.barEdge = atTop ? p.y + button.height : screenH - (win ? win.height : 0) + p.y
     show.mode = root.showtimeMode
+    show.celsius = root.units === "C"
     show.soundsOn = root.soundsOn
     show.soundVolume = root.soundVolume
     // On the stage the rocket is the stage's own Peak lifting off.
@@ -506,6 +507,7 @@ BarWidget {
     if (win && win.screen) show.screen = win.screen
     show.soundsOn = root.soundsOn
     show.soundVolume = root.soundVolume
+    show.celsius = root.units === "C"
     show.play(data)
   }
 

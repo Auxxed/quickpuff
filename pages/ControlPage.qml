@@ -18,6 +18,19 @@ Column {
   transform: Translate { id: pageShift }
   Reveal { panel: controlPage.panel; target: controlPage; shift: pageShift; cascade: false; slide: true }
 
+  // Above the buttons, so it's read before Heat is pressed.
+  Text {
+    width: parent.width
+    visible: panel.lowHeatBattery && !panel.heating
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    horizontalAlignment: Text.AlignHCenter
+    text: "\uf071  Battery " + Math.round(Number(panel.statusData.battery)) + "%: the Peak may refuse to heat. Plug it in first."
+    color: panel.urgent
+    font.family: panel.fontFamily
+    font.pixelSize: Style.font.caption
+  }
+
   Row {
     id: actionRow
     width: parent.width
@@ -33,8 +46,9 @@ Column {
       glyph: "\uf06d"
       tall: true
       tint: panel.profileTint
-      solid: !panel.heating
-      emphasized: !panel.heating
+      // Not the call to action when the battery's too low to heat.
+      solid: !panel.heating && !panel.lowHeatBattery
+      emphasized: !panel.heating && !panel.lowHeatBattery
       // Full once it's there. While it climbs the hero's bar and the timer
       // ring show how far, and Stop is the action, so Heat keeps still.
       progress: panel.atTemp ? 1 : -1
@@ -66,17 +80,6 @@ Column {
     }
   }
 
-  Text {
-    width: parent.width
-    visible: panel.lowHeatBattery && !panel.heating
-    textFormat: Text.PlainText
-    wrapMode: Text.WordWrap
-    horizontalAlignment: Text.AlignHCenter
-    text: "\uf071  Battery " + Math.round(Number(panel.statusData.battery)) + "%: the Peak may refuse to heat. Plug it in first."
-    color: panel.urgent
-    font.family: panel.fontFamily
-    font.pixelSize: Style.font.caption
-  }
 
   Item {
     id: timerRow
@@ -646,8 +649,8 @@ Column {
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       text: panel.rampMethod === "live"
-        ? "This profile's first pull runs 40° under its temperature for flavour, the last 20° over it so nothing's left in the chamber."
-        : "The last pull runs 20° hot so nothing's left in the chamber. (The low start needs a one-time check: quickpuff ramp probe --yes, next to the Peak.)"
+        ? "This profile's first pull runs " + (panel.celsius ? "22°" : "40°") + " under its temperature for flavour, the last " + (panel.celsius ? "11°" : "20°") + " over it so nothing's left in the chamber."
+        : "The last pull runs " + (panel.celsius ? "11°" : "20°") + " hot so nothing's left in the chamber. (The low start needs a one-time check: quickpuff ramp probe --yes, next to the Peak.)"
       color: panel.dim
       font.family: panel.fontFamily
       font.pixelSize: Style.font.caption

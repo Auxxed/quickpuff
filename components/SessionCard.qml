@@ -80,7 +80,7 @@ BorderSurface {
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
-        text: panel.formatSessionTime(sessionCard.session.ts)
+        text: panel.formatSessionClock(sessionCard.session.ts)
         color: panel.dim
         font.family: panel.fontFamily
         font.pixelSize: Style.font.caption
