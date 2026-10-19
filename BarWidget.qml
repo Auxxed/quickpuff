@@ -30,7 +30,8 @@ BarWidget {
 
   QuickpuffCli { id: cli }
 
-  readonly property var readyAnimations: ["rocket", "confetti", "lava", "aurora", "fireworks", "smoke", "neon"]
+  readonly property var readyAnimations: ["rocket", "confetti", "lava", "aurora", "fireworks", "smoke", "neon",
+    "supernova", "constellation", "fireflies", "deepsea", "warp"]
   readonly property var pages: ["control", "lights", "usage", "care", "device"]
 
   function injectPanel() {
@@ -143,6 +144,7 @@ BarWidget {
     // Reached temperature: celebrate, on the overlay monitor. While
     // Showtime is up it calls the moment itself, off the live feed.
     if (root.outputClass === "preheat" && cls === "ready" && root.isOverlayScreen() && !showtimeLoader.active) root.playReady("")
+    if (root.outputClass === "preheat" && cls === "ready") readyHop.restart()
     // A heat cycle began: raise the curtain (once per cycle).
     if (cls === "preheat" || cls === "ready") {
       if (!root.showtimeThisCycle && root.showtimeMode !== "off" && root.isOverlayScreen()) root.openShowtime()
@@ -294,6 +296,10 @@ BarWidget {
   // Played over the desktop by ReadyOverlay.qml when the Peak reaches
   // temperature; which one comes from `quickpuff ready-anim`.
   property string readyAnimation: "rocket"
+  // How long Showtime's stage waits after Ready, so the ready animation
+  // plays out on it before the card takes over (seconds; 6.2 otherwise).
+  readonly property var readyHold: ({ "off": 2.2, "rocket": 7.4, "supernova": 6.6, "constellation": 6.8,
+    "fireflies": 7.0, "deepsea": 7.0, "warp": 7.0 })
   // Showtime (SessionOverlay.qml): off, corner or stage.
   property string showtimeMode: "corner"
   property bool soundsOn: true
@@ -376,7 +382,7 @@ BarWidget {
     show.launch = root.showtimeMode === "stage" && root.readyAnimation === "rocket"
     // Hold the stage long enough for the ready animation to play on it.
     show.chimeOnReady = root.readyAnimation === "off" || show.launch
-    show.holdAfterReady = root.readyAnimation === "off" ? 2.2 : root.readyAnimation === "rocket" ? 7.4 : 6.2
+    show.holdAfterReady = root.readyHold[root.readyAnimation] || 6.2
     show.armed = true
   }
 
@@ -428,6 +434,13 @@ BarWidget {
   Connections {
     target: readyLoader.item
     function onFinished() { readyLoader.active = false }
+  }
+
+  // Ready: the label hops, so the bar says it too.
+  SequentialAnimation {
+    id: readyHop
+    NumberAnimation { target: button; property: "scale"; to: 1.16; duration: 120; easing.type: Easing.OutQuad }
+    NumberAnimation { target: button; property: "scale"; to: 1.0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 2.6 }
   }
 
   // Breathes while the chamber climbs, so a glance at the bar says "almost".

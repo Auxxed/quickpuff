@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Shapes
 import QtQuick.Effects
+import QtQuick.Particles
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -45,7 +46,12 @@ PanelWindow {
     "aurora": auroraComponent,
     "fireworks": fireworksComponent,
     "smoke": smokeComponent,
-    "neon": neonComponent
+    "neon": neonComponent,
+    "supernova": supernovaComponent,
+    "constellation": constellationComponent,
+    "fireflies": firefliesComponent,
+    "deepsea": deepseaComponent,
+    "warp": warpComponent
   })
   // Puffco's display face, for the neon sign.
   FontLoader { id: displayFont; source: Qt.resolvedUrl("fonts/Rajdhani-SemiBold.ttf") }
@@ -127,6 +133,26 @@ PanelWindow {
   Component { id: fireworksComponent; Fireworks {} }
   Component { id: smokeComponent; SmokeRings {} }
   Component { id: neonComponent; NeonSign {} }
+  Component { id: supernovaComponent; Supernova {} }
+  Component { id: constellationComponent; Constellation {} }
+  Component { id: firefliesComponent; Fireflies {} }
+  Component { id: deepseaComponent; DeepSea {} }
+  Component { id: warpComponent; Warp {} }
+
+  // Repeatable noise in 0..1, so a show scatters its stars the same way
+  // every frame without storing them.
+  function hash(x) {
+    var v = Math.sin(x * 12.9898 + 78.233) * 43758.5453
+    return v - Math.floor(v)
+  }
+
+  // The profile's colour turned round the colour wheel by `dh` (0-1), at the
+  // given saturation and lightness; greys and white count as a cool blue.
+  function hueTurn(dh, sat, light) {
+    var q = Qt.color(overlay.tint)
+    var h = q.hslHue < 0 ? 0.58 : q.hslHue
+    return Qt.hsla(((h + dh) % 1 + 1) % 1, sat, light, 1)
+  }
 
   // ================================================================ Rocket
   // The Peak Pro assembles on a launch pad (body, glass into its chrome
@@ -213,7 +239,7 @@ PanelWindow {
         NumberAnimation { target: show; property: "shake"; to: 2.6; duration: 560 }
       }
       // Liftoff.
-      ScriptAction { script: { show.count = ""; readyText.pop(); overlay.cue("liftoff") } }
+      ScriptAction { script: { show.count = ""; readyText.pop(); overlay.cue("liftoff"); blastAnim.restart() } }
       ParallelAnimation {
         NumberAnimation { target: show; property: "liftY"; to: -(show.padY + 420 * show.s); duration: 1450; easing.type: Easing.InCubic }
         NumberAnimation { target: show; property: "flameStretch"; to: 2.4; duration: 800; easing.type: Easing.OutCubic }
@@ -271,6 +297,55 @@ PanelWindow {
       }
     }
 
+    // ---- Liftoff: a ring of light and dust racing out across the ground.
+    property real blast: 0
+    NumberAnimation { id: blastAnim; target: show; property: "blast"; from: 0; to: 1; duration: 1100; easing.type: Easing.OutCubic }
+    Repeater {
+      model: [{ "w": 18, "a": 0.18 }, { "w": 4, "a": 0.85 }]
+      Rectangle {
+        required property var modelData
+        visible: show.blast > 0 && show.blast < 1
+        width: (60 + 520 * show.blast) * show.s
+        height: width * 0.2
+        radius: height / 2
+        x: show.padX - width / 2
+        y: show.padY - height / 2
+        color: "transparent"
+        border.width: Math.max(1, modelData.w * show.s * (1 - 0.6 * show.blast))
+        border.color: Util.alpha(Qt.tint("#ffd9a8", Util.alpha(overlay.tint, 0.4)), modelData.a)
+        opacity: Math.pow(1 - show.blast, 1.5) * show.fadeAll
+      }
+    }
+
+    // ---- Sparks spraying off the flame while it burns.
+    Repeater {
+      model: 16
+      Rectangle {
+        id: spark
+        required property int index
+        property real k: 0
+        readonly property real side: index % 2 ? 1 : -1
+        readonly property real spread: (0.25 + ((index * 41) % 60) / 100) * side
+        readonly property real fly: (60 + (index * 29) % 90) * show.s
+        width: 3 * show.s
+        height: (8 + 10 * (1 - k)) * show.s
+        radius: width / 2
+        rotation: drop > show.padY ? 90 * side : spread * 60
+        // Down out of the flame, then skidding along the pad once they hit it.
+        readonly property real drop: rocket.y + rocket.height + 6 * show.s + fly * 1.1 * k
+        x: show.padX + show.shakeX + spread * fly * k * (drop > show.padY ? 1.8 : 1) - width / 2
+        y: Math.min(show.padY + 2 * show.s, drop) - height / 2
+        color: index % 3 ? "#ffd27a" : "#ffffff"
+        opacity: show.flame > 0.3 ? (1 - k) * show.fadeAll : 0
+        SequentialAnimation on k {
+          running: show.flame > 0.3
+          loops: Animation.Infinite
+          PauseAnimation { duration: (spark.index * 53) % 300 }
+          NumberAnimation { from: 0; to: 1; duration: 420 + (spark.index % 4) * 70; easing.type: Easing.OutQuad }
+        }
+      }
+    }
+
     // ---- Contrail from the pad up to the rocket
     Rectangle {
       opacity: show.trailOn * show.fadeAll * 0.8
@@ -286,22 +361,34 @@ PanelWindow {
       }
     }
 
-    // ---- Smoke
+    // ---- Smoke: soft clouds rolling out along the ground, lit warm from
+    // the flame on their near side.
     Repeater {
-      model: 18
+      model: 22
 
-      Rectangle {
+      Shape {
         id: puff
         required property int index
         readonly property real side: index % 2 ? 1 : -1
-        readonly property real reach: (40 + (index * 37) % 70) * show.s
-        width: (18 + (index * 13) % 16) * show.s
+        readonly property real reach: (40 + (index * 37) % 80) * show.s
+        readonly property color body: index % 3 ? "#e3e5ea" : "#c3c7cf"
+        width: (22 + (index * 13) % 18) * show.s
         height: width
-        radius: width / 2
-        color: index % 3 ? "#d9dce3" : "#b7bcc6"
         opacity: 0
         x: show.padX - width / 2
         y: show.padY - height / 2
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: RadialGradient {
+            centerX: puff.width / 2; centerY: puff.height / 2; centerRadius: puff.width / 2
+            focalX: puff.width * 0.42; focalY: puff.height * 0.62
+            GradientStop { position: 0.0; color: Qt.tint(puff.body, Util.alpha("#ffb36b", 0.22)) }
+            GradientStop { position: 0.55; color: Util.alpha(puff.body, 0.55) }
+            GradientStop { position: 1.0; color: Util.alpha(puff.body, 0) }
+          }
+          PathSvg { path: "M0," + puff.height / 2 + " A" + puff.width / 2 + "," + puff.height / 2 + " 0 1,0 " + puff.width + "," + puff.height / 2 + " A" + puff.width / 2 + "," + puff.height / 2 + " 0 1,0 0," + puff.height / 2 + " Z" }
+        }
 
         SequentialAnimation {
           running: show.smoking
@@ -310,10 +397,10 @@ PanelWindow {
           ParallelAnimation {
             NumberAnimation { target: puff; property: "x"; from: show.padX - puff.width / 2; to: show.padX - puff.width / 2 + puff.side * puff.reach; duration: 1100; easing.type: Easing.OutCubic }
             NumberAnimation { target: puff; property: "y"; from: show.padY - puff.height / 2; to: show.padY - puff.height / 2 - (puff.index % 4) * 9 * show.s; duration: 1100; easing.type: Easing.OutCubic }
-            NumberAnimation { target: puff; property: "scale"; from: 0.4; to: 1.8; duration: 1100 }
+            NumberAnimation { target: puff; property: "scale"; from: 0.4; to: 2.2; duration: 1100; easing.type: Easing.OutCubic }
             SequentialAnimation {
-              NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.75 * show.fadeAll; duration: 180 }
-              NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 920; easing.type: Easing.InQuad }
+              NumberAnimation { target: puff; property: "opacity"; from: 0; to: 0.95 * show.fadeAll; duration: 160 }
+              NumberAnimation { target: puff; property: "opacity"; to: 0; duration: 940; easing.type: Easing.InQuad }
             }
           }
         }
@@ -829,20 +916,44 @@ PanelWindow {
           height: size * (1 - 0.12 * Math.sin(p * Math.PI * 5 + index))
           radius: Math.min(width, height) / 2
           x: lava.width * (0.04 + ((index * 37) % 92) / 100) + Math.sin(p * Math.PI * 2 + index) * 40 * lava.s - width / 2
-          y: lava.height + size - eased * (lava.height + 2.4 * size)
+          y: lava.height + size * 0.35 - eased * (lava.height + 1.75 * size)
           color: lava.hues[index % lava.hues.length]
           opacity: p <= 0 || p >= 1 ? 0 : Math.min(1, p / 0.1, (1 - p) / 0.15)
         }
       }
     }
 
+    // Wax: the blobs blurred together, then cut at a threshold so they
+    // merge and pull apart with clean, rounded edges, like the real thing.
+    // A soft halo of the same wax glows behind it.
+    MultiEffect {
+      id: waxBlur
+      anchors.fill: wax
+      source: wax
+      visible: false
+      layer.enabled: true
+      blurEnabled: true
+      blurMax: 64
+      blur: 1
+    }
     MultiEffect {
       anchors.fill: wax
       source: wax
       blurEnabled: true
       blurMax: 64
-      blur: 0.8
-      opacity: 0.85
+      blur: 1
+      brightness: 0.15
+      opacity: 0.35
+    }
+    MultiEffect {
+      anchors.fill: wax
+      source: waxBlur
+      maskEnabled: true
+      maskSource: waxBlur
+      maskThresholdMin: 0.42
+      maskSpreadAtMin: 0.08
+      saturation: 0.15
+      opacity: 0.92
     }
   }
 
@@ -1374,6 +1485,1491 @@ PanelWindow {
       blurMax: 4
       blur: 0.2
       opacity: neon.power
+    }
+  }
+
+  // ============================================================ Supernova
+  // Deep space falls over the desktop. A star gathers light in a slow
+  // spiral and feeds with a heartbeat, collapses to a pinprick, then
+  // detonates: a flash, a shockwave, a lens flare across the screen, rays
+  // wheeling out of the core, debris and embers flung wide, and a nebula
+  // blooming (a glowing shell of gas in the profile's colour and its
+  // neighbours, veined with dark dust, star dust glittering in it) while
+  // READY condenses out of the light.
+  component Supernova: Item {
+    id: nova
+
+    property real t: 0
+    readonly property real dur: 6.4
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property real cx: width * 0.5
+    readonly property real cy: height * 0.45
+    readonly property real blastAt: 1.9
+    // Seconds since the blast; negative before it.
+    readonly property real since: now - blastAt
+    readonly property real dark: Math.min(1, now / 0.7) * Math.max(0, Math.min(1, (dur - now) / 1.0))
+    // How far the remnant has spread: fast at first, then drifting.
+    readonly property real spread: since <= 0 ? 0 : 1 - Math.exp(-since / 1.1)
+    readonly property var cloud: [overlay.tint, overlay.hueTurn(0.07, 0.95, 0.62), overlay.hueTurn(-0.09, 0.9, 0.55),
+      overlay.hueTurn(0.5, 0.85, 0.6), overlay.hueTurn(0.42, 0.8, 0.5), overlay.hueTurn(0.15, 0.9, 0.65)]
+    property bool blown: false
+
+    NumberAnimation on t { from: 0; to: 1; duration: 6400; running: true; onFinished: overlay.finished() }
+    onSinceChanged: if (since >= 0 && !blown) {
+      blown = true
+      debris.burst(360)
+      embers.burst(70)
+      overlay.cue("firework")
+    }
+
+    // Deep space, and its far stars.
+    Rectangle { anchors.fill: parent; color: "#03020a"; opacity: 0.76 * nova.dark }
+    Repeater {
+      model: 130
+      Rectangle {
+        required property int index
+        readonly property real a: overlay.hash(index * 1.31)
+        readonly property real b: overlay.hash(index * 7.17)
+        readonly property real c: overlay.hash(index * 3.3)
+        width: (0.8 + 2 * c * c) * nova.s
+        height: width
+        radius: width / 2
+        x: a * nova.width
+        y: b * nova.height
+        color: index % 5 ? "#dfe6ff" : Qt.lighter(overlay.tint, 1.6)
+        opacity: nova.dark * (0.3 + 0.7 * Math.abs(Math.sin(nova.now * (0.7 + 2 * a) + index)))
+      }
+    }
+
+    // Gathering: motes of light spiralling in to feed the star.
+    Repeater {
+      model: 80
+      Rectangle {
+        required property int index
+        readonly property real seedA: overlay.hash(index * 2.71)
+        readonly property real seedB: overlay.hash(index * 9.13)
+        readonly property real start: 0.1 + seedA * 0.9
+        readonly property real g: Math.max(0, Math.min(1, (nova.now - start) / (nova.blastAt - 0.2 - start)))
+        readonly property real r: (0.14 + 0.36 * seedB) * nova.height * Math.pow(1 - g, 1.5)
+        readonly property real a: seedB * 6.283 + (1 - Math.pow(1 - g, 2)) * 5.5
+        width: (1.6 + 3 * seedA) * nova.s
+        height: width
+        radius: width / 2
+        x: nova.cx + Math.cos(a) * r - width / 2
+        y: nova.cy + Math.sin(a) * r * 0.8 - height / 2
+        color: index % 3 ? Qt.lighter(overlay.tint, 1.5) : "#ffffff"
+        opacity: g > 0 && g < 1 ? Math.min(1, g * 5) * nova.dark : 0
+      }
+    }
+
+    // The star: swelling as it feeds, a heartbeat in its light, a pinprick
+    // for an instant before the blast.
+    readonly property real coreSize: {
+      if (since >= 0) return 0
+      if (now > blastAt - 0.18) return 3 * s
+      var feed = Math.min(1, now / (blastAt - 0.2))
+      return (5 + 24 * feed) * s * (1 + 0.2 * Math.sin(now * 13) * feed)
+    }
+    SoftGlow {
+      hue: Qt.lighter(overlay.tint, 1.35)
+      x: nova.cx - 50
+      y: nova.cy - 50
+      scale: nova.coreSize * 5 / 100
+      opacity: nova.since < 0 ? nova.dark : 0
+    }
+    Rectangle {
+      width: nova.coreSize
+      height: width
+      radius: width / 2
+      x: nova.cx - width / 2
+      y: nova.cy - height / 2
+      color: "#ffffff"
+      visible: nova.since < 0
+    }
+
+    // The nebula, turning slowly, blurred into gas.
+    Item {
+      anchors.fill: parent
+      opacity: nova.since >= 0 ? Math.min(1, nova.since / 0.3) * nova.dark : 0
+      transform: Rotation { origin.x: nova.cx; origin.y: nova.cy; angle: 7 * Math.max(0, nova.since) }
+      layer.enabled: nova.since >= 0
+      layer.effect: MultiEffect {
+        blurEnabled: true
+        blurMax: 40
+        blur: 0.7
+        saturation: 0.15
+      }
+
+      // A faint glow of hot gas inside, in the profile's colour, darker
+      // toward the middle the way a shell nebula is hollow.
+      SoftGlow {
+        hue: Util.alpha(overlay.tint, 0.3)
+        x: nova.cx - 50
+        y: nova.cy - 50
+        opacity: 0.6
+        transform: Scale { origin.x: 50; origin.y: 50; xScale: nova.height * (0.12 + 0.6 * nova.spread) / 100; yScale: nova.height * (0.1 + 0.5 * nova.spread) / 100 }
+      }
+      // The shell: clumps of glowing gas strung unevenly round the blast
+      // front, stretched along it and overlapping, with a second, fainter
+      // layer just inside in other colours.
+      Repeater {
+        model: 44
+        SoftGlow {
+          required property int index
+          readonly property bool inner: index % 3 === 2
+          readonly property real a: overlay.hash(index * 2.9) * 6.283
+          readonly property real r: nova.height * (0.07 + 0.3 * nova.spread) * (inner ? 0.72 : 1) * (0.78 + 0.44 * overlay.hash(index * 5.3))
+          readonly property real len: nova.height * (0.1 + 0.18 * overlay.hash(index * 1.7)) * (0.3 + 0.7 * nova.spread)
+          hue: Util.alpha(nova.cloud[(index * 5 + (inner ? 3 : 0)) % nova.cloud.length], inner ? 0.35 : 0.55)
+          x: nova.cx + Math.cos(a) * r - 50
+          y: nova.cy + Math.sin(a) * r * 0.84 - 50
+          opacity: 0.6
+          transform: [
+            Scale { origin.x: 50; origin.y: 50; xScale: len / 100; yScale: len * (0.28 + 0.2 * overlay.hash(index * 8.1)) / 100 },
+            Rotation { origin.x: 50; origin.y: 50; angle: a * 180 / Math.PI + 90 + (overlay.hash(index * 4.4) - 0.5) * 30 }
+          ]
+        }
+      }
+      // Dark dust lanes crossing it, for depth.
+      Repeater {
+        model: 4
+        SoftGlow {
+          required property int index
+          readonly property real a: overlay.hash(index * 7.7) * 6.283
+          readonly property real len: nova.height * (0.22 + 0.2 * overlay.hash(index * 3.9)) * nova.spread
+          hue: Util.alpha("#020106", 0.7)
+          x: nova.cx + Math.cos(a) * nova.height * 0.12 * nova.spread - 50
+          y: nova.cy + Math.sin(a) * nova.height * 0.1 * nova.spread - 50
+          opacity: 0.6
+          transform: [
+            Scale { origin.x: 50; origin.y: 50; xScale: len / 100; yScale: len * 0.18 / 100 },
+            Rotation { origin.x: 50; origin.y: 50; angle: overlay.hash(index * 9.1) * 180 }
+          ]
+        }
+      }
+    }
+
+    // Rays wheeling out of the core.
+    Repeater {
+      model: 16
+      Rectangle {
+        required property int index
+        readonly property real len: nova.height * (0.22 + 0.32 * overlay.hash(index * 3.7)) * (0.4 + 0.6 * nova.spread)
+        x: nova.cx
+        y: nova.cy - height / 2
+        width: len
+        height: (2 + 4 * overlay.hash(index * 1.1)) * nova.s
+        radius: height / 2
+        rotation: index / 16 * 360 + overlay.hash(index) * 14 + 6 * Math.max(0, nova.since)
+        transformOrigin: Item.Left
+        opacity: nova.since >= 0 ? 0.5 * Math.min(1, nova.since / 0.15) * Math.max(0, 1 - nova.since / 3.2) * nova.dark : 0
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: "#ffffff" }
+          GradientStop { position: 0.3; color: Util.alpha(Qt.lighter(overlay.tint, 1.6), 0.6) }
+          GradientStop { position: 1.0; color: Util.alpha(overlay.tint, 0) }
+        }
+      }
+    }
+
+    // The blast's white heart, and the core left behind, still burning.
+    SoftGlow {
+      hue: "#ffffff"
+      x: nova.cx - 50
+      y: nova.cy - 50
+      readonly property real f: Math.max(0, Math.min(1, nova.since / 1.6))
+      scale: nova.height * (0.12 + 0.3 * Math.sqrt(f)) / 100
+      opacity: nova.since >= 0 ? Math.pow(1 - f, 1.6) : 0
+    }
+    SoftGlow {
+      hue: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.3))
+      x: nova.cx - 50
+      y: nova.cy - 50
+      scale: (22 + 4 * Math.sin(nova.now * 9)) * nova.s / 100
+      opacity: nova.since >= 0 ? nova.dark : 0
+    }
+
+    // The shockwave: a bright thin ring and a soft wide one.
+    Repeater {
+      model: [{ "w": 0.008, "a": 0.6, "sp": 1.0 }, { "w": 0.05, "a": 0.18, "sp": 0.88 }]
+      Rectangle {
+        required property var modelData
+        readonly property real p: Math.max(0, Math.min(1, nova.since / 1.5))
+        readonly property real e: 1 - Math.pow(1 - p, 3)
+        width: nova.height * (0.06 + 2.1 * e) * modelData.sp
+        height: width
+        radius: width / 2
+        x: nova.cx - width / 2
+        y: nova.cy - height / 2
+        color: "transparent"
+        border.width: Math.max(1, nova.height * modelData.w * (1 - 0.6 * e))
+        border.color: Util.alpha(Qt.lighter(overlay.tint, 1.5), modelData.a)
+        opacity: nova.since >= 0 && p < 1 ? Math.pow(1 - p, 1.4) : 0
+      }
+    }
+
+    // Lens flare: a streak of light across the whole screen through the core.
+    Repeater {
+      model: [{ "h": 3, "a": 1.0 }, { "h": 40, "a": 0.2 }]
+      Rectangle {
+        required property var modelData
+        readonly property real p: Math.max(0, Math.min(1, nova.since / 1.6))
+        width: nova.width * (0.25 + 0.9 * Math.sqrt(p))
+        height: modelData.h * nova.s * (1 - 0.5 * p)
+        radius: height / 2
+        x: nova.cx - width / 2
+        y: nova.cy - height / 2
+        opacity: nova.since >= 0 ? modelData.a * Math.pow(1 - p, 1.5) : 0
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: Util.alpha(Qt.lighter(overlay.tint, 1.6), 0) }
+          GradientStop { position: 0.5; color: "#ffffff" }
+          GradientStop { position: 1.0; color: Util.alpha(Qt.lighter(overlay.tint, 1.6), 0) }
+        }
+      }
+    }
+
+    // Debris, embers and star dust.
+    Item {
+      anchors.fill: parent
+      opacity: nova.dark
+
+      ParticleSystem { id: novaSys; anchors.fill: parent }
+      ImageParticle {
+        system: novaSys
+        groups: ["debris"]
+        source: Qt.resolvedUrl("particles/glow.png")
+        color: Qt.lighter(overlay.tint, 1.45)
+        colorVariation: 0.3
+        alpha: 0.95
+      }
+      ImageParticle {
+        system: novaSys
+        groups: ["embers", "dust"]
+        source: Qt.resolvedUrl("particles/spark.png")
+        color: Qt.tint("#fff6e8", Util.alpha(overlay.tint, 0.25))
+        colorVariation: 0.15
+        rotationVariation: 30
+        alpha: 1
+      }
+      Emitter {
+        id: debris
+        system: novaSys
+        group: "debris"
+        x: nova.cx - 2; y: nova.cy - 2; width: 4; height: 4
+        emitRate: 0
+        lifeSpan: 2600; lifeSpanVariation: 900
+        size: 9 * nova.s; sizeVariation: 6 * nova.s; endSize: 2 * nova.s
+        velocity: AngleDirection { angleVariation: 180; magnitude: 640 * nova.s; magnitudeVariation: 480 * nova.s }
+      }
+      Emitter {
+        id: embers
+        system: novaSys
+        group: "embers"
+        x: nova.cx - 2; y: nova.cy - 2; width: 4; height: 4
+        emitRate: 0
+        lifeSpan: 3000; lifeSpanVariation: 800
+        size: 16 * nova.s; sizeVariation: 8 * nova.s; endSize: 3 * nova.s
+        velocity: AngleDirection { angleVariation: 180; magnitude: 360 * nova.s; magnitudeVariation: 260 * nova.s }
+      }
+      Emitter {
+        system: novaSys
+        group: "dust"
+        x: nova.cx - width / 2; y: nova.cy - height / 2
+        width: nova.height * 0.85; height: nova.height * 0.6
+        shape: EllipseShape { fill: true }
+        emitRate: nova.since >= 0.4 && nova.now < nova.dur - 1.2 ? 42 : 0
+        lifeSpan: 1500; lifeSpanVariation: 600
+        size: 10 * nova.s; sizeVariation: 7 * nova.s; endSize: 0
+        velocity: PointDirection { xVariation: 16 * nova.s; yVariation: 16 * nova.s }
+      }
+      Friction { system: novaSys; groups: ["debris", "embers"]; factor: 1.8 }
+    }
+
+    // READY, condensing out of the light: wide tracking pulling in.
+    Item {
+      readonly property real e: 1 - Math.pow(1 - Math.max(0, Math.min(1, (nova.since - 0.6) / 1.3)), 3)
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: nova.cy + nova.height * 0.27
+      width: readyWord.implicitWidth
+      height: readyWord.implicitHeight
+      opacity: nova.since > 0.6 ? e * nova.dark : 0
+
+      SoftGlow {
+        hue: Util.alpha(overlay.tint, 0.28)
+        anchors.centerIn: parent
+        transform: Scale { origin.x: 50; origin.y: 50; xScale: readyWord.implicitWidth * 1.3 / 100; yScale: readyWord.implicitHeight * 1.3 / 100 }
+      }
+      Text {
+        id: readyWord
+        anchors.centerIn: parent
+        textFormat: Text.PlainText
+        text: "READY"
+        color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.2))
+        font.family: overlay.displayFamily
+        font.pixelSize: 56 * nova.s
+        font.weight: Font.DemiBold
+        font.letterSpacing: (14 + 50 * (1 - parent.e)) * nova.s
+      }
+    }
+  }
+
+  // ========================================================= Constellation
+  // Night falls over the desktop: the Milky Way spills across it and its
+  // stars come out. Then stars ignite one after another, each with a ripple
+  // of light, and draw your Peak Pro between them in fine glowing lines. A
+  // shooting star dives in and lights its ring in the profile's colour; the
+  // figure fills softly with light, as if it had come alive, and READY
+  // appears beside it like a name on a star chart.
+  component Constellation: Item {
+    id: sky
+
+    property real t: 0
+    readonly property real dur: 6.6
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property real dark: Math.min(1, now / 0.8) * Math.max(0, Math.min(1, (dur - now) / 1.0))
+    // The Peak's outline as stars, on the panel drawing's 80 x 160 grid,
+    // going round from the top of the glass. Edge 8 → 9 is the light ring;
+    // edge 12 is the glass's chrome seat, drawn last.
+    readonly property var pts: [[12.5, 1.5], [21.5, 0.8], [46, 93], [49.5, 80.5], [71, 80.5], [72.5, 104],
+      [56, 113.5], [64.5, 152], [60, 158], [9.5, 158], [6.5, 111.5], [9.5, 108]]
+    readonly property var edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8], [8, 9], [9, 10], [10, 11], [11, 0], [11, 2]]
+    readonly property real k: height * 0.6 / 160
+    readonly property real ox: width * 0.46 - 40 * k
+    readonly property real oy: height * 0.48 - 80 * k
+    function px(i) { return ox + pts[i][0] * k }
+    function py(i) { return oy + pts[i][1] * k }
+    function litAt(i) { return 0.8 + i * 0.16 }
+    function edgeAt(e) { return e < 12 ? litAt(e) + 0.08 : litAt(11) + 0.35 }
+    readonly property real shootAt: litAt(11) + 0.6
+    readonly property real shotP: Math.max(0, Math.min(1, (now - shootAt) / 0.5))
+    // The ring lighting up once the shooting star lands, and the figure
+    // filling with light after it.
+    readonly property real ringK: Math.max(0, Math.min(1, (now - shootAt - 0.5) / 0.35))
+    readonly property real alive: Math.max(0, Math.min(1, (now - shootAt - 0.7) / 0.9))
+    property bool shot: false
+
+    NumberAnimation on t { from: 0; to: 1; duration: 6600; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("shimmer")
+    onRingKChanged: if (ringK > 0 && !shot) { shot = true; overlay.cue("shimmer"); ringSparks.fire() }
+
+    // Night.
+    Rectangle {
+      anchors.fill: parent
+      opacity: sky.dark
+      gradient: Gradient {
+        GradientStop { position: 0.0; color: Util.alpha("#02030f", 0.9) }
+        GradientStop { position: 0.6; color: Util.alpha("#040920", 0.8) }
+        GradientStop { position: 1.0; color: Util.alpha("#060c26", 0.62) }
+      }
+    }
+
+    // The Milky Way: a faint, misty river of light across the sky, veined
+    // with dark dust and thick with stars.
+    Item {
+      anchors.fill: parent
+      opacity: sky.dark * Math.min(1, sky.now / 1.4)
+      Item {
+        anchors.fill: parent
+        layer.enabled: true
+        layer.effect: MultiEffect { blurEnabled: true; blurMax: 48; blur: 0.8 }
+        Repeater {
+          model: 16
+          SoftGlow {
+            required property int index
+            readonly property real f: overlay.hash(index * 3.7)
+            hue: Util.alpha(index % 4 === 1 ? "#a99cff" : "#b8c8ff", 0.09 + 0.07 * overlay.hash(index * 1.3))
+            x: sky.width * (-0.05 + 1.1 * f) + (overlay.hash(index * 6.1) - 0.5) * sky.height * 0.05 - 50
+            y: sky.height * (0.85 - 0.75 * f) + (overlay.hash(index * 5.3) - 0.5) * sky.height * 0.1 - 50
+            transform: [
+              Scale { origin.x: 50; origin.y: 50; xScale: sky.width * (0.16 + 0.18 * overlay.hash(index * 2.9)) / 100; yScale: sky.height * (0.1 + 0.14 * overlay.hash(index * 7.3)) / 100 },
+              Rotation { origin.x: 50; origin.y: 50; angle: -34 + (overlay.hash(index * 8.8) - 0.5) * 16 }
+            ]
+          }
+        }
+        Repeater {
+          model: 5
+          SoftGlow {
+            required property int index
+            readonly property real f: 0.12 + index * 0.19 + (overlay.hash(index * 4.1) - 0.5) * 0.08
+            hue: Util.alpha("#010208", 0.45)
+            x: sky.width * (-0.05 + 1.1 * f) - 50
+            y: sky.height * (0.85 - 0.75 * f) - 50
+            transform: [
+              Scale { origin.x: 50; origin.y: 50; xScale: sky.width * 0.14 / 100; yScale: sky.height * 0.025 / 100 },
+              Rotation { origin.x: 50; origin.y: 50; angle: -30 }
+            ]
+          }
+        }
+      }
+      Repeater {
+        model: 260
+        Rectangle {
+          required property int index
+          readonly property real f: overlay.hash(index * 2.17)
+          // Gathered close about the river's middle, thinning out from it.
+          readonly property real off: (overlay.hash(index * 6.61) + overlay.hash(index * 9.03) - 1) * sky.height * 0.16
+          width: (0.7 + 1.3 * overlay.hash(index * 4.4)) * sky.s
+          height: width
+          radius: width / 2
+          x: sky.width * (-0.05 + 1.1 * f) + off * 0.56
+          y: sky.height * (0.85 - 0.75 * f) + off * 0.83
+          color: "#e0e7ff"
+          opacity: 0.25 + 0.6 * Math.abs(Math.sin(sky.now * (1 + overlay.hash(index)) + index))
+        }
+      }
+    }
+
+    // Far stars, coming out one by one and twinkling, a few of them big.
+    Repeater {
+      model: 120
+      Item {
+        required property int index
+        readonly property real a: overlay.hash(index * 1.77)
+        readonly property real b: overlay.hash(index * 5.03)
+        readonly property real c: overlay.hash(index * 9.41)
+        readonly property bool big: index % 12 === 0
+        readonly property real twinkle: 0.3 + 0.7 * Math.abs(Math.sin(sky.now * (0.8 + 2.2 * a) + index * 1.3))
+        x: a * sky.width
+        y: b * sky.height * 0.92
+        opacity: sky.dark * Math.min(1, Math.max(0, (sky.now - c * 1.2) / 0.6)) * twinkle
+
+        Rectangle {
+          width: (1 + 2 * c * c) * sky.s
+          height: width
+          radius: width / 2
+          x: -width / 2
+          y: -height / 2
+          color: c > 0.85 ? "#fff1d6" : "#dbe5ff"
+        }
+        Image {
+          visible: parent.big
+          source: Qt.resolvedUrl("particles/spark.png")
+          width: (16 + 10 * parent.twinkle) * sky.s
+          height: width
+          x: -width / 2
+          y: -height / 2
+          smooth: true
+        }
+      }
+    }
+
+    // The figure filling with light, once it's alive.
+    Shape {
+      anchors.fill: parent
+      opacity: 0.22 * sky.alive * sky.dark
+      preferredRendererType: Shape.CurveRenderer
+      ShapePath {
+        strokeColor: "transparent"
+        fillGradient: LinearGradient {
+          x1: 0; y1: sky.py(0); x2: 0; y2: sky.py(8)
+          GradientStop { position: 0.0; color: Util.alpha("#bcd0ff", 0.4) }
+          GradientStop { position: 1.0; color: overlay.tint }
+        }
+        PathPolyline {
+          path: {
+            var out = []
+            for (var i = 0; i <= sky.pts.length; i++) out.push(Qt.point(sky.px(i % sky.pts.length), sky.py(i % sky.pts.length)))
+            return out
+          }
+        }
+      }
+    }
+
+    // The lines between the stars, drawing themselves once both ends burn.
+    Repeater {
+      model: sky.edges.length
+      Item {
+        required property int index
+        readonly property int i0: sky.edges[index][0]
+        readonly property int i1: sky.edges[index][1]
+        readonly property real x0: sky.px(i0)
+        readonly property real y0: sky.py(i0)
+        readonly property real x1: sky.px(i1)
+        readonly property real y1: sky.py(i1)
+        readonly property real len: Math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
+        readonly property real p: Math.max(0, Math.min(1, (sky.now - sky.edgeAt(index)) / 0.32))
+        readonly property bool ring: index === 8
+        readonly property color ink: ring ? Qt.tint("#cfdcff", Util.alpha(overlay.tint, sky.ringK))
+          : Qt.tint("#cfdcff", Util.alpha(overlay.tint, 0.35 * sky.alive))
+        x: x0
+        y: y0
+        rotation: Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI
+        transformOrigin: Item.TopLeft
+        opacity: sky.dark * (index === 12 ? 0.7 : 1)
+
+        Rectangle {
+          y: -height / 2
+          width: parent.len * parent.p
+          height: (parent.ring ? 10 + 16 * sky.ringK : 9) * sky.s
+          radius: height / 2
+          color: Util.alpha(parent.ink, parent.ring ? 0.2 + 0.25 * sky.ringK : 0.17 + 0.08 * sky.alive)
+        }
+        Rectangle {
+          y: -height / 2
+          width: parent.len * parent.p
+          height: (parent.ring ? 2 + 2.4 * sky.ringK : 1.7) * sky.s
+          radius: height / 2
+          color: parent.ink
+        }
+      }
+    }
+
+    // Light pooling under the ring once it's lit.
+    SoftGlow {
+      hue: overlay.tint
+      x: (sky.px(8) + sky.px(9)) / 2 - 50
+      y: sky.py(8) - 50
+      opacity: 0.5 * sky.ringK * sky.dark
+      transform: Scale { origin.x: 50; origin.y: 50; xScale: (sky.px(8) - sky.px(9)) * 1.9 / 100; yScale: 70 * sky.s / 100 }
+    }
+
+    // The stars themselves: a ripple and a flare as each ignites, then a
+    // steady twinkle.
+    Repeater {
+      model: 12
+      Item {
+        required property int index
+        readonly property real f: Math.max(0, Math.min(1, (sky.now - sky.litAt(index)) / 0.6))
+        readonly property real flare: f <= 0 ? 0 : (f < 0.2 ? f / 0.2 : 1 - 0.72 * (f - 0.2) / 0.8)
+        x: sky.px(index)
+        y: sky.py(index)
+        opacity: f > 0 ? sky.dark : 0
+
+        Rectangle {
+          readonly property real rp: Math.min(1, parent.f * 1.4)
+          width: (10 + 90 * rp) * sky.s
+          height: width
+          radius: width / 2
+          x: -width / 2
+          y: -height / 2
+          color: "transparent"
+          border.width: Math.max(1, 1.4 * sky.s)
+          border.color: Util.alpha("#cfdcff", 0.7)
+          opacity: rp < 1 ? Math.pow(1 - rp, 1.5) : 0
+        }
+        SoftGlow {
+          hue: Util.alpha(Qt.tint("#bcd0ff", Util.alpha(overlay.tint, 0.5 * sky.alive)), 0.75)
+          x: -50
+          y: -50
+          scale: (18 + 44 * parent.flare + 8 * sky.alive) * sky.s / 100
+        }
+        Image {
+          source: Qt.resolvedUrl("particles/spark.png")
+          width: (16 + 56 * parent.flare + 6 * Math.sin(sky.now * 5 + parent.index)) * sky.s
+          height: width
+          x: -width / 2
+          y: -height / 2
+          rotation: 40 * (1 - parent.f)
+          smooth: true
+        }
+        Rectangle {
+          width: 4.5 * sky.s
+          height: width
+          radius: width / 2
+          x: -width / 2
+          y: -height / 2
+          color: "#ffffff"
+        }
+      }
+    }
+
+    // The shooting star, diving in from the top right to the end of the ring.
+    Item {
+      id: comet
+      readonly property real sx: sky.width * 0.97
+      readonly property real sy: sky.height * 0.02
+      readonly property real ex: sky.px(8)
+      readonly property real ey: sky.py(8)
+      readonly property real e: sky.shotP * sky.shotP
+      x: sx + (ex - sx) * e
+      y: sy + (ey - sy) * e
+      visible: sky.shotP > 0 && sky.shotP < 1
+      rotation: Math.atan2(ey - sy, ex - sx) * 180 / Math.PI
+
+      Rectangle {
+        x: -width
+        y: -height / 2
+        width: 420 * sky.s
+        height: 14 * sky.s
+        radius: height / 2
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: Util.alpha(overlay.tint, 0) }
+          GradientStop { position: 1.0; color: Util.alpha(Qt.lighter(overlay.tint, 1.5), 0.35) }
+        }
+      }
+      Rectangle {
+        x: -width
+        y: -height / 2
+        width: 380 * sky.s
+        height: 3.5 * sky.s
+        radius: height / 2
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+          GradientStop { position: 1.0; color: "#ffffff" }
+        }
+      }
+      SoftGlow { hue: "#ffffff"; x: -50; y: -50; scale: 40 * sky.s / 100 }
+    }
+    Sparks {
+      id: ringSparks
+      x: sky.px(8)
+      y: sky.py(8)
+      count: 16
+      reach: 90 * sky.s
+      dot: 4.5 * sky.s
+      hues: ["#ffffff", Qt.lighter(overlay.tint, 1.5), overlay.tint]
+    }
+
+    // READY, like a name on a star chart.
+    Text {
+      readonly property real e: 1 - Math.pow(1 - Math.max(0, Math.min(1, (sky.now - sky.shootAt - 0.8) / 1.0)), 3)
+      x: sky.px(5) + 54 * sky.s
+      y: sky.py(5) - height / 2
+      opacity: e * sky.dark
+      textFormat: Text.PlainText
+      text: "READY"
+      color: Qt.tint("#e4ecff", Util.alpha(overlay.tint, 0.35))
+      font.family: overlay.displayFamily
+      font.pixelSize: 44 * sky.s
+      font.weight: Font.DemiBold
+      font.letterSpacing: (10 + 26 * (1 - e)) * sky.s
+    }
+  }
+
+  // ============================================================= Fireflies
+  // A swarm of fireflies pours out of the bar and wheels across the screen
+  // like a murmuration. They gather into the shape of your Peak Pro and
+  // flash together, its ring in the profile's colour, then scatter into the
+  // dark and wink out.
+  component Fireflies: Item {
+    id: ff
+
+    property real t: 0
+    readonly property real dur: 6.8
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property int count: 150
+    readonly property real dark: Math.min(1, now / 0.6) * Math.max(0, Math.min(1, (dur - now) / 0.8))
+    readonly property real k: height * 0.58 / 160
+    readonly property real ox: width * 0.5 - 40 * k
+    readonly property real oy: height * 0.49 - 80 * k
+    readonly property real formAt: 2.6
+    readonly property real holdAt: 3.8
+    readonly property real scatterAt: 5.2
+    // Where each firefly lands: points spread evenly round the Peak's
+    // outline (and the glass's chrome seat), the light ring's flagged.
+    readonly property var targets: {
+      var P = [[12.5, 1.5], [21.5, 0.8], [46, 93], [49.5, 80.5], [71, 80.5], [72.5, 104],
+               [56, 113.5], [64.5, 152], [60, 158], [9.5, 158], [6.5, 111.5], [9.5, 108]]
+      var segs = []
+      for (var i = 0; i < P.length; i++) segs.push([P[i], P[(i + 1) % P.length], i === 8])
+      segs.push([[9.5, 108], [46, 93], false])
+      var total = 0
+      for (i = 0; i < segs.length; i++) {
+        var dx = segs[i][1][0] - segs[i][0][0], dy = segs[i][1][1] - segs[i][0][1]
+        segs[i].push(Math.sqrt(dx * dx + dy * dy))
+        total += segs[i][3]
+      }
+      var out = []
+      for (var n = 0; n < count; n++) {
+        var d = n / count * total, g = 0
+        while (g < segs.length - 1 && d > segs[g][3]) { d -= segs[g][3]; g++ }
+        var f = segs[g][3] > 0 ? d / segs[g][3] : 0
+        out.push([segs[g][0][0] + (segs[g][1][0] - segs[g][0][0]) * f, segs[g][0][1] + (segs[g][1][1] - segs[g][0][1]) * f, segs[g][2]])
+      }
+      return out
+    }
+    // The swarm's heart wanders the middle of the screen.
+    readonly property real flockX: width * (0.5 + 0.17 * Math.sin(now * 0.8 + 0.4))
+    readonly property real flockY: height * (0.45 + 0.12 * Math.sin(now * 1.25))
+    readonly property real turn: now * 0.55
+    readonly property real aspect: 0.42 + 0.22 * Math.sin(now * 0.9)
+    // Once they're in shape, light chases round the outline; then, just
+    // before they scatter, they all flash together.
+    readonly property real flashAt: scatterAt - 0.55
+    function glow(index) {
+      if (now > flashAt) return 0.6 + 0.4 * Math.sin(Math.min(1, (now - flashAt) / 0.5) * Math.PI)
+      return 0.4 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin(now * 5.5 - index * 0.22), 3)
+    }
+
+    NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("shimmer")
+
+    Rectangle { anchors.fill: parent; color: "#02060a"; opacity: 0.7 * ff.dark }
+
+    // Drawn once through a bloom, once crisp: the glow is the point.
+    Item {
+      id: swarm
+      anchors.fill: parent
+      opacity: 0
+      layer.enabled: true
+
+      Repeater {
+        model: ff.count
+        Item {
+          id: fly
+          required property int index
+          readonly property real a: overlay.hash(index * 1.37)
+          readonly property real b: overlay.hash(index * 4.91)
+          readonly property real c: overlay.hash(index * 8.29)
+          readonly property var target: ff.targets[index]
+          readonly property real tx: ff.ox + target[0] * ff.k
+          readonly property real ty: ff.oy + target[1] * ff.k
+          // Out of the bar, into the swarm.
+          readonly property real pe: 1 - Math.pow(1 - Math.max(0, Math.min(1, (ff.now - a * 0.9) / 1.0)), 3)
+          readonly property real ang: c * 6.283 + ff.now * (0.9 + 0.9 * a) * (index % 3 ? 1 : -1)
+          // The flock ripples (lobes running round it), breathes and turns.
+          readonly property real rad: (50 + 240 * b) * ff.s * (0.72 + 0.3 * Math.sin(ang * 3 + ff.now * 2.2) + 0.15 * Math.sin(ff.now * 1.3 + index * 0.1))
+          readonly property real lx: Math.cos(ang) * rad
+          readonly property real ly: Math.sin(ang) * rad * ff.aspect
+          readonly property real fx: ff.flockX + lx * Math.cos(ff.turn) - ly * Math.sin(ff.turn)
+          readonly property real fy: ff.flockY + lx * Math.sin(ff.turn) + ly * Math.cos(ff.turn)
+          readonly property real sx: overlay.originX + (fx - overlay.originX) * pe
+          readonly property real sy: overlay.barEdge + (fy - overlay.barEdge) * pe
+          // Into the Peak's shape.
+          readonly property real pfRaw: Math.max(0, Math.min(1, (ff.now - ff.formAt - c * 0.45) / 1.0))
+          readonly property real pf: pfRaw < 0.5 ? 2 * pfRaw * pfRaw : 1 - Math.pow(-2 * pfRaw + 2, 2) / 2
+          readonly property real hx: sx + (tx - sx) * pf + Math.sin(ff.now * 3 + index) * 3 * ff.s * pf
+          readonly property real hy: sy + (ty - sy) * pf + Math.cos(ff.now * 2.6 + index) * 3 * ff.s * pf
+          // Away into the dark.
+          readonly property real ps: Math.max(0, Math.min(1, (ff.now - ff.scatterAt - b * 0.3) / 1.3))
+          readonly property real ex: (tx - ff.width * 0.5) * 0.004 + (a - 0.5)
+          readonly property real ey: -0.6 - b
+          readonly property real blink: ff.now > ff.holdAt - 0.2 && ps === 0
+            ? ff.glow(index)
+            : 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(ff.now * (2.5 + 3 * a) + index * 2.1), 3)
+          readonly property color hue: target[2] && pf > 0 ? Qt.tint("#efff8a", Util.alpha(overlay.tint, pf))
+            : (index % 4 === 0 ? "#fff1a8" : "#e2ff76")
+          x: hx + ex * 420 * ff.s * Math.pow(ps, 1.4)
+          y: hy + ey * 260 * ff.s * Math.pow(ps, 1.4)
+          opacity: (ff.now > a * 0.9 ? 1 : 0) * blink * (1 - ps)
+
+          Rectangle {
+            width: 26 * ff.s
+            height: width
+            radius: width / 2
+            x: -width / 2
+            y: -height / 2
+            color: Util.alpha(fly.hue, 0.22)
+          }
+          Rectangle {
+            width: (3 + 2 * fly.c) * ff.s
+            height: width
+            radius: width / 2
+            x: -width / 2
+            y: -height / 2
+            color: Qt.lighter(fly.hue, 1.25)
+          }
+        }
+      }
+    }
+
+    MultiEffect {
+      anchors.fill: swarm
+      source: swarm
+      blurEnabled: true
+      blurMax: 40
+      blur: 0.9
+      brightness: 0.35
+      opacity: ff.dark
+    }
+    MultiEffect {
+      anchors.fill: swarm
+      source: swarm
+      opacity: ff.dark
+    }
+  }
+
+  // ============================================================== Deep sea
+  // The desktop sinks underwater: light ripples down from the surface,
+  // plankton glitters, bubbles wobble up, whale sharks cruise past (one huge
+  // and close, one far off in the blue), and bioluminescent jellyfish rise
+  // out of the deep, their bells pulsing (each beat a push upward) and their
+  // tentacles trailing, in the profile's colour, cyan and violet.
+  component DeepSea: Item {
+    id: sea
+
+    property real t: 0
+    readonly property real dur: 6.8
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property real dark: Math.min(1, now / 0.8) * Math.max(0, Math.min(1, (dur - now) / 1.0))
+    readonly property var hues: [overlay.tint, "#58f0ff", "#b38cff", Qt.lighter(overlay.tint, 1.4), "#7affd2", "#ff8ad8"]
+
+    NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("bubbles")
+
+    // The water, darker the deeper it goes.
+    Rectangle {
+      anchors.fill: parent
+      opacity: sea.dark
+      gradient: Gradient {
+        GradientStop { position: 0.0; color: Util.alpha("#003048", 0.6) }
+        GradientStop { position: 0.5; color: Util.alpha("#00182c", 0.74) }
+        GradientStop { position: 1.0; color: Util.alpha("#000710", 0.88) }
+      }
+    }
+
+    // Whale sharks: one far off in the blue, small and hazy, cruising the
+    // other way; one close by, gliding slowly across the whole scene behind
+    // the jellyfish, the light shafts falling across its back.
+    WhaleShark {
+      len: sea.width * 0.27
+      haze: 0.68
+      facing: -1
+      swim: sea.now * 1.15
+      pitch: 1.5 * Math.sin(sea.now * 0.5)
+      x: sea.width * (1.12 - 0.62 * sea.now / sea.dur)
+      y: sea.height * 0.27 + Math.sin(sea.now * 0.7) * 6 * sea.s
+      opacity: 0.8 * sea.dark
+    }
+    WhaleShark {
+      readonly property real p: Math.max(0, (sea.now - 0.15) / (sea.dur - 0.15))
+      len: sea.width * 0.6
+      haze: 0.12
+      facing: 1
+      swim: sea.now
+      pitch: 2.5 + 1.2 * Math.sin(sea.now * 0.6)
+      x: -len * 0.45 + (sea.width + len * 0.2) * p
+      y: sea.height * (0.6 - 0.08 * p) + Math.sin(sea.now * 0.55) * 10 * sea.s
+      opacity: Math.min(1, sea.now / 0.6) * sea.dark
+    }
+
+    // Light from the surface, in slow swaying shafts.
+    Repeater {
+      model: 8
+      Rectangle {
+        required property int index
+        readonly property real a: overlay.hash(index * 3.17)
+        readonly property real b: overlay.hash(index * 7.71)
+        width: (50 + 130 * a) * sea.s
+        height: sea.height * 0.95
+        x: sea.width * (0.06 + 0.88 * b) - width / 2 + Math.sin(sea.now * 0.5 + index) * 30 * sea.s
+        y: -sea.height * 0.04
+        rotation: (b - 0.5) * 26 + Math.sin(sea.now * 0.45 + index * 1.3) * 3
+        transformOrigin: Item.Top
+        opacity: sea.dark * (0.55 + 0.45 * Math.sin(sea.now * 0.9 + index * 1.7))
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: Util.alpha("#a6ecff", 0.17) }
+          GradientStop { position: 0.55; color: Util.alpha("#a6ecff", 0.05) }
+          GradientStop { position: 1.0; color: Util.alpha("#a6ecff", 0) }
+        }
+      }
+    }
+
+    // Plankton glittering as it drifts.
+    Item {
+      anchors.fill: parent
+      opacity: sea.dark
+      ParticleSystem { id: seaSys; anchors.fill: parent }
+      ImageParticle {
+        system: seaSys
+        source: Qt.resolvedUrl("particles/glow.png")
+        color: "#8af4ff"
+        colorVariation: 0.25
+        alpha: 0.85
+        alphaVariation: 0.4
+      }
+      Emitter {
+        system: seaSys
+        anchors.fill: parent
+        emitRate: sea.now < sea.dur - 1.4 ? 55 : 0
+        lifeSpan: 2600; lifeSpanVariation: 1000
+        size: 7 * sea.s; sizeVariation: 5 * sea.s; endSize: 1 * sea.s
+        velocity: PointDirection { y: -14 * sea.s; xVariation: 10 * sea.s; yVariation: 10 * sea.s }
+      }
+      Wander { system: seaSys; xVariance: 40 * sea.s; pace: 60 * sea.s }
+    }
+
+    // Bubbles wobbling up to the surface.
+    Repeater {
+      model: 16
+      Rectangle {
+        required property int index
+        readonly property real a: overlay.hash(index * 5.9)
+        readonly property real b: overlay.hash(index * 2.3)
+        readonly property real p: ((sea.now * (0.16 + 0.12 * a)) + b) % 1
+        width: (5 + 12 * a) * sea.s
+        height: width
+        radius: width / 2
+        x: sea.width * (0.05 + 0.9 * overlay.hash(index * 9.7)) + Math.sin(p * 18 + index) * 8 * sea.s
+        y: sea.height * (1.05 - 1.15 * p)
+        color: Util.alpha("#c8f6ff", 0.06)
+        border.width: Math.max(1, 1.2 * sea.s)
+        border.color: Util.alpha("#c8f6ff", 0.5)
+        opacity: sea.dark * Math.min(1, p / 0.1)
+      }
+    }
+
+    // The jellyfish, drawn through a bloom.
+    Item {
+      id: deep
+      anchors.fill: parent
+      opacity: 0
+      layer.enabled: true
+
+      Repeater {
+        model: 11
+        Item {
+          id: jelly
+          required property int index
+          // The first few are far off: small, faint and slow, behind the rest.
+          readonly property bool far: index < 5
+          readonly property real a: overlay.hash(index * 2.31)
+          readonly property real b: overlay.hash(index * 6.07)
+          readonly property color hue: sea.hues[index % sea.hues.length]
+          readonly property real size: (78 + 86 * a) * sea.s * (far ? 0.42 : 1)
+          readonly property real period: 1.25 + 0.55 * b
+          readonly property real start: (far ? index * 0.2 : (index - 5) * 0.3) + a * 0.25
+          readonly property real life: Math.max(0, sea.now - start)
+          readonly property real beat: life / period
+          readonly property real phase: beat - Math.floor(beat)
+          // A beat: a quick squeeze, then a long relax.
+          readonly property real squeeze: phase < 0.28 ? Math.sin(phase / 0.28 * Math.PI / 2) : Math.cos((phase - 0.28) / 0.72 * Math.PI / 2)
+          // Each squeeze is a push upward, on top of a slow drift.
+          readonly property real push: Math.floor(beat) + (1 - Math.pow(1 - Math.min(1, phase / 0.4), 2))
+          readonly property real climb: (48 * life + (115 + 60 * b) * push) * sea.s * (far ? 0.5 : 1)
+          readonly property real w: size / 2 * (1 - 0.2 * squeeze)
+          readonly property real h: size * 0.5 * (1 + 0.24 * squeeze)
+          x: sea.width * (0.08 + 0.84 * ((index * 0.37 + a * 0.31) % 1)) + Math.sin(life * 0.6 + index) * 46 * sea.s
+          y: sea.height + size * 0.6 - climb
+          rotation: Math.sin(life * 0.8 + index * 2) * 8
+          opacity: (life > 0 ? Math.min(1, life / 0.5) : 0) * (far ? 0.45 : 1)
+
+          // Tentacles: trailing, bunching on each squeeze, a wave running
+          // down them; brighter near the bell.
+          Repeater {
+            model: 6
+            Shape {
+              id: tentacle
+              required property int index
+              readonly property real rootX: -jelly.w * 0.78 + index * (jelly.w * 1.56 / 5)
+              readonly property real len: jelly.size * (1.3 + 0.8 * overlay.hash(jelly.index * 3.1 + index))
+              preferredRendererType: Shape.CurveRenderer
+              function wave(lo, hi) {
+                var out = []
+                for (var k = lo; k <= hi; k++) {
+                  var f = k / 10
+                  out.push(Qt.point(rootX * (1 + 0.3 * f * jelly.squeeze) + Math.sin(k * 0.8 - jelly.life * 4 + index * 1.4) * 11 * sea.s * f,
+                                    jelly.h * 0.08 + len * f * (1 - 0.16 * jelly.squeeze)))
+                }
+                return out
+              }
+              ShapePath {
+                strokeColor: Util.alpha(Qt.lighter(jelly.hue, 1.2), 0.75)
+                strokeWidth: 1.6 * sea.s
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathPolyline { path: tentacle.wave(0, 5) }
+              }
+              ShapePath {
+                strokeColor: Util.alpha(jelly.hue, 0.32)
+                strokeWidth: 1.2 * sea.s
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathPolyline { path: tentacle.wave(5, 10) }
+              }
+            }
+          }
+
+          // The bell: a dome over a scalloped rim, glowing from inside.
+          Shape {
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+              strokeColor: Util.alpha(Qt.lighter(jelly.hue, 1.35), 0.9)
+              strokeWidth: 1.7 * sea.s
+              joinStyle: ShapePath.RoundJoin
+              fillGradient: RadialGradient {
+                centerX: 0; centerY: -jelly.h * 0.45; centerRadius: jelly.w * 1.15
+                focalX: 0; focalY: -jelly.h * 0.6
+                GradientStop { position: 0.0; color: Util.alpha(Qt.lighter(jelly.hue, 1.5), 0.6) }
+                GradientStop { position: 0.6; color: Util.alpha(jelly.hue, 0.28) }
+                GradientStop { position: 1.0; color: Util.alpha(jelly.hue, 0.1) }
+              }
+              PathSvg {
+                path: {
+                  var w = jelly.w, h = jelly.h
+                  return "M " + (-w) + " 0 C " + (-w) + " " + (-h * 1.3) + " " + w + " " + (-h * 1.3) + " " + w + " 0"
+                    + " Q " + (w * 0.75) + " " + (h * 0.2) + " " + (w * 0.5) + " " + (h * 0.06)
+                    + " Q " + (w * 0.25) + " " + (h * 0.22) + " 0 " + (h * 0.08)
+                    + " Q " + (-w * 0.25) + " " + (h * 0.22) + " " + (-w * 0.5) + " " + (h * 0.06)
+                    + " Q " + (-w * 0.75) + " " + (h * 0.2) + " " + (-w) + " 0 Z"
+                }
+              }
+            }
+          }
+          // Its glowing heart, brightest at the end of each squeeze.
+          SoftGlow {
+            hue: Qt.lighter(jelly.hue, 1.5)
+            x: -50
+            y: -jelly.h * 0.5 - 50
+            scale: jelly.w * (0.9 + 0.3 * jelly.squeeze) / 100
+            opacity: 0.55 + 0.35 * jelly.squeeze
+          }
+          // Lights along the rim.
+          Repeater {
+            model: 7
+            Rectangle {
+              required property int index
+              width: 3.2 * sea.s
+              height: width
+              radius: width / 2
+              x: -jelly.w + index * (2 * jelly.w / 6) - width / 2
+              y: (index % 2 ? jelly.h * 0.1 : 0) - height / 2
+              color: Qt.lighter(jelly.hue, 1.6)
+              opacity: 0.6 + 0.4 * Math.sin(sea.now * 6 + index + jelly.index)
+            }
+          }
+        }
+      }
+    }
+
+    MultiEffect {
+      anchors.fill: deep
+      source: deep
+      blurEnabled: true
+      blurMax: 48
+      blur: 0.85
+      brightness: 0.3
+      opacity: sea.dark
+    }
+    MultiEffect {
+      anchors.fill: deep
+      source: deep
+      opacity: sea.dark
+    }
+  }
+
+  // ================================================================== Warp
+  // The screen falls into space and the stars stretch into hyperspace,
+  // faster and faster, out of a point in the middle. Then it drops out of
+  // warp, and a spiral galaxy hangs there, tilted toward you: a blazing core,
+  // arms of stars and glowing dust in the profile's colour winding round it
+  // as it turns (the inner stars faster than the outer ones), with READY
+  // under it.
+  component Warp: Item {
+    id: warp
+
+    property real t: 0
+    readonly property real dur: 6.8
+    readonly property real now: t * dur
+    readonly property real s: overlay.u * overlay.stage
+    readonly property real cx: width * 0.5
+    readonly property real cy: height * 0.45
+    readonly property real dark: Math.min(1, now / 0.5) * Math.max(0, Math.min(1, (dur - now) / 1.0))
+    readonly property real dropAt: 1.8
+    readonly property real since: now - dropAt
+    // How far through the stars: the speed building as the square of time
+    // until the drop, then braking hard.
+    readonly property real travelled: {
+      var a = 0.22, b = 2.4
+      if (now < dropAt) return a * now + b * now * now * now / (3 * dropAt * dropAt)
+      var atDrop = a * dropAt + b * dropAt / 3
+      var brake = Math.min(since, 0.35)
+      return atDrop + (a + b) * (brake - brake * brake / (2 * 0.35))
+    }
+    readonly property real speed: now < dropAt ? 0.22 + 2.4 * Math.pow(now / dropAt, 2) : Math.max(0, 2.62 * (1 - since / 0.35))
+    readonly property real galaxyIn: Math.max(0, Math.min(1, since / 2.0))
+    readonly property real grow: 0.35 + 0.65 * (1 - Math.pow(1 - galaxyIn, 3))
+    // The disc's tilt: squashed to this fraction top to bottom, then turned.
+    readonly property real tilt: 0.38
+    readonly property real lean: -18 * Math.PI / 180
+    readonly property real rMin: height * 0.03
+    readonly property real rMax: height * 0.46
+    property bool dropped: false
+
+    // Where a point on the disc (polar, in the disc's own plane) lands on
+    // screen, and how near the viewer it is (0 back, 1 front).
+    function sx(a, r) { var x = Math.cos(a) * r * grow, y = Math.sin(a) * r * grow * tilt; return cx + x * Math.cos(lean) - y * Math.sin(lean) }
+    function sy(a, r) { var x = Math.cos(a) * r * grow, y = Math.sin(a) * r * grow * tilt; return cy + x * Math.sin(lean) + y * Math.cos(lean) }
+    // Turned by now: the inner disc faster than the outer.
+    function spin(r) { return Math.max(0, since) * (0.18 + 0.75 * rMin * 3 / Math.max(r, rMin)) }
+
+    NumberAnimation on t { from: 0; to: 1; duration: 6800; running: true; onFinished: overlay.finished() }
+    Component.onCompleted: overlay.cue("liftoff")
+    onSinceChanged: if (since >= 0 && !dropped) { dropped = true; overlay.cue("shimmer") }
+
+    Rectangle { anchors.fill: parent; color: "#010208"; opacity: 0.8 * warp.dark }
+
+    // Hyperspace: streaks rushing out of the vanishing point.
+    Repeater {
+      model: 170
+      Rectangle {
+        required property int index
+        readonly property real ang: overlay.hash(index * 1.91) * 6.283
+        readonly property real rate: 0.6 + 0.8 * overlay.hash(index * 4.37)
+        readonly property real u: (overlay.hash(index * 8.53) + warp.travelled * rate) % 1
+        readonly property real reach: Math.max(warp.width, warp.height) * 0.75
+        readonly property real r: (0.02 + 0.98 * u * u) * reach
+        readonly property real streak: Math.max(2 * warp.s, warp.speed * r * 0.28)
+        x: warp.cx + Math.cos(ang) * r
+        y: warp.cy + Math.sin(ang) * r - height / 2
+        width: streak
+        height: (1 + 1.6 * u) * warp.s
+        radius: height / 2
+        rotation: ang * 180 / Math.PI
+        transformOrigin: Item.Left
+        opacity: warp.dark * Math.min(1, u * 3) * (warp.since < 0 ? 1 : Math.max(0, 1 - warp.since / 0.8))
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop { position: 0.0; color: Util.alpha("#cfe0ff", 0) }
+          GradientStop { position: 1.0; color: index % 6 ? "#e8f0ff" : Qt.lighter(overlay.tint, 1.5) }
+        }
+      }
+    }
+
+    // Dropping out of warp: a bloom of light from the middle.
+    SoftGlow {
+      hue: Qt.lighter(overlay.tint, 1.8)
+      x: warp.cx - 50
+      y: warp.cy - 50
+      readonly property real f: Math.max(0, Math.min(1, warp.since / 0.7))
+      scale: warp.height * (0.3 + 1.2 * f) / 100
+      opacity: warp.since >= 0 ? 0.55 * Math.pow(1 - f, 2) : 0
+    }
+
+    // The galaxy, drawn through a bloom.
+    Item {
+      id: space
+      anchors.fill: parent
+      opacity: 0
+      layer.enabled: true
+
+      Item {
+        anchors.fill: parent
+        opacity: warp.galaxyIn > 0 ? Math.min(1, warp.since / 0.7) : 0
+
+        // A faint halo, and the dust of the arms: soft clouds laid along
+        // the spirals, squashed and turned with the disc.
+        Item {
+          x: warp.cx
+          y: warp.cy
+          transform: [
+            Scale { xScale: warp.grow; yScale: warp.grow * warp.tilt },
+            Rotation { angle: warp.lean * 180 / Math.PI }
+          ]
+          SoftGlow { hue: Util.alpha("#8ea6ff", 0.09); x: -50; y: -50; scale: warp.rMax * 2.4 / 100 }
+          Repeater {
+            model: 52
+            SoftGlow {
+              required property int index
+              readonly property real rr: warp.rMin * 2 + (warp.rMax - warp.rMin * 2) * Math.pow(overlay.hash(index * 3.3), 0.8)
+              readonly property real a: (index % 2) * Math.PI + Math.log(rr / warp.rMin) * 2.1 + warp.spin(rr)
+                + (overlay.hash(index * 6.7) - 0.5) * 0.45
+              // Blue-white starlight, with knots of the profile's colour
+              // where new stars are being born.
+              hue: index % 4 === 0 ? Util.alpha(Qt.lighter(overlay.tint, 1.25), 0.32)
+                : Util.alpha(index % 2 ? "#a9bdff" : "#d4dcff", 0.2)
+              x: Math.cos(a) * rr - 50
+              y: Math.sin(a) * rr - 50
+              transform: [
+                Scale { origin.x: 50; origin.y: 50; xScale: (26 + rr * 0.3) / 100; yScale: (12 + rr * 0.1) / 100 },
+                Rotation { origin.x: 50; origin.y: 50; angle: a * 180 / Math.PI + 70 }
+              ]
+            }
+          }
+        }
+
+        // The stars, each placed on the disc and projected, so they stay
+        // round however the disc leans; nearer ones a touch bigger.
+        Repeater {
+          model: 520
+          Rectangle {
+            required property int index
+            readonly property real q: overlay.hash(index * 1.37)
+            readonly property real rr: warp.rMin + (warp.rMax - warp.rMin) * Math.sqrt(q)
+            readonly property int arm: index % 2
+            readonly property bool scattered: index % 4 === 3
+            readonly property real th: (scattered ? overlay.hash(index * 5.9) * 6.283
+              : arm * Math.PI + Math.log(rr / warp.rMin) * 2.1 + (overlay.hash(index * 2.9) - 0.5) * (0.25 + 0.6 * q))
+              + warp.spin(rr)
+            readonly property real near: 0.5 + 0.5 * Math.sin(th)
+            width: (1.2 + 2.6 * overlay.hash(index * 7.7)) * warp.s * (0.8 + 0.4 * near) * (0.6 + 0.4 * warp.grow)
+            height: width
+            radius: width / 2
+            x: warp.sx(th, rr) - width / 2
+            y: warp.sy(th, rr) - height / 2
+            color: q < 0.12 ? "#fff1d2" : (index % 5 === 0 ? Qt.lighter(overlay.tint, 1.5) : "#dbe7ff")
+            opacity: (scattered ? 0.5 : 0.8) * (0.6 + 0.4 * Math.abs(Math.sin(warp.now * 2 + index)))
+          }
+        }
+
+        // The core: blazing white at the heart of a warm glow.
+        SoftGlow {
+          hue: Util.alpha(Qt.tint("#ffe6c4", Util.alpha(overlay.tint, 0.25)), 0.5)
+          x: warp.cx - 50
+          y: warp.cy - 50
+          transform: Scale { origin.x: 50; origin.y: 50; xScale: warp.rMax * 0.6 * warp.grow / 100; yScale: warp.rMax * 0.34 * warp.grow / 100 }
+        }
+        SoftGlow {
+          hue: "#fff6e4"
+          x: warp.cx - 50
+          y: warp.cy - 50
+          scale: warp.rMax * 0.24 * warp.grow / 100
+        }
+      }
+    }
+
+    MultiEffect {
+      anchors.fill: space
+      source: space
+      blurEnabled: true
+      blurMax: 40
+      blur: 0.75
+      brightness: 0.25
+      opacity: warp.dark
+    }
+    MultiEffect {
+      anchors.fill: space
+      source: space
+      opacity: warp.dark
+    }
+
+    Text {
+      readonly property real e: 1 - Math.pow(1 - Math.max(0, Math.min(1, (warp.since - 1.1) / 1.2)), 3)
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: warp.cy + warp.height * 0.29
+      opacity: warp.since > 1.1 ? e * warp.dark : 0
+      textFormat: Text.PlainText
+      text: "READY"
+      color: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.25))
+      font.family: overlay.displayFamily
+      font.pixelSize: 50 * warp.s
+      font.weight: Font.DemiBold
+      font.letterSpacing: (14 + 40 * (1 - e)) * warp.s
+    }
+  }
+
+  // A whale shark in side view, gliding: the broad flat head and wide mouth,
+  // gill slits, ridges running down its flanks, the white checkerboard of
+  // spots, a tall dorsal fin, a pectoral that rows gently and a crescent tail
+  // sweeping as it swims, with a remora under its belly and pilot fish riding
+  // its bow wave. Drawn on a body 1000 units long (head to the right, centred
+  // on 500, 120) and scaled to `len` pixels; `haze` (0-1) sinks it into the
+  // blue with distance.
+  component WhaleShark: Item {
+    id: shark
+
+    property real len: 600
+    property real haze: 0
+    // 1 swims right, -1 left.
+    property int facing: 1
+    // Seconds, driving the tail and fins.
+    property real swim: 0
+    // Degrees, nose up.
+    property real pitch: 0
+
+    readonly property color water: "#0b3550"
+    function hazed(c, amount) { return Qt.tint(c, Util.alpha(water, Math.min(1, haze * amount))) }
+    readonly property real stroke: Math.sin(swim * 2 * Math.PI / 2.6)
+    readonly property color back: hazed("#4d6a7c", 1)
+    readonly property color flank: hazed("#213646", 1)
+    readonly property color belly: hazed("#93a8b4", 0.9)
+    readonly property color mark: hazed("#e8f4ff", 0.85)
+
+    // The outline, as its top and bottom edges from tail to snout.
+    readonly property var topEdge: [[90, 114], [130, 108], [200, 92], [300, 70], [420, 47], [560, 33], [700, 35],
+      [850, 48], [950, 70], [985, 88], [1000, 104]]
+    readonly property var bottomEdge: [[90, 128], [160, 132], [260, 148], [380, 172], [500, 192], [640, 200],
+      [780, 196], [900, 177], [960, 153], [990, 136], [1000, 124]]
+    function edgeAt(edge, x) {
+      for (var i = 0; i < edge.length - 1; i++) {
+        if (x <= edge[i + 1][0]) {
+          var f = (x - edge[i][0]) / (edge[i + 1][0] - edge[i][0])
+          return edge[i][1] + (edge[i + 1][1] - edge[i][1]) * f
+        }
+      }
+      return edge[edge.length - 1][1]
+    }
+    // A closed path through the outline's points, smoothed through their
+    // midpoints.
+    readonly property string bodyPath: {
+      var pts = topEdge.slice().reverse().concat([[80, 121]]).concat(bottomEdge)
+      pts.splice(0, 0, [1003, 114])
+      var d = "M " + pts[0][0] + " " + pts[0][1]
+      for (var i = 1; i < pts.length - 1; i++)
+        d += " Q " + pts[i][0] + " " + pts[i][1] + " " + (pts[i][0] + pts[i + 1][0]) / 2 + " " + (pts[i][1] + pts[i + 1][1]) / 2
+      return d + " L " + pts[pts.length - 1][0] + " " + pts[pts.length - 1][1] + " Z"
+    }
+    // The spots: staggered columns over the back and upper flank, small and
+    // close on the head; pale bars between the columns along the back.
+    readonly property string spotPath: {
+      var d = ""
+      function dot(x, y, r) { d += " M " + (x - r) + " " + y + " a " + r + " " + r + " 0 1 0 " + (2 * r) + " 0 a " + r + " " + r + " 0 1 0 " + (-2 * r) + " 0" }
+      var c = 0
+      for (var x = 140; x < 960; c++) {
+        var head = x > 820
+        var t = edgeAt(topEdge, x), b = edgeAt(bottomEdge, x)
+        var low = t + (b - t) * (head ? 0.75 : 0.62)
+        var gap = head ? 13 : 18
+        var r = (head ? 2.2 : 3.4) * (0.75 + 0.25 * Math.min(1, x / 400))
+        for (var y = t + 9 + (c % 2) * gap / 2; y < low; y += gap) dot(x, y, r)
+        x += head ? 15 : 26
+      }
+      return d
+    }
+    readonly property string barPath: {
+      var d = ""
+      for (var x = 300; x <= 800; x += 52) {
+        var t = edgeAt(topEdge, x), b = edgeAt(bottomEdge, x)
+        d += " M " + x + " " + (t + 5) + " L " + (x + 3) + " " + (t + (b - t) * 0.55)
+      }
+      return d
+    }
+
+    Item {
+      width: 1000
+      height: 400
+      transform: [
+        Translate { x: -500; y: -120 },
+        Scale { xScale: shark.len / 1000 * shark.facing; yScale: shark.len / 1000 },
+        Rotation { angle: -shark.pitch * shark.facing }
+      ]
+
+      // The tail, sweeping from the root of the body.
+      Shape {
+        width: 1000
+        height: 400
+        preferredRendererType: Shape.CurveRenderer
+        transform: Rotation { origin.x: 92; origin.y: 121; angle: shark.stroke * 8 }
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: LinearGradient {
+            x1: 0; y1: -60; x2: 0; y2: 215
+            GradientStop { position: 0.0; color: shark.back }
+            GradientStop { position: 1.0; color: shark.flank }
+          }
+          PathSvg { path: "M 102 110 C 70 80 20 20 -78 -58 C -62 -10 -46 40 -14 104 L -10 121 C -30 155 -42 185 -52 214 C 10 186 58 156 102 132 Z" }
+        }
+      }
+
+      // The fins along the back and belly, their roots under the body.
+      Shape {
+        width: 1000
+        height: 400
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillGradient: LinearGradient {
+            x1: 0; y1: -58; x2: 0; y2: 226
+            GradientStop { position: 0.0; color: shark.back }
+            GradientStop { position: 0.5; color: shark.flank }
+            GradientStop { position: 1.0; color: Qt.darker(shark.belly, 1.4) }
+          }
+          PathSvg { path: "M 585 36 C 552 -6 512 -40 474 -58 C 466 -50 462 -32 460 -14 C 456 10 446 32 425 49 Z M 262 81 C 250 68 236 58 222 52 C 220 66 214 80 205 93 Z M 432 182 C 417 198 402 213 384 226 C 386 210 388 192 390 178 Z M 264 149 C 252 161 238 173 224 181 C 224 169 224 158 222 146 Z" }
+        }
+      }
+
+      // The body: lit from above, dark down the flank, pale underneath.
+      Shape {
+        width: 1000
+        height: 400
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: Util.alpha(shark.mark, 0.12)
+          strokeWidth: 1.2
+          fillGradient: LinearGradient {
+            x1: 0; y1: 30; x2: 0; y2: 202
+            GradientStop { position: 0.0; color: shark.back }
+            GradientStop { position: 0.55; color: shark.flank }
+            GradientStop { position: 1.0; color: shark.belly }
+          }
+          PathSvg { path: shark.bodyPath }
+        }
+        // Spots and pale bars.
+        ShapePath {
+          strokeColor: "transparent"
+          fillColor: Util.alpha(shark.mark, 0.62 * (1 - 0.4 * shark.haze))
+          PathSvg { path: shark.spotPath }
+        }
+        ShapePath {
+          strokeColor: Util.alpha(shark.mark, 0.2 * (1 - 0.5 * shark.haze))
+          strokeWidth: 2.4
+          capStyle: ShapePath.RoundCap
+          fillColor: "transparent"
+          PathSvg { path: shark.barPath }
+        }
+        // Ridges down the flank.
+        ShapePath {
+          strokeColor: Util.alpha(shark.mark, 0.22 * (1 - 0.5 * shark.haze))
+          strokeWidth: 1.6
+          capStyle: ShapePath.RoundCap
+          fillColor: "transparent"
+          PathSvg { path: "M 905 72 Q 600 44 180 100 M 885 106 Q 600 110 165 117 M 860 150 Q 600 166 210 134" }
+        }
+        // Gill slits, the mouth and the eye.
+        ShapePath {
+          strokeColor: Util.alpha("#05121b", 0.55)
+          strokeWidth: 2.2
+          capStyle: ShapePath.RoundCap
+          fillColor: "transparent"
+          PathSvg { path: "M 842 90 Q 832 132 842 172 M 855 88 Q 845 130 855 169 M 868 86 Q 858 128 868 166 M 881 84 Q 872 125 881 162 M 894 82 Q 886 122 894 158 M 1003 122 Q 980 134 952 138" }
+        }
+        ShapePath {
+          strokeColor: "transparent"
+          fillColor: Util.alpha("#05121b", 0.8)
+          PathSvg { path: "M 928 102 a 4.5 4.5 0 1 0 9 0 a 4.5 4.5 0 1 0 -9 0" }
+        }
+      }
+
+      // The near pectoral fin, rowing slowly.
+      Shape {
+        width: 1000
+        height: 400
+        preferredRendererType: Shape.CurveRenderer
+        transform: Rotation { origin.x: 735; origin.y: 194; angle: Math.sin(shark.swim * 2 * Math.PI / 2.6 + 1) * 5 }
+        ShapePath {
+          strokeColor: Util.alpha(shark.mark, 0.1)
+          strokeWidth: 1
+          fillGradient: LinearGradient {
+            x1: 0; y1: 190; x2: 0; y2: 312
+            GradientStop { position: 0.0; color: shark.flank }
+            GradientStop { position: 1.0; color: Qt.darker(shark.flank, 1.3) }
+          }
+          PathSvg { path: "M 778 190 C 748 240 702 284 605 312 C 612 302 640 278 668 244 C 682 226 690 210 695 198 Z" }
+        }
+      }
+
+      // A remora riding under the belly, and pilot fish in the bow wave.
+      Shape {
+        width: 1000
+        height: 400
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+          strokeColor: "transparent"
+          fillColor: shark.hazed("#2c3c46", 1)
+          PathSvg { path: "M 600 206 C 618 200 650 200 672 205 C 650 211 618 212 600 206 Z M 600 206 L 588 200 L 590 212 Z" }
+        }
+      }
+      Repeater {
+        model: 5
+        Shape {
+          required property int index
+          width: 40
+          height: 20
+          x: 1030 + (index % 3) * 26 + Math.sin(shark.swim * 1.7 + index) * 5
+          y: 110 + index * 14 + Math.cos(shark.swim * 1.3 + index * 2) * 4
+          preferredRendererType: Shape.CurveRenderer
+          ShapePath {
+            strokeColor: "transparent"
+            fillColor: shark.hazed("#c9d6dd", 1)
+            PathSvg { path: "M 4 10 C 12 4 26 4 34 10 C 26 16 12 16 4 10 Z M 4 10 L -4 5 L -4 15 Z" }
+          }
+          ShapePath {
+            strokeColor: Util.alpha(shark.hazed("#1d2a33", 1), 0.8)
+            strokeWidth: 2
+            fillColor: "transparent"
+            PathSvg { path: "M 12 6 L 12 14 M 20 5 L 20 15 M 28 6 L 28 14" }
+          }
+        }
+      }
     }
   }
 

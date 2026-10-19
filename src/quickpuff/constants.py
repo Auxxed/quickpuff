@@ -110,7 +110,10 @@ class BatteryChargeState(IntEnum):
 
 
 # Ready animations the bar widget knows how to play; "off" plays nothing.
-READY_ANIMATIONS = ("off", "confetti", "rocket", "lava", "aurora", "fireworks", "smoke", "neon")
+READY_ANIMATIONS = (
+    "off", "confetti", "rocket", "lava", "aurora", "fireworks", "smoke", "neon",
+    "supernova", "constellation", "fireflies", "deepsea", "warp",
+)
 # The heat-up overlay: nothing, a card in the corner, or the whole stage.
 SHOWTIME_MODES = ("off", "corner", "stage")
 

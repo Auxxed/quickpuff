@@ -377,6 +377,20 @@ PanelWindow {
   }
   readonly property real glow: (phase === "preheat" ? 0.35 + 0.65 * progress : 1) * breath
 
+  // The readout's lines arrive one after another as the stage comes up.
+  function enter(i) {
+    var k = Math.max(0, Math.min(1, (stageT - i * 0.1) / 0.6))
+    return 1 - Math.pow(1 - k, 3)
+  }
+
+  // How hot it looks: embers off the chamber thicken through the climb,
+  // stream at temperature and die away as it cools.
+  readonly property real heat: phase === "preheat" ? 0.25 + 0.75 * progress
+    : (phase === "ready" || phase === "session") ? 1
+    : phase === "cooling" ? 0.3 : 0
+  property real shownHeat: heat
+  Behavior on shownHeat { NumberAnimation { duration: 900 } }
+
   Item {
     id: stage
     anchors.fill: parent
@@ -648,6 +662,48 @@ PanelWindow {
       }
     }
 
+    // Embers drifting up off the chamber, more of them the hotter it gets.
+    Repeater {
+      model: 28
+      Item {
+        id: ember
+        required property int index
+        property real k: 0
+        readonly property real seedA: ((index * 37) % 100) / 100
+        readonly property real seedB: ((index * 61) % 100) / 100
+        // Only some of them burn on a cool chamber.
+        readonly property bool lit: seedA < show.shownHeat
+        readonly property real ox: peak.x + peak.width * (0.66 + 0.18 * seedB)
+        readonly property real oy: peak.y + peak.height * 0.5
+        readonly property real rise: show.height * (0.22 + 0.3 * seedA)
+        x: ox + Math.sin(k * Math.PI * (1.5 + seedB) + index) * 26 * show.u * k - width / 2
+        y: oy - rise * k - height / 2
+        width: (5 + 6 * seedB) * show.u
+        height: width
+        opacity: lit ? Math.min(1, k / 0.15) * Math.pow(1 - k, 1.3) * show.stageT : 0
+        visible: show.stageT > 0.01 && show.shownHeat > 0.01
+
+        Rectangle {
+          anchors.centerIn: parent
+          width: parent.width * 3.2
+          height: width
+          radius: width / 2
+          color: Util.alpha(Qt.tint(show.tint, Util.alpha("#ff8a3c", 0.5)), 0.22)
+        }
+        Rectangle {
+          anchors.fill: parent
+          radius: width / 2
+          color: Qt.tint("#ffd27a", Util.alpha(show.tint, 0.25 * (1 - ember.k)))
+        }
+        SequentialAnimation on k {
+          running: show.stageT > 0.01 && show.shownHeat > 0.01
+          loops: Animation.Infinite
+          PauseAnimation { duration: (ember.index * 173) % 1900 }
+          NumberAnimation { from: 0; to: 1; duration: 2200 + ember.seedB * 1400; easing.type: Easing.OutSine }
+        }
+      }
+    }
+
     // Speed streaks round the Peak as it climbs.
     Repeater {
       model: 8
@@ -680,6 +736,8 @@ PanelWindow {
 
       Row {
         spacing: 14 * show.u
+        opacity: show.enter(0)
+        transform: Translate { x: (1 - show.enter(0)) * 60 * show.u }
         Rectangle {
           anchors.verticalCenter: parent.verticalCenter
           width: 12 * show.u
@@ -723,18 +781,23 @@ PanelWindow {
         id: bigRow
         spacing: 6 * show.u
         transformOrigin: Item.Left
-        Text {
+        opacity: show.enter(1)
+        transform: Translate { x: (1 - show.enter(1)) * 90 * show.u }
+        // The digits roll to each reading, odometer-style (and count the
+        // launch down the same way).
+        RollingNumber {
           id: big
-          textFormat: Text.PlainText
+          panel: palette
+          duration: 520
+          stagger: 60
           text: show.countText !== "" ? show.countText
-            : isFinite(show.shownF) && show.shownF > 0 ? String(Math.round(show.shownF)) : "—"
+            : isFinite(show.tempF) && show.tempF > 0 ? String(Math.round(show.tempF)) : "—"
           color: show.phase === "preheat"
             ? Qt.tint("#f4eef6", Util.alpha(show.tint, 0.25 + 0.5 * show.progress))
             : Qt.tint("#ffffff", Util.alpha(show.tint, 0.35))
           font.family: show.display
           font.pixelSize: 250 * show.u
           font.weight: Font.DemiBold
-          style: Text.Normal
         }
         Text {
           y: big.height * 0.14
@@ -754,6 +817,8 @@ PanelWindow {
       }
 
       Text {
+        opacity: show.enter(2)
+        transform: Translate { x: (1 - show.enter(2)) * 60 * show.u }
         textFormat: Text.PlainText
         text: show.phase === "preheat"
           ? "→  " + (isFinite(show.targetF) ? Math.round(show.targetF) + "°F" : "") + (show.secondsLeft > 0 ? "   ·   " + show.fmtTime(show.secondsLeft) : "")
@@ -773,20 +838,55 @@ PanelWindow {
         height: 6 * show.u
         radius: height / 2
         color: Util.alpha("#ffffff", 0.1)
+        opacity: show.enter(3)
+        transform: Translate { x: (1 - show.enter(3)) * 60 * show.u }
         Rectangle {
+          id: stageFill
           height: parent.height
           radius: parent.radius
           width: parent.width * (show.phase === "preheat" ? show.progress : 1)
           color: show.tint
           Behavior on width { NumberAnimation { duration: 300 } }
+          Item {
+            anchors.fill: parent
+            clip: true
+            Rectangle {
+              property real k: 0
+              visible: show.phase === "preheat"
+              width: Math.max(80 * show.u, stageFill.width * 0.35)
+              height: parent.height
+              x: -width + (stageFill.width + width) * k
+              gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: Util.alpha("#ffffff", 0) }
+                GradientStop { position: 0.5; color: Util.alpha("#ffffff", 0.55) }
+                GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
+              }
+              NumberAnimation on k {
+                running: show.phase === "preheat"
+                loops: Animation.Infinite
+                from: 0
+                to: 1
+                duration: 1500
+                easing.type: Easing.InOutQuad
+              }
+            }
+          }
           Rectangle {
-            anchors.right: parent.right
+            anchors.horizontalCenter: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            width: 22 * show.u
+            width: (16 + 10 * show.breath) * show.u
             height: width
             radius: width / 2
             color: Util.alpha(show.tint, 0.45)
             visible: show.phase === "preheat"
+            Rectangle {
+              anchors.centerIn: parent
+              width: 9 * show.u
+              height: width
+              radius: width / 2
+              color: Qt.tint(show.tint, Util.alpha("#ffffff", 0.6))
+            }
           }
         }
       }
@@ -798,6 +898,8 @@ PanelWindow {
         id: curve
         width: show.width * 0.36
         height: show.height * 0.12
+        opacity: show.enter(4)
+        transform: Translate { x: (1 - show.enter(4)) * 60 * show.u }
         preferredRendererType: Shape.CurveRenderer
         readonly property var pts: show.tracePoints
         readonly property real tMax: pts.length ? Math.max(20, Number(pts[pts.length - 1][0])) : 20
@@ -813,13 +915,41 @@ PanelWindow {
           if (out.length < 2) out = [Qt.point(0, height), Qt.point(0.01, height)]
           return out
         }
+        readonly property var line: poly()
+        // Its glow, then the line.
+        ShapePath {
+          strokeColor: Util.alpha(show.tint, 0.22)
+          strokeWidth: 12 * show.u
+          fillColor: "transparent"
+          capStyle: ShapePath.RoundCap
+          joinStyle: ShapePath.RoundJoin
+          PathPolyline { path: curve.line }
+        }
         ShapePath {
           strokeColor: Qt.lighter(show.tint, 1.2)
           strokeWidth: 3 * show.u
           fillColor: "transparent"
           capStyle: ShapePath.RoundCap
           joinStyle: ShapePath.RoundJoin
-          PathPolyline { path: curve.poly() }
+          PathPolyline { path: curve.line }
+        }
+        // The newest reading, breathing while the chamber heats.
+        Rectangle {
+          visible: curve.pts.length > 1
+          readonly property point at: curve.line[curve.line.length - 1]
+          width: (12 + 8 * show.breath) * show.u
+          height: width
+          radius: width / 2
+          x: at.x - width / 2
+          y: at.y - height / 2
+          color: Util.alpha(show.tint, 0.4)
+          Rectangle {
+            anchors.centerIn: parent
+            width: 8 * show.u
+            height: width
+            radius: width / 2
+            color: Qt.tint(show.tint, Util.alpha("#ffffff", 0.65))
+          }
         }
         // Target line.
         Rectangle {
@@ -855,8 +985,9 @@ PanelWindow {
     height: h
     x: Math.max(16 * show.u, Math.min(show.width - w - 16 * show.u, show.originX - w / 2))
     y: show.barAtTop ? show.barEdge + 14 * show.u : show.barEdge - h - 14 * show.u
-    opacity: show.cardT * show.fadeAll
+    opacity: Math.min(1, show.cardT) * show.fadeAll
     scale: 0.92 + 0.08 * show.cardT
+    transform: Translate { y: (1 - Math.min(1, show.cardT)) * (show.barAtTop ? -24 : 24) * show.u }
     transformOrigin: show.barAtTop ? Item.Top : Item.Bottom
     visible: show.cardT > 0.001
 
@@ -920,13 +1051,15 @@ PanelWindow {
         elide: Text.ElideRight
         width: parent.width
       }
-      Text {
-        textFormat: Text.PlainText
+      RollingNumber {
+        panel: palette
+        duration: 460
+        stagger: 40
         text: {
           var p = show.phase
           if (p === "session" || p === "ready") return show.fmtTime(show.secondsLeft)
           if (p === "summary" || p === "done") return show.fmtTime(show.summaryDur)
-          return isFinite(show.shownF) && show.shownF > 0 ? Math.round(show.shownF) + "°" : "—"
+          return isFinite(show.tempF) && show.tempF > 0 ? Math.round(show.tempF) + "°" : "—"
         }
         color: "#f4eef6"
         font.family: show.display

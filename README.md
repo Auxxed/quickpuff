@@ -148,8 +148,11 @@ and `~/.local/share/quickpuff/venv`.
   at temperature; the daemon records it, so opening the panel mid-session
   still shows the whole curve. **Ready animation** picks what plays over the
   desktop when the Peak reaches temperature: Rocket, Confetti, Lava Lamp,
-  Aurora, Fireworks, Smoke Rings, Neon, or Off. **Preview** plays the one
-  you picked.
+  Aurora, Fireworks, Smoke Rings, Neon, Supernova (a star collapses and
+  blooms into a nebula), Star Chart (your Peak drawn as a constellation),
+  Fireflies (a swarm that gathers into your Peak), Deep Sea (glowing
+  jellyfish rising past cruising whale sharks), Warp (hyperspace, then a turning galaxy), or Off.
+  **Preview** plays the one you picked.
 - **Lights** — LED on/off, brightness, stealth mode, the selected
   profile's LED color, previewed on the drawn Peak at the brightness you
   set (with the cycle playing, if one is on). **Color cycle** has the Peak animate a profile's light
@@ -367,7 +370,8 @@ quickpuff color '#ff6a1a' --index 0  # a profile's LED color
 quickpuff cycle lava '#ff2d55' '#ff6a1a' '#ffb000' --speed 40  # animate it
 quickpuff light save "Puffcon"     # keep the light a profile is wearing
 quickpuff light list               # then: light apply|rename|delete NAME
-quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, smoke, neon or off
+quickpuff ready-anim fireworks     # rocket, confetti, lava, aurora, fireworks, smoke, neon,
+                                   # supernova, constellation, fireflies, deepsea, warp or off
 quickpuff surprise on              # a new light after each session
 quickpuff theme-light on           # the lantern in your Omarchy theme's colours
 quickpuff music-light on           # the lantern in the playing album art's colours

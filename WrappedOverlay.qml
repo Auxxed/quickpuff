@@ -120,6 +120,16 @@ PanelWindow {
     onTriggered: wrap.next()
   }
 
+  // 0 → 1 through the slide on screen, for its story bar; full on the card.
+  property real slideT: 0
+  onSlideChanged: {
+    slideTAnim.stop()
+    slideT = 0
+    if (onCard) slideT = 1
+    else slideTAnim.start()
+  }
+  NumberAnimation { id: slideTAnim; target: wrap; property: "slideT"; from: 0; to: 1; duration: 3300 }
+
   function next() {
     if (slide < slides.length - 1) {
       slide++
@@ -141,7 +151,8 @@ PanelWindow {
     fadeOut.start()
   }
 
-  Timer { id: saveSoon; interval: 900; onTriggered: wrap.save() }
+  // Once the card has finished building, so the saved picture is whole.
+  Timer { id: saveSoon; interval: 2000; onTriggered: wrap.save() }
   Timer { id: closeSoon; interval: 9000; onTriggered: wrap.close() }
 
   // The card, at 1600 x 900, into ~/Pictures/Puffco Wrapped (the daemon makes
@@ -206,8 +217,63 @@ PanelWindow {
       NumberAnimation on t { from: 0; to: 1; duration: 16000; loops: Animation.Infinite }
     }
 
-    // One slide at a time: the kicker, the big line (counting up when it's a
-    // number), and the line under it.
+    // Bokeh: soft discs of the profile's light floating slowly upward.
+    Repeater {
+      model: 18
+      Glow {
+        id: mote
+        required property int index
+        // Each starts partway through its climb, so the screen opens full.
+        property real base: 0
+        readonly property real seedA: ((index * 37) % 100) / 100
+        readonly property real seedB: ((index * 71) % 100) / 100
+        readonly property real k: (base + seedB) % 1
+        width: (40 + 120 * seedA) * wrap.u
+        height: width
+        hue: Util.alpha(index % 3 ? wrap.tint : Qt.lighter(wrap.tint, 1.5), 0.18 + 0.2 * seedB)
+        x: wrap.width * (0.04 + 0.92 * seedB) + Math.sin(k * Math.PI * 2 + index) * 40 * wrap.u - width / 2
+        y: wrap.height * (1.1 - 1.3 * k) - height / 2
+        opacity: Math.min(1, k / 0.15, (1 - k) / 0.25)
+        NumberAnimation on base {
+          from: 0
+          to: 1
+          duration: 14000 + mote.seedA * 9000
+          loops: Animation.Infinite
+        }
+      }
+    }
+
+    // Story bars along the top: one per slide, filling while it plays.
+    Row {
+      id: storyBars
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: 28 * wrap.u
+      spacing: 8 * wrap.u
+      readonly property int count: Math.max(1, wrap.slides.length)
+      readonly property real barW: Math.min(140 * wrap.u, (wrap.width * 0.6 - spacing * (count - 1)) / count)
+      Repeater {
+        model: wrap.slides.length
+        Rectangle {
+          required property int index
+          width: storyBars.barW
+          height: 4 * wrap.u
+          radius: height / 2
+          color: Util.alpha("#ffffff", 0.18)
+          Rectangle {
+            height: parent.height
+            radius: parent.radius
+            color: "#ffffff"
+            opacity: 0.85
+            width: parent.width * (index < wrap.slide ? 1 : index > wrap.slide ? 0 : wrap.slideT)
+          }
+        }
+      }
+    }
+
+    // One slide at a time: the kicker tracking in, the big line springing
+    // up (counting when it's a number), and the line under it after a beat.
+    // The slide before lifts away as this one rises, and while it holds the
+    // whole slide pushes in a touch.
     Repeater {
       model: wrap.slides.length
 
@@ -217,20 +283,60 @@ PanelWindow {
         readonly property var spec: wrap.slides[index]
         readonly property bool current: wrap.slide === index
         anchors.fill: parent
-        visible: opacity > 0 && !spec.card
-        opacity: current ? 1 : 0
-        property real rise: current ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: 520; easing.type: Easing.OutCubic } }
-        Behavior on rise { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+        visible: opacity > 0.001 && !spec.card
+        // Before: below, waiting. Current: in place. After: lifted away.
+        property real place: index < wrap.slide ? -1 : (current ? 0 : 1)
+        Behavior on place { NumberAnimation { duration: 760; easing.type: Easing.OutCubic } }
+        // Fades are started by hand: a Behavior would pick its timings
+        // before `current` had flipped. The slide before clears quickly;
+        // this one waits for it.
+        opacity: 0
+        SequentialAnimation {
+          id: slideIn
+          PauseAnimation { duration: 240 }
+          NumberAnimation { target: page; property: "opacity"; to: 1; duration: 520; easing.type: Easing.OutCubic }
+        }
+        NumberAnimation { id: slideOut; target: page; property: "opacity"; to: 0; duration: 200; easing.type: Easing.InQuad }
         property real shown: 0
-        onCurrentChanged: if (current && spec.count !== undefined) { shown = 0; countUp.restart() }
-        NumberAnimation { id: countUp; target: page; property: "shown"; to: page.spec.count || 0; duration: 1400; easing.type: Easing.OutCubic }
+        // 0 → 1 as the slide arrives: drives the type's entrance.
+        property real arrive: 0
+        property real push: 0
+        onCurrentChanged: {
+          if (!current) {
+            slideIn.stop()
+            slideOut.restart()
+            return
+          }
+          shown = 0
+          arrive = 0
+          slideOut.stop()
+          slideIn.restart()
+          arriveStart.restart()
+          pushAnim.restart()
+        }
+        // The type starts once the slide before has cleared.
+        Timer {
+          id: arriveStart
+          interval: 200
+          onTriggered: {
+            if (page.spec.count !== undefined) countUp.restart()
+            arriveAnim.restart()
+          }
+        }
+        NumberAnimation { id: countUp; target: page; property: "shown"; to: page.spec.count || 0; duration: 1500; easing.type: Easing.OutCubic }
+        NumberAnimation { id: arriveAnim; target: page; property: "arrive"; from: 0; to: 1; duration: 1100; easing.type: Easing.Linear }
+        NumberAnimation { id: pushAnim; target: page; property: "push"; from: 0; to: 1; duration: 3600; easing.type: Easing.OutSine }
+        function beat(i) {
+          var k = Math.max(0, Math.min(1, (arrive - i * 0.16) / 0.55))
+          return 1 - Math.pow(1 - k, 3)
+        }
 
         Column {
           anchors.centerIn: parent
-          anchors.verticalCenterOffset: page.rise * 40 * wrap.u
+          anchors.verticalCenterOffset: page.place * 60 * wrap.u
           spacing: 18 * wrap.u
           width: wrap.width * 0.8
+          scale: 1 + 0.035 * page.push
 
           Text {
             width: parent.width
@@ -238,9 +344,10 @@ PanelWindow {
             textFormat: Text.PlainText
             text: page.spec.kicker || ""
             color: Qt.lighter(wrap.tint, 1.35)
+            opacity: page.beat(0)
             font.family: wrap.display
             font.pixelSize: 30 * wrap.u
-            font.letterSpacing: 10 * wrap.u
+            font.letterSpacing: (10 + 22 * (1 - page.beat(0))) * wrap.u
           }
           Text {
             width: parent.width
@@ -249,6 +356,8 @@ PanelWindow {
             wrapMode: Text.WordWrap
             text: page.spec.count !== undefined ? Math.round(page.shown) + (page.spec.unit || "") : (page.spec.big || "")
             color: "white"
+            opacity: page.beat(1)
+            scale: 0.86 + 0.14 * page.beat(1) + 0.04 * Math.sin(Math.PI * page.beat(1))
             font.family: wrap.display
             font.pixelSize: (page.spec.count !== undefined ? 220 : 120) * wrap.u
             font.letterSpacing: 6 * wrap.u
@@ -262,6 +371,8 @@ PanelWindow {
             wrapMode: Text.WordWrap
             text: page.spec.small || ""
             color: "#e8d8e4"
+            opacity: page.beat(2.2)
+            transform: Translate { y: (1 - page.beat(2.2)) * 24 * wrap.u }
             font.family: wrap.body
             font.pixelSize: 40 * wrap.u
             font.letterSpacing: 2 * wrap.u
@@ -291,6 +402,17 @@ PanelWindow {
       border.color: Util.alpha(wrap.tint, 0.6)
 
       readonly property real k: width / 1400
+      // 0 → 1 once the card is up: the headline, then each stat in turn.
+      property real build: 0
+      Connections {
+        target: wrap
+        function onOnCardChanged() { if (wrap.onCard) cardBuild.restart() }
+      }
+      NumberAnimation { id: cardBuild; target: card; property: "build"; from: 0; to: 1; duration: 1600; easing.type: Easing.Linear }
+      function beat(i) {
+        var t = Math.max(0, Math.min(1, (build - 0.12 - i * 0.08) / 0.35))
+        return 1 - Math.pow(1 - t, 3)
+      }
 
       Glow { hue: Util.alpha(wrap.tint, 0.35); width: card.width * 0.6; height: width; x: card.width * 0.55; y: -height * 0.35 }
 
@@ -298,6 +420,8 @@ PanelWindow {
         x: 70 * card.k
         y: 60 * card.k
         spacing: 10 * card.k
+        opacity: card.beat(0)
+        transform: Translate { x: (1 - card.beat(0)) * -40 * card.k }
 
         Text {
           textFormat: Text.PlainText
@@ -343,8 +467,11 @@ PanelWindow {
 
           Column {
             required property var modelData
+            required property int index
             width: 360 * card.k
             spacing: 4 * card.k
+            opacity: card.beat(1 + index)
+            transform: Translate { y: (1 - card.beat(1 + index)) * 30 * card.k }
             Text {
               textFormat: Text.PlainText
               text: modelData.label
