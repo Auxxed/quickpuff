@@ -2270,21 +2270,15 @@ PanelWindow {
           y: hy + ey * 260 * ff.s * Math.pow(ps, 1.4)
           opacity: (ff.now > a * 0.9 ? 1 : 0) * blink * (1 - ps)
 
+          // A point of light; the bloom below gives it its glow (a flat
+          // halo disc here drew a hard ring in the crisp pass).
           Rectangle {
-            width: 26 * ff.s
+            width: (3.5 + 2.5 * fly.c) * ff.s
             height: width
             radius: width / 2
             x: -width / 2
             y: -height / 2
-            color: Util.alpha(fly.hue, 0.22)
-          }
-          Rectangle {
-            width: (3 + 2 * fly.c) * ff.s
-            height: width
-            radius: width / 2
-            x: -width / 2
-            y: -height / 2
-            color: Qt.lighter(fly.hue, 1.25)
+            color: Qt.tint(fly.hue, Util.alpha("#ffffff", 0.25))
           }
         }
       }
@@ -2294,9 +2288,18 @@ PanelWindow {
       anchors.fill: swarm
       source: swarm
       blurEnabled: true
-      blurMax: 40
-      blur: 0.9
-      brightness: 0.35
+      blurMax: 48
+      blur: 1.0
+      brightness: 0.6
+      opacity: ff.dark
+    }
+    MultiEffect {
+      anchors.fill: swarm
+      source: swarm
+      blurEnabled: true
+      blurMax: 16
+      blur: 0.8
+      brightness: 0.3
       opacity: ff.dark
     }
     MultiEffect {
