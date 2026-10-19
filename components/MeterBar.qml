@@ -84,7 +84,7 @@ Rectangle {
         GradientStop { position: 1.0; color: Util.alpha("#ffffff", 0) }
       }
       NumberAnimation on k {
-        running: meter.sheen && meter.visible && panel.opened
+        running: meter.sheen && meter.visible && panel.opened && !panel.calm
         loops: Animation.Infinite
         from: 0
         to: 1

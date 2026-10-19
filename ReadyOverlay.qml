@@ -2833,12 +2833,12 @@ PanelWindow {
     function angleOf(i) {
       // Spread round the core, each a little off its slot, so they never
       // bunch up on one side.
-      var a = (i + 0.6 * overlay.hash(i * 3.7)) / count * 6.283
+      var a = (i + 0.5 + 0.9 * (overlay.hash(i * 3.7) - 0.5)) / count * 6.283
       return a + 0.7 * Math.sin(now * (0.5 + 0.4 * overlay.hash(i * 1.3)) + i) + 0.25 * Math.sin(now * 1.7 + i * 2.3)
     }
     function tendril(i, from, to, n) {
       var a = angleOf(i), out = []
-      var r0 = r * 0.1, r1 = r0 + (r * 0.97 - r0) * reach
+      var r0 = r * 0.1, r1 = r0 + (r * 0.93 - r0) * reach
       for (var k = from; k <= to; k++) {
         var f = k / n
         var jitter = (Math.sin(k * 1.7 + now * 11 + i * 3) * 0.07 + Math.sin(k * 3.3 - now * 17 + i) * 0.04) * f
@@ -2852,7 +2852,7 @@ PanelWindow {
       var base = tendril(i, 11, 11, 16)[0]
       var r0 = Math.sqrt((base.x - cx) * (base.x - cx) + (base.y - cy) * (base.y - cy))
       for (var k = 0; k <= 4; k++) {
-        var rr = r0 + (r * 0.95 * reach - r0) * (k / 4) * 0.85
+        var rr = r0 + (r * 0.9 * reach - r0) * (k / 4) * 0.85
         out.push(k === 0 ? base : Qt.point(cx + Math.cos(a + Math.sin(k * 2 + now * 13) * 0.03) * rr, cy + Math.sin(a + Math.sin(k * 2 + now * 13) * 0.03) * rr))
       }
       return out
@@ -2973,7 +2973,7 @@ PanelWindow {
             PathPolyline { path: globe.tendril(index, 0, 16, 16) }
           }
           ShapePath {
-            strokeColor: Util.alpha(globe.hot, 0.75)
+            strokeColor: Util.alpha(Qt.tint(globe.hot, Util.alpha(overlay.tint, 0.3)), 0.45)
             strokeWidth: 1.1 * globe.s
             fillColor: "transparent"
             joinStyle: ShapePath.RoundJoin
@@ -2989,9 +2989,9 @@ PanelWindow {
           required property int index
           readonly property real a: globe.angleOf(index)
           hue: Qt.tint(globe.hot, Util.alpha("#ffffff", 0.4))
-          x: globe.cx + Math.cos(a) * globe.r * 0.97 - 50
-          y: globe.cy + Math.sin(a) * globe.r * 0.97 - 50
-          scale: (14 + 6 * Math.sin(globe.now * 9 + index)) * globe.s / 100
+          x: globe.cx + Math.cos(a) * globe.r * 0.93 - 50
+          y: globe.cy + Math.sin(a) * globe.r * 0.93 - 50
+          scale: (12 + 5 * Math.sin(globe.now * 9 + index)) * globe.s / 100
           opacity: globe.reach > 0.95 ? 0.9 : 0
         }
       }

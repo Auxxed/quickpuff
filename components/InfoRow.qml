@@ -33,7 +33,14 @@ Item {
   }
   function decode() {
     decodeTimer.stop()
-    if (!panel || panel.calm || value === "") { decoding = false; decodeDelay.stop(); return }
+    var now = Date.now()
+    if (!panel || panel.calm || value === "" || (now - panel.lastDecodeAt > 1500 && now - panel.lastDecodeAt < panel.introGapMs)) {
+      decoding = false
+      decodeDelay.stop()
+      return
+    }
+    // The first row to decode opens the window; the rest join it.
+    if (now - panel.lastDecodeAt >= panel.introGapMs) panel.lastDecodeAt = now
     locked = 0
     scramble()
     decoding = true

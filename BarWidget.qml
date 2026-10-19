@@ -497,8 +497,9 @@ BarWidget {
       running: root.burning && !root.calm
       loops: Animation.Infinite
       alwaysRunToEnd: true
-      NumberAnimation { to: 0.45; duration: 800; easing.type: Easing.InOutSine }
-      NumberAnimation { to: 1; duration: 800; easing.type: Easing.InOutSine }
+      // Slow and shallow: it's in view for the whole session.
+      NumberAnimation { to: 0.8; duration: 1600; easing.type: Easing.InOutSine }
+      NumberAnimation { to: 1; duration: 1600; easing.type: Easing.InOutSine }
     }
 
     Rectangle {

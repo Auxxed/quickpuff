@@ -106,7 +106,8 @@ Item {
     interval: 600
     running: art.crackle && art.live
     repeat: true
-    onTriggered: { art.strike(); interval = 320 + Math.random() * 760 }
+    // On the panel's heartbeat: a half or a whole beat apart.
+    onTriggered: { art.strike(); interval = Math.random() < 0.5 ? 800 : 1600 }
   }
   SequentialAnimation {
     id: arcAnim

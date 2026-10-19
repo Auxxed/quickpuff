@@ -35,9 +35,9 @@ Column {
       tint: panel.profileTint
       solid: !panel.heating
       emphasized: !panel.heating
-      // Fills as the chamber climbs; full once it's there. While it heats,
-      // Stop is the action, so Heat keeps still.
-      progress: panel.preheating ? panel.heatProgress : (panel.atTemp ? 1 : -1)
+      // Full once it's there. While it climbs the hero's bar and the timer
+      // ring show how far, and Stop is the action, so Heat keeps still.
+      progress: panel.atTemp ? 1 : -1
       onActivated: panel.runArgv(["quickpuff", "heat", "start"])
     }
 
@@ -285,16 +285,11 @@ Column {
             anchors.margins: Math.max(1, Style.normalBorderWidth)
             width: Style.space(3)
             color: tile.tint
-            opacity: tile.active ? 1 : 0.35
+            opacity: !tile.active ? 0.35 : panel.heating ? 1 - 0.65 * panel.wave : 1
 
-            Behavior on opacity { NumberAnimation { duration: 200 } }
-
-            SequentialAnimation on opacity {
-              running: tile.active && tile.visible && panel.heating && panel.opened
-              loops: Animation.Infinite
-              alwaysRunToEnd: true
-              NumberAnimation { to: 0.35; duration: panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
-              NumberAnimation { to: 1.0; duration: panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
+            Behavior on opacity {
+              enabled: !panel.heating
+              NumberAnimation { duration: 200 }
             }
           }
 

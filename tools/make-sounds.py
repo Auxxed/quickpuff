@@ -617,7 +617,7 @@ def neon(rng):
 # Electric shows.
 
 
-@cue(4.0, -18.0, fade=0.8)
+@cue(4.0, -21.0, fade=0.8)
 def thunder(rng, crack_db=-9, roll_db=-16, far=None):
     """Lightning (Storm's last strike, the big one): the bolt's tearing crack on the beat,
     a falling sub boom under it, then thunder rolling away: brown noise

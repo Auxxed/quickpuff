@@ -74,8 +74,9 @@ Item {
     shown = text
   }
 
-  // Rolls every digit in from a few steps below, as if the readout had just
-  // been switched on. Used when the panel opens.
+  // Every character rises into place, right to left, as if the readout had
+  // just been switched on (used when the panel opens). Nothing passes
+  // through a value that wasn't read.
   function intro() {
     for (var i = 0; i < slotRepeater.count; i++) {
       var s = slotRepeater.itemAt(i)
@@ -117,10 +118,13 @@ Item {
         function isDigit(c) { return c.length === 1 && c >= "0" && c <= "9" }
 
         function intro() {
-          if (!wheel) return
+          if (ch === "") return
           wheelAnim.stop()
-          pos = target - (2 + (fromRight % 2))
-          wheelAnim.restart()
+          fromCh = ""
+          toCh = ch
+          wheel = false
+          swapDir = 1
+          swapAnim.restart()
         }
 
         Component.onCompleted: {

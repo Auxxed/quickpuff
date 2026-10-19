@@ -23,7 +23,7 @@ Item {
   // 0 → 1 as it first shows (the arc sweeping out to its value), and the
   // head's slow breath.
   property real sweep: 1
-  property real headGlow: 1
+  readonly property real headGlow: panel ? 1 - 0.45 * panel.wave : 1
   readonly property real drawn: Math.max(0, Math.min(1, progress)) * sweep
 
   onDrawnChanged: canvas.requestPaint()
@@ -39,12 +39,6 @@ Item {
   }
   NumberAnimation { id: sweepAnim; target: ring; property: "sweep"; from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
 
-  SequentialAnimation on headGlow {
-    running: ring.visible && ring.panel && ring.panel.opened && !ring.panel.calm
-    loops: Animation.Infinite
-    NumberAnimation { to: 0.55; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
-    NumberAnimation { to: 1; duration: ring.panel.heartbeatMs / 2; easing.type: Easing.InOutSine }
-  }
 
   Canvas {
     id: canvas

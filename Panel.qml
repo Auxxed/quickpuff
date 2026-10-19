@@ -78,6 +78,19 @@ Panel {
   // One period for everything that breathes (the Peak's ring, the state dot,
   // the timer's head, the bar), so nothing beats against anything else.
   readonly property int heartbeatMs: 1600
+  // The heartbeat itself: one clock for every breather, so they rise and
+  // fall together. `wave` goes 0 → 1 → 0 over a beat, and rests at 0 when
+  // nothing needs it (or in Calm motion).
+  property real beat: 0
+  readonly property real wave: 0.5 - 0.5 * Math.cos(2 * Math.PI * beat)
+  NumberAnimation on beat {
+    running: root.opened && !root.calm && (root.heating || root.connecting || root.resting || root.timerActive)
+    loops: Animation.Infinite
+    from: 0
+    to: 1
+    duration: root.heartbeatMs
+    onRunningChanged: if (!running) root.beat = 0
+  }
   // Bumped on an open that plays the intros: the sections cascade in, the
   // hero powers up, meters regrow and counts roll in. That's the first open
   // in a while (introGapMs); a glance in between opens straight onto the
@@ -87,6 +100,9 @@ Panel {
   readonly property int introGapMs: 10 * 60 * 1000
   property real lastIntroAt: -introGapMs
   property bool introNow: false
+  // When the Device details last decoded: once per introGapMs, like the
+  // intros, not on every visit to the tab.
+  property real lastDecodeAt: -introGapMs
   // The last tab switch: which way it went (1 rightward, -1 leftward) and
   // when, so the page it brings in slides from that side.
   property int pageDir: 0
@@ -238,6 +254,20 @@ Panel {
 
   readonly property string tempLabel: {
     var t = formatTemp(statusData.heater_temp_f, statusData.heater_temp_c)
+    return t !== "" ? t : "—"
+  }
+  // The hero's number. At temperature the reading wanders a few degrees
+  // every 0.7 s; the big number holds until it moves 3°F, so a session
+  // reads steady (every other moment it's the live reading).
+  property real heldTempF: NaN
+  onStatusDataChanged: holdTemp()
+  function holdTemp() {
+    var f = Number(statusData.heater_temp_f)
+    if (!isFinite(f)) { heldTempF = NaN; return }
+    if (!atTemp || !isFinite(heldTempF) || Math.abs(f - heldTempF) >= 3) heldTempF = f
+  }
+  readonly property string heroTempLabel: {
+    var t = atTemp ? formatTemp(heldTempF, undefined) : formatTemp(statusData.heater_temp_f, statusData.heater_temp_c)
     return t !== "" ? t : "—"
   }
   readonly property string targetLabel: activeProfile
@@ -1444,7 +1474,10 @@ Panel {
 
   // The moment the chamber reaches temperature: the Peak hops, a glint runs
   // up its glass and confetti bursts off it.
-  onAtTempChanged: if (atTemp && opened) hero.celebrate()
+  onAtTempChanged: {
+    holdTemp()
+    if (atTemp && opened) hero.celebrate()
+  }
   // A new profile (or a new colour on this one) lands on the ring with a flash.
   onProfileTintChanged: if (opened && connected && !calm) heroArt.pulse()
 
@@ -1980,14 +2013,7 @@ Panel {
               : root.lanternOn ? 0.8
               : 0.45
             Behavior on glow { NumberAnimation { duration: 500 } }
-            property real breath: 1
-            SequentialAnimation on breath {
-              running: root.preheating && root.opened && !root.calm
-              loops: Animation.Infinite
-              alwaysRunToEnd: true
-              NumberAnimation { to: 0.35; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
-              NumberAnimation { to: 1; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
-            }
+            readonly property real breath: root.preheating ? 1 - 0.65 * root.wave : 1
             // Idle but connected: a few slow, shallow breaths as the panel
             // opens, so it looks awake, then still (a breath that never
             // stopped kept the window redrawing for as long as it was open).
@@ -2157,14 +2183,8 @@ Panel {
                     height: width
                     radius: width / 2
                     color: Util.alpha(root.stateColor, 0.28)
-                    visible: root.heating || root.connecting || root.resting
-
-                    SequentialAnimation on scale {
-                      running: parent.visible && root.opened
-                      loops: Animation.Infinite
-                      NumberAnimation { from: 0.5; to: 1.0; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
-                      NumberAnimation { from: 1.0; to: 0.5; duration: root.heartbeatMs / 2; easing.type: Easing.InOutSine }
-                    }
+                    visible: (root.heating || root.connecting || root.resting) && !root.calm
+                    scale: 0.5 + 0.5 * root.wave
                   }
 
                   // A ring pings out of the dot whenever the state changes.
@@ -2218,11 +2238,12 @@ Panel {
                 property real rawF: Number(root.statusData.heater_temp_f)
                 property real shownF: isFinite(rawF) ? rawF : 0
                 Behavior on shownF { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
-                readonly property string label: root.connected ? root.tempLabel : ""
+                readonly property string label: root.connected ? root.heroTempLabel : ""
+                // The heat's colour builds in from 200°F; a cold chamber
+                // reads plain, not red.
                 readonly property color baseTone: !root.connected ? root.dim
-                  : shownF > 120 ? Qt.tint(root.foreground,
-                      Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 120) / 200)))
-                  : root.heating ? Qt.lighter(root.urgent, 1.15)
+                  : shownF > 200 ? Qt.tint(root.foreground,
+                      Util.alpha(root.heatRamp(shownF), Math.min(1, (shownF - 200) / 300)))
                   : root.foreground
                 readonly property color tone: Qt.tint(baseTone, Util.alpha("#ffffff", 0.7 * hero.flare))
 

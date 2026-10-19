@@ -124,6 +124,10 @@ PanelWindow {
   readonly property string profileName: profile && profile.name ? String(profile.name).toUpperCase() : "HEAT"
   readonly property real targetF: profile ? Number(profile.temp_f) : NaN
   readonly property real tempF: Number(st.heater_temp_f)
+  // The stage's big number holds through a session until the reading moves
+  // 3°F, so it reads steady instead of ticking every 0.7 s.
+  property real heldF: NaN
+  onTempFChanged: if ((phase !== "session" && phase !== "ready") || !isFinite(heldF) || Math.abs(tempF - heldF) >= 3) heldF = tempF
   readonly property bool demo: !!(st.demo && st.demo.badge)
   readonly property string colorway: st.product ? String(st.product.marketing_name || "") : ""
   readonly property real totalS: Number(st.state_total_s) > 0 ? Number(st.state_total_s) : NaN
@@ -793,7 +797,7 @@ PanelWindow {
           duration: 520
           stagger: 60
           text: show.countText !== "" ? show.countText
-            : isFinite(show.tempF) && show.tempF > 0 ? String(Math.round(show.tempF)) : "—"
+            : isFinite(show.heldF) && show.heldF > 0 ? String(Math.round(show.heldF)) : "—"
           color: show.phase === "preheat"
             ? Qt.tint("#f4eef6", Util.alpha(show.tint, 0.25 + 0.5 * show.progress))
             : Qt.tint("#ffffff", Util.alpha(show.tint, 0.35))

@@ -67,12 +67,16 @@ BorderSurface {
   Behavior on color { ColorAnimation { duration: 120 } }
 
   Rectangle {
+    id: solidFill
     anchors.fill: parent
     radius: parent.radius
     visible: chip.solid
+    // The profile's colour a touch deeper at rest, so a saturated red or
+    // blue doesn't glare; full brightness on hover.
+    readonly property color rest: Qt.hsla(chip.tint.hslHue, chip.tint.hslSaturation * 0.85, chip.tint.hslLightness * 0.92, 1)
     gradient: Gradient {
-      GradientStop { position: 0.0; color: chip.hot ? Qt.lighter(chip.tint, 1.15) : chip.tint }
-      GradientStop { position: 1.0; color: Qt.darker(chip.tint, chip.hot ? 1.25 : 1.45) }
+      GradientStop { position: 0.0; color: chip.hot ? Qt.lighter(chip.tint, 1.1) : solidFill.rest }
+      GradientStop { position: 1.0; color: Qt.darker(chip.hot ? chip.tint : solidFill.rest, chip.hot ? 1.25 : 1.4) }
     }
   }
 
@@ -85,7 +89,7 @@ BorderSurface {
     visible: chip.pulse
 
     SequentialAnimation on opacity {
-      running: chip.pulse && chip.visible && panel.opened
+      running: chip.pulse && chip.visible && panel.opened && !panel.calm
       loops: Animation.Infinite
       alwaysRunToEnd: true
       NumberAnimation { from: 0; to: 0.16; duration: 800; easing.type: Easing.InOutSine }
@@ -130,6 +134,7 @@ BorderSurface {
     count: 2
     length: Math.max(Style.space(40), (chip.width + chip.height) * 0.22)
     thickness: Math.max(1.5, Style.space(1.5))
+    inside: true
     running: chip.charging && chip.visible && panel.opened && !panel.calm
   }
 
