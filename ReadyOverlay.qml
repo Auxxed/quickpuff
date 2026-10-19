@@ -3318,28 +3318,46 @@ PanelWindow {
         d += " Q " + pts[i][0] + " " + pts[i][1] + " " + (pts[i][0] + pts[i + 1][0]) / 2 + " " + (pts[i][1] + pts[i + 1][1]) / 2
       return d + " L " + pts[pts.length - 1][0] + " " + pts[pts.length - 1][1] + " Z"
     }
-    // The spots: staggered columns over the back and upper flank, small and
-    // close on the head; pale bars between the columns along the back.
+    // The spots: loose columns over the back and upper flank, small and
+    // close on the head, each nudged and sized a little differently (and a
+    // few missing) so they read as a pattern, not a grid; pale stripes
+    // between the columns, and the ridges running along the flank.
     readonly property string spotPath: {
       var d = ""
       function dot(x, y, r) { d += " M " + (x - r) + " " + y + " a " + r + " " + r + " 0 1 0 " + (2 * r) + " 0 a " + r + " " + r + " 0 1 0 " + (-2 * r) + " 0" }
-      var c = 0
+      var c = 0, n = 0
       for (var x = 140; x < 960; c++) {
         var head = x > 820
         var t = edgeAt(topEdge, x), b = edgeAt(bottomEdge, x)
         var low = t + (b - t) * (head ? 0.75 : 0.62)
         var gap = head ? 13 : 18
         var r = (head ? 2.2 : 3.4) * (0.75 + 0.25 * Math.min(1, x / 400))
-        for (var y = t + 9 + (c % 2) * gap / 2; y < low; y += gap) dot(x, y, r)
-        x += head ? 15 : 26
+        for (var y = t + 9 + (c % 2) * gap / 2; y < low; y += gap) {
+          n++
+          if (overlay.hash(n * 2.71) < 0.1) continue
+          var jx = (overlay.hash(n * 1.37) - 0.5) * (head ? 5 : 9)
+          var jy = (overlay.hash(n * 3.11) - 0.5) * (head ? 4 : 7)
+          dot(x + jx, Math.min(low, y + jy), r * (0.7 + 0.6 * overlay.hash(n * 0.83)))
+        }
+        x += (head ? 15 : 26) * (0.85 + 0.3 * overlay.hash(c * 5.3))
       }
       return d
     }
     readonly property string barPath: {
       var d = ""
-      for (var x = 300; x <= 800; x += 52) {
+      for (var x = 262; x <= 820; x += 34 + 10 * overlay.hash(x * 0.17)) {
         var t = edgeAt(topEdge, x), b = edgeAt(bottomEdge, x)
-        d += " M " + x + " " + (t + 5) + " L " + (x + 3) + " " + (t + (b - t) * 0.55)
+        var bow = (overlay.hash(x * 0.29) - 0.5) * 6
+        d += " M " + x + " " + (t + 5) + " Q " + (x + 2 + bow) + " " + (t + (b - t) * 0.3) + " " + (x + 4) + " " + (t + (b - t) * 0.58)
+      }
+      // The ridges along the flank.
+      for (var k = 0; k < 2; k++) {
+        var f = k ? 0.42 : 0.26
+        d += " M 300 " + (edgeAt(topEdge, 300) + (edgeAt(bottomEdge, 300) - edgeAt(topEdge, 300)) * f)
+        for (var rx = 360; rx <= 820; rx += 60) {
+          var rt = edgeAt(topEdge, rx), rb = edgeAt(bottomEdge, rx)
+          d += " L " + rx + " " + (rt + (rb - rt) * f)
+        }
       }
       return d
     }
