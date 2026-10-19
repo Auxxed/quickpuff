@@ -2144,11 +2144,21 @@ PanelWindow {
       opacity: e * sky.dark
       textFormat: Text.PlainText
       text: "READY"
-      color: Qt.tint("#e4ecff", Util.alpha(overlay.tint, 0.35))
+      color: Qt.tint("#f2f5ff", Util.alpha(overlay.tint, 0.25))
+      // Starlight round the letters.
+      layer.enabled: true
+      layer.effect: MultiEffect {
+        shadowEnabled: true
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        blurMax: 20
+        shadowBlur: 0.5
+        shadowColor: Util.alpha("#cfdcff", 0.6)
+      }
       font.family: overlay.displayFamily
-      font.pixelSize: 44 * sky.s
+      font.pixelSize: 58 * sky.s
       font.weight: Font.DemiBold
-      font.letterSpacing: (10 + 26 * (1 - e)) * sky.s
+      font.letterSpacing: (14 + 26 * (1 - e)) * sky.s
     }
   }
 
@@ -3548,7 +3558,9 @@ PanelWindow {
         centerX: 50; centerY: 50; centerRadius: 50
         focalX: 50; focalY: 50
         GradientStop { position: 0.0; color: glow.hue }
-        GradientStop { position: 0.3; color: Util.alpha(glow.hue, 0.5) }
+        // Half the centre's alpha, not a flat 0.5: a fainter glow had a
+        // brighter ring than middle, and every soft glow came out a donut.
+        GradientStop { position: 0.3; color: Util.alpha(glow.hue, glow.hue.a * 0.5) }
         GradientStop { position: 1.0; color: Util.alpha(glow.hue, 0) }
       }
       PathSvg { path: "M0,50 A50,50 0 1,0 100,50 A50,50 0 1,0 0,50 Z" }
