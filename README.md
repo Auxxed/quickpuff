@@ -211,8 +211,9 @@ Control → Showtime or with `quickpuff showtime off|corner|stage`.
 signature chime at Ready, a sound for each ready animation (countdown beeps and
 a liftoff for the rocket, a cannon pop for confetti, bubbling lava, an aurora
 shimmer, fireworks, smoke, a neon buzz, rain and rolling thunder for the storm,
-a crackling plasma globe, a hyperdrive dropping out of warp, bubbles and a far-off
-whale in the deep sea, crickets and chimes for the fireflies) and a resolve when the session is over.
+a crackling plasma globe, a hyperdrive dropping out of warp, bubbles and a
+far-off whale in the deep sea, crickets and chimes for the fireflies) and a
+resolve when the session is over.
 Each one is timed to its picture: a puff leaves with every smoke ring, the neon
 buzz flickers with the sign, and a firework booms as its shell bursts. No two
 shows are quite alike: the fireworks change their layout and colours every
