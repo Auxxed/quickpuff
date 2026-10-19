@@ -124,6 +124,20 @@ PanelWindow {
   readonly property string profileName: profile && profile.name ? String(profile.name).toUpperCase() : "HEAT"
   readonly property real targetF: profile ? Number(profile.temp_f) : NaN
   readonly property real tempF: Number(st.heater_temp_f)
+  // A temperature as a flame colour, the same ramp as the panel's hero
+  // (Panel.heatRamp): pale amber, orange, ember red, white-hot.
+  function heatColor(f) {
+    var stops = [[400, "#ffd27a"], [480, "#ffa03c"], [540, "#ff6a3a"], [600, "#ffe9e0"]]
+    var v = Number(f)
+    if (!isFinite(v) || v <= stops[0][0]) return stops[0][1]
+    for (var i = 1; i < stops.length; i++) {
+      if (v <= stops[i][0]) {
+        var k = (v - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0])
+        return Qt.tint(stops[i - 1][1], Util.alpha(stops[i][1], k))
+      }
+    }
+    return stops[stops.length - 1][1]
+  }
   // The stage's big number holds through a session until the reading moves
   // 3°F, so it reads steady instead of ticking every 0.7 s.
   property real heldF: NaN
@@ -798,9 +812,9 @@ PanelWindow {
           stagger: 60
           text: show.countText !== "" ? show.countText
             : isFinite(show.heldF) && show.heldF > 0 ? String(Math.round(show.heldF)) : "—"
-          color: show.phase === "preheat"
-            ? Qt.tint("#f4eef6", Util.alpha(show.tint, 0.25 + 0.5 * show.progress))
-            : Qt.tint("#ffffff", Util.alpha(show.tint, 0.35))
+          // Plain while the chamber's cold, the heat's colour building in from
+          // 200°F, like the panel's number.
+          color: Qt.tint("#f4eef6", Util.alpha(show.heatColor(show.heldF), Math.max(0, Math.min(1, (show.heldF - 200) / 300))))
           font.family: show.display
           font.pixelSize: 250 * show.u
           font.weight: Font.DemiBold
