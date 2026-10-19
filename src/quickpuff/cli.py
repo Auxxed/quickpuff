@@ -539,7 +539,7 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     wrapped = sub.add_parser("wrapped", help="Your month, year or all time in sessions, Wrapped style")
     wrapped.add_argument("period", choices=["month", "year", "all"], nargs="?", default="month")
-    wrapped.add_argument("--show", action="store_true", help="Play it on screen as an animated recap (saves the card to ~/Pictures)")
+    wrapped.add_argument("--show", action="store_true", help="Play it on screen as an animated recap (saves the card to ~/Pictures/Puffco Wrapped)")
 
     theme_light = sub.add_parser("theme-light", help="Light the lantern in your Omarchy theme's colours, and follow theme changes")
     theme_light.add_argument("action", choices=["on", "off"])

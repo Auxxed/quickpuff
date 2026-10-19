@@ -7,7 +7,8 @@ import "components/plain.js" as Plain
 
 // QuickPuff Wrapped: your month (or year, or all time) in sessions, played
 // over the desktop slide by slide, Spotify Wrapped style, ending on a card
-// that's saved to ~/Pictures. Click to skip to the card, click again to close.
+// that's saved to ~/Pictures/Puffco Wrapped. Click to skip to the card, click
+// again to close.
 //
 // Everything shown comes from `quickpuff wrapped`, checked in play(): known
 // ranges for numbers, #rrggbb for the colour, plain short text for names.
@@ -143,14 +144,15 @@ PanelWindow {
   Timer { id: saveSoon; interval: 900; onTriggered: wrap.save() }
   Timer { id: closeSoon; interval: 9000; onTriggered: wrap.close() }
 
-  // The card, at 1600 x 900, into ~/Pictures under a name that's new each time.
+  // The card, at 1600 x 900, into ~/Pictures/Puffco Wrapped (the daemon makes
+  // the folder, see paths.wrapped_dir) under a name that's new each time.
   function save() {
     var home = String(Quickshell.env("HOME") || "")
     if (home.charAt(0) !== "/") return
     var stamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)
-    var path = home + "/Pictures/QuickPuff-Wrapped-" + w.period + "-" + stamp + ".png"
+    var name = "Pictures/Puffco Wrapped/QuickPuff-Wrapped-" + w.period + "-" + stamp + ".png"
     card.grabToImage(function(result) {
-      if (result.saveToFile(path)) wrap.savedTo = "~/Pictures/QuickPuff-Wrapped-" + w.period + "-" + stamp + ".png"
+      if (result.saveToFile(home + "/" + name)) wrap.savedTo = "~/" + name
     }, Qt.size(1600, 900))
   }
 

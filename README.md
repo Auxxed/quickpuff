@@ -264,8 +264,8 @@ plays, through the Peak's Boost.
 desktop, Spotify Wrapped style: how many and against the same stretch of the
 period before, your longest streak and busiest day, your favourite profile,
 your hottest session, your prime time, and a title for how you dab. It ends on
-a card that's saved to `~/Pictures`. `quickpuff wrapped` without `--show`
-prints the same in the terminal.
+a card that's saved to `~/Pictures/Puffco Wrapped`. `quickpuff wrapped`
+without `--show` prints the same in the terminal.
 
 ### Notifications and reconnecting
 
@@ -448,7 +448,8 @@ shows what you have):
   how much output it reads, and `--no-start`, so the widget never starts the
   daemon itself (the systemd service does). It never reads your files; the
   settings it needs come back from the CLI. It plays sounds with `pw-play`.
-  Wrapped saves its card as a new, timestamped PNG in `~/Pictures`.
+  Wrapped saves its card as a new, timestamped PNG in
+  `~/Pictures/Puffco Wrapped` (the daemon makes the folder).
 - **Debug commands:** `quickpuff peek` and `poke` (raw reads and writes on
   the Peak) work only when the daemon was started with
   `quickpuff daemon --debug`.

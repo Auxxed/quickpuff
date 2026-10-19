@@ -34,6 +34,7 @@ from .paths import (
     save_config,
     socket_path,
     ui_settings,
+    wrapped_dir,
 )
 from .heat_trace import HeatTrace
 from .lights import normalize_color
@@ -2538,6 +2539,11 @@ class QuickPuffDaemon:
             data = await asyncio.to_thread(history.wrapped, period, None, peak.get("profiles") or [])
             data["peak_name"] = notify_text(self._peak_name(), 40)
             if _as_bool(args.get("show")):
+                # The overlay can't make folders, so the card's folder is made here.
+                try:
+                    wrapped_dir().mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    log.warning("Can't make %s for the Wrapped card: %s", wrapped_dir(), exc)
                 await self._broadcast_event("wrapped", data)
             return data
         if cmd == "set_ramp":

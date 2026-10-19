@@ -111,6 +111,11 @@ def data_dir() -> Path:
     return base / "quickpuff"
 
 
+def wrapped_dir() -> Path:
+    """Where Wrapped saves its cards. WrappedOverlay.qml names the same folder."""
+    return Path.home() / "Pictures" / "Puffco Wrapped"
+
+
 def socket_path() -> Path:
     override = os.environ.get("QUICKPUFF_SOCKET")
     if override:

@@ -505,3 +505,19 @@ def test_bookkeeping_that_cant_be_saved_is_skipped_not_fatal(tmp_path, monkeypat
     d._baseline_clean(120)  # the cleaning countdown, as a snapshot arrives
     assert d.clean_at_total == 120
     assert refused_config.read_text() == "must survive\n"
+
+
+def test_wrapped_show_makes_the_card_folder_before_the_overlay_plays(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    d = make_daemon(tmp_path, monkeypatch)
+    seen = []
+
+    async def broadcast(event, data):
+        seen.append((event, paths.wrapped_dir().is_dir()))
+
+    monkeypatch.setattr(d, "_broadcast_event", broadcast)
+    asyncio.run(d.handle("wrapped", {"period": "month"}))
+    assert seen == [] and not paths.wrapped_dir().exists()
+    asyncio.run(d.handle("wrapped", {"period": "month", "show": True}))
+    assert seen == [("wrapped", True)]
+    assert paths.wrapped_dir() == tmp_path / "home" / "Pictures" / "Puffco Wrapped"
