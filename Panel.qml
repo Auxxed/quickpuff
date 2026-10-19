@@ -25,7 +25,10 @@ Panel {
 
   // Palette/typography lifted off the bar so every child stops repeating the
   // `bar ? bar.x : fallback` ternary, matching how first-party panels do it.
-  readonly property color foreground: root.barForeground
+  // Popup text, not barForeground: on a transparent bar that one is picked
+  // against the wallpaper and turns dark over a bright one, unreadable on the
+  // theme's popup card.
+  readonly property color foreground: Color.popups.text
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
