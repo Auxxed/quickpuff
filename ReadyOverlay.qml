@@ -883,6 +883,8 @@ PanelWindow {
         }
       }
     }
+
+    ReadyWord { now: rain.now; at: 0.5; until: rain.dur - 0.7; y: rain.height * 0.42 }
   }
 
   // ============================================================ Lava lamp
@@ -959,6 +961,8 @@ PanelWindow {
       saturation: 0.15
       opacity: 0.92
     }
+
+    ReadyWord { now: lava.t * 6.0; at: 0.8; until: 5.3; y: lava.height * 0.42 }
   }
 
   // ============================================================ Aurora
@@ -1015,6 +1019,8 @@ PanelWindow {
       blur: 0.9
       opacity: aurora.envelope
     }
+
+    ReadyWord { now: aurora.t * 6.5; at: 1.2; until: 5.6; y: aurora.height * 0.36 }
   }
 
   // ============================================================ Fireworks
@@ -1232,6 +1238,8 @@ PanelWindow {
       blurMax: 4
       blur: 0.25
     }
+
+    ReadyWord { now: fw.now; at: 1.0; until: fw.dur - 0.8; y: fw.height * 0.45 }
   }
 
   // ============================================================ Smoke rings
@@ -1293,6 +1301,8 @@ PanelWindow {
         }
       }
     }
+
+    ReadyWord { now: smoke.t * 6.4; at: 0.8; until: 5.6; y: smoke.height * 0.42 }
   }
 
   // ============================================================ Neon sign
@@ -3574,6 +3584,40 @@ PanelWindow {
 
   // A soft round glow: `hue` in the middle, fading out to the edge. Drawn at
   // 100 x 100 and sized with `scale`, so it never has to re-tessellate.
+  // READY in the shows' common lockup (64 px display face, wide tracking,
+  // white at 92% with a soft dark halo): it rises in at `at` seconds into
+  // the show and fades out by `until`, on the show's own clock `now`.
+  component ReadyWord: Text {
+    property real now: 0
+    property real at: 0
+    property real until: 5
+    property real s: overlay.u * overlay.stage
+    property color tone: Qt.tint("#ffffff", Util.alpha(overlay.tint, 0.25))
+    readonly property real rise: Math.max(0, Math.min(1, (now - at) / 0.3))
+    readonly property real e: rise * Math.max(0, Math.min(1, (until - now) / 0.5))
+    anchors.horizontalCenter: parent.horizontalCenter
+    opacity: 0.92 * e
+    visible: e > 0
+    transform: Translate { y: (1 - rideRise(rise)) * 12 * s }
+    function rideRise(k) { return 1 - Math.pow(1 - k, 3) }
+    textFormat: Text.PlainText
+    text: "READY"
+    color: tone
+    font.family: overlay.displayFamily
+    font.pixelSize: 64 * s
+    font.weight: Font.DemiBold
+    font.letterSpacing: 15 * s
+    layer.enabled: visible
+    layer.effect: MultiEffect {
+      shadowEnabled: true
+      shadowHorizontalOffset: 0
+      shadowVerticalOffset: 0
+      blurMax: 24
+      shadowBlur: 0.5
+      shadowColor: Util.alpha("#000000", 0.55)
+    }
+  }
+
   component SoftGlow: Shape {
     id: glow
 
