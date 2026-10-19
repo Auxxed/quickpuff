@@ -60,7 +60,10 @@ Item {
     pillLeft = left
     pillRight = left + cellWidth
   }
-  onSelectedIndexChanged: placePill(true)
+  onSelectedIndexChanged: {
+    placePill(true)
+    if (panel && panel.opened) landAnim.restart()
+  }
   onCellWidthChanged: placePill(false)
   Component.onCompleted: placePill(false)
 
@@ -73,15 +76,52 @@ Item {
     NumberAnimation { duration: seg.pillToRight ? 230 : 380; easing.type: Easing.OutCubic }
   }
 
+  // A flash of light as the pill lands on its new choice.
+  property real land: 0
+  SequentialAnimation {
+    id: landAnim
+    PauseAnimation { duration: 170 }
+    NumberAnimation { target: seg; property: "land"; from: 1; to: 0; duration: 650; easing.type: Easing.OutCubic }
+  }
+
+  // The pill glows from underneath, like a neon tube along its foot.
+  Glow {
+    visible: seg.selectedIndex >= 0
+    hue: Util.alpha(Color.accent, 0.3)
+    x: seg.pillLeft + (seg.pillRight - seg.pillLeft) / 2 - 50
+    y: seg.height - 50
+    opacity: 0.6 + 0.4 * seg.land
+    transform: Scale { origin.x: 50; origin.y: 50; xScale: (seg.pillRight - seg.pillLeft) * 1.15 / 100; yScale: seg.height * 0.75 / 100 }
+  }
+
   Rectangle {
     visible: seg.selectedIndex >= 0
     x: seg.pillLeft
     width: Math.max(height * 0.6, seg.pillRight - seg.pillLeft)
     height: parent.height
     radius: Style.cornerRadius
-    color: Util.alpha(Color.accent, 0.2)
+    color: Util.alpha(Color.accent, 0.2 + 0.12 * seg.land)
     border.width: 1
     border.color: Color.accent
+
+    Rectangle {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      anchors.margins: Math.max(2, Style.space(3))
+      height: Math.max(2, Style.space(2))
+      radius: height / 2
+      color: Qt.tint(Color.accent, Util.alpha("#ffffff", 0.35 * seg.land))
+      opacity: 0.75 + 0.25 * seg.land
+      Rectangle {
+        anchors.centerIn: parent
+        width: parent.width + Style.space(4)
+        height: parent.height + Style.space(5)
+        radius: height / 2
+        color: Util.alpha(Color.accent, 0.22 + 0.2 * seg.land)
+        z: -1
+      }
+    }
   }
 
   Repeater {
