@@ -96,6 +96,15 @@ HEAT_STATES = {
     int(OperatingState.HEAT_CYCLE_ACTIVE),
 }
 CYCLE_STATES = HEAT_STATES | {int(OperatingState.HEAT_CYCLE_FADE)}
+# A Peak in one of these is being used, so a rest check-in leaves it connected.
+# Anything else (idle, the Peak's own sleep, a battery or version display) is
+# fair to rest again: a check-in holding on until the 10-minute idle timer
+# kept the link up 11 minutes of every 26.
+IN_USE_STATES = CYCLE_STATES | {
+    int(OperatingState.TEMP_SELECT),
+    int(OperatingState.BLE_BONDING),
+    int(OperatingState.FACTORY_TEST),
+}
 # After a cycle returns to idle, wait so a second dab isn't cut off.
 BATTERY_SAVER_SLEEP_S = 30.0
 # The Q-tip reminder waits this long after a session ends.
@@ -1219,6 +1228,10 @@ class QuickPuffDaemon:
                 dev = self.device
                 if not dev or not dev.is_connected:
                     return
+                # A connect still finishing (it reads profiles after the link
+                # is up) would end the rest it never saw begin.
+                if self._connect_lock.locked():
+                    return
                 # The last poll can be seconds old, and a press of the Peak's
                 # own button may have started a cycle since.
                 state = int(await dev.get_operating_state())
@@ -1255,6 +1268,12 @@ class QuickPuffDaemon:
                 await dev.disconnect()
             except Exception:
                 log.debug("rest: disconnect failed", exc_info=True)
+        # Something that ran during the disconnect may have ended the rest,
+        # such as a connect finishing. The link is gone either way, so the
+        # flag, the status and the check-in loop must all say resting: with
+        # the flag off and the status on, nothing ever woke the Peak again.
+        self._resting = True
+        self._stop_poll()
         self.status.update(
             {
                 "connected": False,
@@ -1399,7 +1418,7 @@ class QuickPuffDaemon:
             self.battery_saver
             and bool(self.device and self.device.is_connected)
             and not self._watching()
-            and self.status.get("operating_state_id") == int(OperatingState.IDLE)
+            and self.status.get("operating_state_id") not in IN_USE_STATES
             and time.monotonic() - self._last_user_cmd >= BATTERY_SAVER_SLEEP_S
         )
 
@@ -1440,6 +1459,11 @@ class QuickPuffDaemon:
             if self._rest_allowed():
                 await self._rest()
             else:
+                log.info(
+                    "Rest check-in: staying connected (%s, panel open %s)",
+                    self.status.get("operating_state"),
+                    self._watching(),
+                )
                 self._end_rest()
 
     async def _drop_half_connected(self) -> None:

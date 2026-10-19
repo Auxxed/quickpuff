@@ -17,6 +17,8 @@ from quickpuff.paths import load_config
 
 IDLE = int(OperatingState.IDLE)
 PREHEAT = int(OperatingState.HEAT_CYCLE_PREHEAT)
+SLEEP = int(OperatingState.SLEEP)
+TEMP_SELECT = int(OperatingState.TEMP_SELECT)
 
 
 class FakePeak:
@@ -213,6 +215,83 @@ def test_check_in_stays_connected_when_the_peak_is_heating(tmp_path):
 
     asyncio.run(run())
     assert not d._resting and d.device is peak and d.status["resting"] is False
+
+
+def check_in_with_peak_in(tmp_path, state):
+    peak = FakePeak()
+    d = make_daemon(tmp_path, peak)
+
+    async def run():
+        await d._rest()
+        peak.state = state
+        d._connect = reachable(d, peak, [])
+
+        async def sync(delay=0.0):
+            pass
+
+        d._sync_usage_safe = sync
+        await d._check_in()
+
+    asyncio.run(run())
+    return d, peak
+
+
+def test_check_in_rests_a_peak_that_was_asleep_again(tmp_path):
+    # A Peak left alone for 15 minutes answers the check-in from its own
+    # sleep, not idle. Holding on until the idle timer kept the link up for
+    # 11 minutes of every 26.
+    d, peak = check_in_with_peak_in(tmp_path, SLEEP)
+    assert d._resting and d.device is None and not peak.is_connected
+    assert d.status["resting"] is True
+
+
+def test_check_in_stays_connected_while_someone_picks_a_temperature(tmp_path):
+    d, peak = check_in_with_peak_in(tmp_path, TEMP_SELECT)
+    assert not d._resting and d.device is peak and d.status["resting"] is False
+
+
+class EndsTheRestWhileLettingGo(FakePeak):
+    """A connect finishing while the saver lets go: it ends the rest."""
+
+    def __init__(self, d):
+        super().__init__()
+        self.d = d
+
+    async def disconnect(self):
+        self.is_connected = False
+        self.d._end_rest()
+
+
+def test_a_rest_interrupted_mid_disconnect_still_rests_and_can_be_woken(tmp_path):
+    # On 2026-10-19 the flag went off while the status said resting: the
+    # check-ins stopped and opening the panel never woke the Peak.
+    d = make_daemon(tmp_path, FakePeak())
+    peak = EndsTheRestWhileLettingGo(d)
+    d.device = peak
+    calls = []
+
+    async def run():
+        await d._rest()
+        assert d._resting and d.status["resting"] is True
+        assert d._rest_task is not None and not d._rest_task.done()
+        d._connect = reachable(d, peak, calls)
+        await d.handle("status", {"watch": True})
+        await d._wake_task
+
+    asyncio.run(run())
+    assert calls == [{}] and d.device is peak and not d._resting
+
+
+def test_saver_leaves_a_peak_alone_while_a_connect_finishes(tmp_path):
+    peak = FakePeak()
+    d = make_daemon(tmp_path, peak)
+
+    async def run():
+        async with d._connect_lock:
+            await d._run_saver_sleep()
+
+    asyncio.run(run())
+    assert d.device is peak and peak.is_connected and not d._resting
 
 
 def test_unreachable_check_in_keeps_resting_without_retrying(tmp_path):
