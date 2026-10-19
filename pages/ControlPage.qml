@@ -36,8 +36,10 @@ Column {
       solid: !panel.heating
       emphasized: !panel.heating
       pulse: panel.preheating
-      // Fills as the chamber climbs; full once it's there.
+      // Fills as the chamber climbs, energy running round its edge; full
+      // once it's there.
       progress: panel.preheating ? panel.heatProgress : (panel.atTemp ? 1 : -1)
+      charging: panel.preheating
       onActivated: panel.runArgv(["quickpuff", "heat", "start"])
     }
 
@@ -47,6 +49,7 @@ Column {
       label: "Boost"
       glyph: "\uf0e7"
       tall: true
+      zaps: true
       tint: Qt.tint(Color.accent, Util.alpha(panel.urgent, 0.5))
       onActivated: panel.runArgv(["quickpuff", "heat", "boost"])
     }

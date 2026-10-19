@@ -2291,6 +2291,7 @@ Panel {
               label: root.needsSetup ? "Finish setup" : (root.resting ? "Waking…" : (root.handedOff ? "Take it back" : (root.connecting ? "Connecting…" : "Connect")))
               glyph: root.needsSetup ? "\uf0ad" : (root.connecting || root.resting ? "\uf110" : "\uf293")
               spinning: !root.needsSetup && (root.connecting || root.resting)
+              charging: !root.needsSetup && (root.connecting || root.resting)
               tall: true
               pulse: !root.needsSetup && !root.connecting
               tint: Color.accent
