@@ -3,6 +3,7 @@ import QtQuick.Shapes
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
+import "components"
 import "components/plain.js" as Plain
 
 // QuickPuff Wrapped: your month (or year, or all time) in sessions, played
@@ -645,15 +646,7 @@ PanelWindow {
       opacity: card.opacity
       visible: card.visible
 
-      property real orbit: 0
       property real flash: 0
-      NumberAnimation on orbit {
-        running: wrap.onCard && !wrap.closing
-        loops: Animation.Infinite
-        from: 0
-        to: 1
-        duration: 5200
-      }
       Connections {
         target: wrap
         function onOnCardChanged() { if (wrap.onCard) edgeFlash.restart() }
@@ -663,29 +656,6 @@ PanelWindow {
         PauseAnimation { duration: 180 }
         NumberAnimation { target: cardEdge; property: "flash"; from: 0; to: 1; duration: 90 }
         NumberAnimation { target: cardEdge; property: "flash"; to: 0; duration: 900; easing.type: Easing.OutCubic }
-      }
-
-      // The card's rounded outline, walked by t (0 → 1, clockwise from the top left).
-      function edgePoint(t) {
-        var w = width, h = height, r = Math.min(card.radius, w / 2, h / 2)
-        var sw = w - 2 * r, sh = h - 2 * r, arc = Math.PI * r / 2
-        var d = (((t % 1) + 1) % 1) * (2 * sw + 2 * sh + 4 * arc)
-        function corner(cx, cy, a0, f) { var a = a0 + f * Math.PI / 2; return Qt.point(cx + Math.cos(a) * r, cy + Math.sin(a) * r) }
-        if (d < sw) return Qt.point(r + d, 0)
-        d -= sw
-        if (d < arc) return corner(w - r, r, -Math.PI / 2, d / arc)
-        d -= arc
-        if (d < sh) return Qt.point(w, r + d)
-        d -= sh
-        if (d < arc) return corner(w - r, h - r, 0, d / arc)
-        d -= arc
-        if (d < sw) return Qt.point(w - r - d, h)
-        d -= sw
-        if (d < arc) return corner(r, h - r, Math.PI / 2, d / arc)
-        d -= arc
-        if (d < sh) return Qt.point(0, h - r - d)
-        d -= sh
-        return corner(r, r, Math.PI, d / arc)
       }
 
       Rectangle {
@@ -698,31 +668,15 @@ PanelWindow {
         opacity: cardEdge.flash
         visible: cardEdge.flash > 0.01
       }
-      Repeater {
-        model: wrap.onCard ? 28 : 0
-        Rectangle {
-          required property int index
-          readonly property int tailStep: index % 14
-          readonly property point p: cardEdge.edgePoint(cardEdge.orbit + (index >= 14 ? 0.5 : 0) - tailStep * 0.004)
-          width: 10 * wrap.u * (1 - tailStep * 0.055)
-          height: width
-          radius: width / 2
-          x: p.x - width / 2
-          y: p.y - height / 2
-          color: tailStep === 0 ? Qt.tint(wrap.tint, Util.alpha("#ffffff", 0.65)) : Util.alpha(Qt.lighter(wrap.tint, 1.3), 0.5 * (1 - tailStep / 14))
-        }
-      }
-      Repeater {
-        model: wrap.onCard ? 2 : 0
-        Glow {
-          required property int index
-          readonly property point p: cardEdge.edgePoint(cardEdge.orbit + index * 0.5)
-          hue: Util.alpha(Qt.lighter(wrap.tint, 1.3), 0.55)
-          width: 60 * wrap.u
-          height: width
-          x: p.x - width / 2
-          y: p.y - height / 2
-        }
+      EdgeRunner {
+        anchors.fill: parent
+        radius: card.radius
+        hue: Qt.lighter(wrap.tint, 1.2)
+        count: 2
+        duration: 5200
+        length: 160 * wrap.u
+        thickness: 2.5 * wrap.u
+        running: wrap.onCard && !wrap.closing
       }
     }
 

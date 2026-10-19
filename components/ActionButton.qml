@@ -32,9 +32,8 @@ BorderSurface {
   property real shownProgress: Math.max(0, progress)
   Behavior on shownProgress { NumberAnimation { duration: 650; easing.type: Easing.OutCubic } }
   readonly property color ink: solid ? panel.inkOn(tint) : (lit || tall ? tint : panel.foreground)
-  // Energy running round the edge: continuously while this is the thing
-  // under way (heating, connecting), and once round on hover for the big
-  // buttons.
+  // Light running round the edge while this is the thing under way
+  // (connecting, searching).
   property bool charging: false
   // A lightning bolt cracks across it when pressed (Boost).
   property bool zaps: false
@@ -43,27 +42,6 @@ BorderSurface {
 
   readonly property bool hot: chipMouse.containsMouse
   readonly property bool lit: hot || emphasized
-
-  // 0-1 round the edge, clockwise from the top left.
-  property real orbit: 0
-  readonly property bool orbiting: (charging && !panel.calm) || orbitOnce.running
-  onHotChanged: if (hot && tall && !charging && panel.opened && !panel.calm) orbitOnce.restart()
-  NumberAnimation { id: orbitOnce; target: chip; property: "orbit"; from: 0; to: 1; duration: 820; easing.type: Easing.InOutCubic }
-  NumberAnimation on orbit {
-    running: chip.charging && chip.visible && panel.opened && !panel.calm
-    loops: Animation.Infinite
-    from: 0
-    to: 1
-    duration: 1700
-  }
-  // A point on the edge, `t` of the way round.
-  function edgePoint(t) {
-    var w = width, h = height, d = (((t % 1) + 1) % 1) * 2 * (w + h)
-    if (d < w) return Qt.point(d, 0)
-    if (d < w + h) return Qt.point(w, d - w)
-    if (d < 2 * w + h) return Qt.point(w - (d - w - h), h)
-    return Qt.point(0, h - (d - 2 * w - h))
-  }
 
   implicitHeight: tall
     ? Math.max(Style.space(50), chipBody.implicitHeight + Style.spacing.controlPaddingY * 2)
@@ -142,87 +120,41 @@ BorderSurface {
     }
   }
 
-  // The energy on the edge: a spark with a fading tail (two, opposite
-  // each other, while charging).
-  Repeater {
-    model: chip.orbiting ? (chip.charging ? 20 : 10) : 0
-    Rectangle {
-      required property int index
-      readonly property int tailStep: index % 10
-      readonly property real at: chip.orbit + (index >= 10 ? 0.5 : 0) - tailStep * 0.009
-      readonly property point p: chip.edgePoint(at)
-      width: Style.space(8) * (1 - tailStep * 0.075)
-      height: width
-      radius: width / 2
-      x: p.x - width / 2
-      y: p.y - height / 2
-      color: tailStep === 0 ? Qt.tint(chip.tint, Util.alpha("#ffffff", 0.6)) : Util.alpha(Qt.lighter(chip.tint, 1.3), 0.42 * (1 - tailStep / 10))
-      opacity: chip.charging ? 1 : Math.sin(Math.PI * Math.min(1, chip.orbit * 1.1))
-    }
+  // The energy on the edge: two comets of light chasing round it.
+  EdgeRunner {
+    anchors.fill: parent
+    radius: chip.radius
+    hue: chip.tint
+    count: 2
+    length: Math.max(Style.space(40), (chip.width + chip.height) * 0.22)
+    thickness: Math.max(1.5, Style.space(1.5))
+    running: chip.charging && chip.visible && panel.opened && !panel.calm
   }
 
-  // Boost's lightning: a jagged bolt across the chip, cracking on and off.
+  // Boost's jolt: the chip's border flashes white, a wash of light goes
+  // through it and the glyph punches up, bright, then settles.
   property real zap: 0
-  property var boltPoints: []
-  property var branchPoints: []
-  function crack() {
-    var pts = [], n = 12
-    for (var i = 0; i <= n; i++) {
-      var f = i / n
-      pts.push(Qt.point(f * width, height * (0.5 + (i === 0 || i === n ? 0 : (Math.random() - 0.5) * 0.85))))
-    }
-    // A fork off the bolt, down toward a corner.
-    var at = pts[3 + Math.floor(Math.random() * 5)], side = Math.random() < 0.5 ? -1 : 1
-    var fork = [at]
-    for (var j = 1; j <= 4; j++)
-      fork.push(Qt.point(at.x + j * width * 0.06 + (Math.random() - 0.5) * width * 0.05, at.y + side * j * height * 0.11))
-    boltPoints = pts
-    branchPoints = fork
-    zapAnim.restart()
-  }
+  function crack() { zapAnim.restart() }
   SequentialAnimation {
     id: zapAnim
-    NumberAnimation { target: chip; property: "zap"; from: 0; to: 1; duration: 40 }
-    NumberAnimation { target: chip; property: "zap"; to: 0.35; duration: 60 }
-    NumberAnimation { target: chip; property: "zap"; to: 0.9; duration: 40 }
-    NumberAnimation { target: chip; property: "zap"; to: 0; duration: 380; easing.type: Easing.OutCubic }
+    NumberAnimation { target: chip; property: "zap"; from: 0; to: 1; duration: 60; easing.type: Easing.OutQuad }
+    NumberAnimation { target: chip; property: "zap"; to: 0; duration: 340; easing.type: Easing.OutCubic }
   }
   Rectangle {
     anchors.fill: parent
     radius: parent.radius
     color: Qt.lighter(chip.tint, 1.6)
-    opacity: 0.22 * chip.zap
+    opacity: 0.16 * chip.zap
     visible: chip.zap > 0
   }
-  Shape {
+  Rectangle {
     anchors.fill: parent
-    visible: chip.zap > 0 && chip.boltPoints.length > 1
+    radius: parent.radius
+    color: "transparent"
+    border.width: Math.max(1, Style.space(1.5))
+    border.color: Qt.tint(chip.tint, Util.alpha("#ffffff", 0.8))
     opacity: chip.zap
-    preferredRendererType: Shape.CurveRenderer
-    ShapePath {
-      strokeColor: Util.alpha(Qt.lighter(chip.tint, 1.4), 0.4)
-      strokeWidth: Style.space(7)
-      fillColor: "transparent"
-      joinStyle: ShapePath.RoundJoin
-      capStyle: ShapePath.RoundCap
-      PathPolyline { path: chip.boltPoints }
-    }
-    ShapePath {
-      strokeColor: Qt.tint(chip.tint, Util.alpha("#ffffff", 0.88))
-      strokeWidth: Style.space(2.2)
-      fillColor: "transparent"
-      joinStyle: ShapePath.MiterJoin
-      capStyle: ShapePath.RoundCap
-      PathPolyline { path: chip.boltPoints }
-    }
-    ShapePath {
-      strokeColor: Qt.tint(chip.tint, Util.alpha("#ffffff", 0.7))
-      strokeWidth: Style.space(1.3)
-      fillColor: "transparent"
-      joinStyle: ShapePath.MiterJoin
-      capStyle: ShapePath.RoundCap
-      PathPolyline { path: chip.branchPoints.length > 1 ? chip.branchPoints : [Qt.point(0, 0), Qt.point(0, 0)] }
-    }
+    visible: chip.zap > 0
   }
 
   Rectangle {
@@ -257,13 +189,19 @@ BorderSurface {
       textFormat: Text.PlainText
       visible: chip.glyph !== ""
       text: chip.glyph
-      color: chip.ink
+      color: chip.zap > 0 ? Qt.tint(chip.ink, Util.alpha("#ffffff", 0.85 * chip.zap)) : chip.ink
       font.family: panel.fontFamily
       font.pixelSize: chip.tall ? Style.font.heading : (chip.label === "" ? Style.font.icon : Style.font.iconSmall)
-      scale: chip.hot && !chipMouse.pressed ? 1.14 : 1
+      scale: (chip.hot && !chipMouse.pressed && !panel.calm ? 1.06 : 1) + 0.25 * chip.zap
 
-      Behavior on color { ColorAnimation { duration: 120 } }
-      Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 2.4 } }
+      Behavior on color {
+        enabled: chip.zap === 0
+        ColorAnimation { duration: 120 }
+      }
+      Behavior on scale {
+        enabled: chip.zap === 0
+        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+      }
 
       RotationAnimation on rotation {
         running: chip.spinning && chip.visible && panel.opened

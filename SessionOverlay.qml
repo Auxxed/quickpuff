@@ -1013,52 +1013,17 @@ PanelWindow {
       opacity: 0
     }
 
-    // While the chamber climbs, two sparks of the profile's light circle
-    // the card's edge, trailing light.
-    property real orbit: 0
-    NumberAnimation on orbit {
-      running: show.phase === "preheat" && show.cardT > 0.01
-      loops: Animation.Infinite
-      from: 0
-      to: 1
+    // While the chamber climbs, two comets of the profile's light chase
+    // round the card's edge.
+    EdgeRunner {
+      anchors.fill: parent
+      radius: cardBg.radius
+      hue: show.tint
+      count: 2
       duration: 2600
-    }
-    // A point `t` of the way round the card's rounded edge, clockwise from
-    // the top left.
-    function edgePoint(t) {
-      var w = width, h = height, r = Math.min(cardBg.radius, w / 2, h / 2)
-      var sw = w - 2 * r, sh = h - 2 * r, arc = Math.PI * r / 2
-      var d = (((t % 1) + 1) % 1) * (2 * sw + 2 * sh + 4 * arc)
-      function corner(cx, cy, a0, f) { var a = a0 + f * Math.PI / 2; return Qt.point(cx + Math.cos(a) * r, cy + Math.sin(a) * r) }
-      if (d < sw) return Qt.point(r + d, 0)
-      d -= sw
-      if (d < arc) return corner(w - r, r, -Math.PI / 2, d / arc)
-      d -= arc
-      if (d < sh) return Qt.point(w, r + d)
-      d -= sh
-      if (d < arc) return corner(w - r, h - r, 0, d / arc)
-      d -= arc
-      if (d < sw) return Qt.point(w - r - d, h)
-      d -= sw
-      if (d < arc) return corner(r, h - r, Math.PI / 2, d / arc)
-      d -= arc
-      if (d < sh) return Qt.point(0, h - r - d)
-      d -= sh
-      return corner(r, r, Math.PI, d / arc)
-    }
-    Repeater {
-      model: show.phase === "preheat" ? 24 : 0
-      Rectangle {
-        required property int index
-        readonly property int tailStep: index % 12
-        readonly property point p: card.edgePoint(card.orbit + (index >= 12 ? 0.5 : 0) - tailStep * 0.006)
-        width: 9 * show.u * (1 - tailStep * 0.065)
-        height: width
-        radius: width / 2
-        x: p.x - width / 2
-        y: p.y - height / 2
-        color: tailStep === 0 ? Qt.tint(show.tint, Util.alpha("#ffffff", 0.6)) : Util.alpha(Qt.lighter(show.tint, 1.3), 0.45 * (1 - tailStep / 12))
-      }
+      length: 90 * show.u
+      thickness: 2 * show.u
+      running: show.phase === "preheat" && show.cardT > 0.01
     }
     SequentialAnimation {
       id: cardFlash
